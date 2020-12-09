@@ -35,7 +35,7 @@ cd server
 go build
 ```
 
-You should end up with the `gosrt` binary.
+You should end up with the `server` binary.
 
 Build the client:
 
