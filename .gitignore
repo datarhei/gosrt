@@ -1,4 +1,5 @@
-gosrt
+/contrib/client
+/server/server
 *.prof
 *.out
 *.txt

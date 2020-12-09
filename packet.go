@@ -1,4 +1,4 @@
-package main
+package srt
 
 import (
 	"bytes"
@@ -105,6 +105,18 @@ type Packet struct {
 	data []byte
 }
 
+func NewPacket(addr net.Addr, data []byte) *Packet {
+	p := &Packet{
+		addr: addr,
+	}
+
+	if err := p.Unmarshal(data); err != nil {
+		return nil
+	}
+
+	return p
+}
+
 func (p Packet) String() string {
 	var b strings.Builder
 
@@ -130,6 +142,37 @@ func (p Packet) String() string {
 	return b.String()
 }
 
+func (p *Packet) Clone() *Packet {
+	clone := &Packet{
+		addr: p.addr,
+		isControlPacket: p.isControlPacket,
+		PktTsbpdTime: p.PktTsbpdTime,
+
+		controlType: p.controlType,
+		subType: p.subType,
+		typeSpecific: p.typeSpecific,
+
+		packetSequenceNumber: p.packetSequenceNumber,
+		packetPositionFlag: p.packetPositionFlag,
+		orderFlag: p.orderFlag,
+		keyBaseEncryptionFlag: p.keyBaseEncryptionFlag,
+		retransmittedPacketFlag: p.retransmittedPacketFlag,
+		messageNumber: p.messageNumber,
+
+		timestamp: p.timestamp,
+		destinationSocketId: p.destinationSocketId,
+	}
+
+	clone.data = make([]byte, len(p.data))
+	copy(clone.data, p.data)
+
+	return clone
+}
+
+func (p *Packet) Data() []byte {
+	return p.data
+}
+
 func (p *Packet) Unmarshal(data []byte) error {
 	if len(data) < 16 {
 		return fmt.Errorf("data too short to unmarshal")
@@ -153,7 +196,8 @@ func (p *Packet) Unmarshal(data []byte) error {
 	p.timestamp = binary.BigEndian.Uint32(data[8:])
 	p.destinationSocketId = binary.BigEndian.Uint32(data[12:])
 
-	p.data = data[16:]
+	p.data = make([]byte, len(data) - 16)
+	copy(p.data, data[16:])
 
 	return nil
 }

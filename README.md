@@ -8,8 +8,8 @@ Implementation of the SRT protocol in pure go
 
 Everything
 
-- nicer API
-- less CPU
+- nicer API <- done
+- less CPU <- the ticker per connection uses up a lot of CPU because it is in a tight loop
 
 # Try it out
 
@@ -31,6 +31,7 @@ brew install srt
 Build the binary of the server:
 
 ```
+cd server
 go build
 ```
 
@@ -56,7 +57,7 @@ ffmpeg -f lavfi -re -i testsrc2=rate=25:size=640x360 -codec:v libx264 -b:v 1024k
 Then start the server:
 
 ```
-./gosrt
+./server
 ```
 
 The server will listen on udp://127.0.0.1:6001 (this is currently hard-coded).

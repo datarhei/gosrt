@@ -1,4 +1,4 @@
-package main
+package old
 
 import (
 	"encoding/binary"
@@ -18,7 +18,6 @@ func (n *NullWriter) Write(p *Packet) {
 }
 
 type PublisherConn struct {
-	conn  net.PacketConn
 	addr  net.Addr
 	start time.Time
 
