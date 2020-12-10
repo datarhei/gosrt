@@ -1,12 +1,12 @@
 package main
 
 import (
-	"os"
-	"os/signal"
 	"flag"
+	"fmt"
 	"net"
 	"net/url"
-	"fmt"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 
@@ -16,9 +16,9 @@ import (
 // server is an implementation of the Server interface
 type server struct {
 	// Configuration parameter taken from the Config
-	addr   string
-	app    string
-	token  string
+	addr  string
+	app   string
+	token string
 
 	server *srt.Server
 
@@ -52,11 +52,11 @@ func main() {
 	flag.Parse()
 
 	s.server = &srt.Server{
-		Addr: s.addr,
-		HandleConnect: s.handleConnect,
-		HandlePublish: s.handlePublish,
+		Addr:            s.addr,
+		HandleConnect:   s.handleConnect,
+		HandlePublish:   s.handlePublish,
 		HandleSubscribe: s.handleSubscribe,
-		Debug: false,
+		Debug:           false,
 	}
 
 	fmt.Fprintf(os.Stderr, "Listening on %s\n", s.addr)
@@ -81,7 +81,7 @@ func (s *server) log(who, action, path, message string, client net.Addr) {
 	fmt.Fprintf(os.Stderr, "%-10s %10s %s (%s) %s\n", who, action, path, client, message)
 }
 
-func (s *server) handleConnect (client net.Addr, streamId string) srt.ConnType {
+func (s *server) handleConnect(client net.Addr, streamId string) srt.ConnType {
 	var mode srt.ConnType = srt.SUBSCRIBE
 	path := streamId
 

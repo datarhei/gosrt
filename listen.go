@@ -4,12 +4,12 @@ package srt
 // https://github.com/golang/go/issues/38261#issuecomment-609479495
 
 import (
-	"net"
-	"time"
-	"sync"
-	"errors"
-	"os"
 	"bytes"
+	"errors"
+	"net"
+	"os"
+	"sync"
+	"time"
 )
 
 type ConnType int
@@ -29,12 +29,12 @@ type Listener interface {
 }
 
 type listener struct {
-	pc      net.PacketConn
+	pc   net.PacketConn
 	addr net.Addr
 
-	backlog   chan connRequest
-	conns     map[uint32]*srtConn
-	lock      sync.RWMutex
+	backlog chan connRequest
+	conns   map[uint32]*srtConn
+	lock    sync.RWMutex
 
 	start time.Time
 
@@ -45,8 +45,8 @@ type listener struct {
 
 	isShutdown bool
 
-	stopReader     chan struct{}
-	stopWriter     chan struct{}
+	stopReader chan struct{}
+	stopWriter chan struct{}
 
 	doneChan chan error
 }
@@ -79,7 +79,7 @@ func Listen(protocol, address string) (Listener, error) {
 	ln.start = time.Now()
 
 	go func() {
-		buffer := make([]byte, 1500)	// MTU size
+		buffer := make([]byte, 1500) // MTU size
 		index := 0
 
 		for {
@@ -129,7 +129,7 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 	}
 
 	select {
-	case err := <- ln.doneChan:
+	case err := <-ln.doneChan:
 		return nil, REJECT, err
 	case request := <-ln.backlog:
 		if accept == nil {
@@ -149,17 +149,17 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 
 		// new connection
 		conn := &srtConn{
-			addr:          request.addr,
-			start:         request.start,
-			socketId:      socketId,
-			peerSocketId:  request.handshake.srtSocketId,
-			streamId:      request.handshake.streamId,
-			tsbpdTimeBase: request.timestamp,
-			tsbpdDelay:    uint32(request.handshake.recvTSBPDDelay) * 1000,
-			drift:         0,
+			addr:                        request.addr,
+			start:                       request.start,
+			socketId:                    socketId,
+			peerSocketId:                request.handshake.srtSocketId,
+			streamId:                    request.handshake.streamId,
+			tsbpdTimeBase:               request.timestamp,
+			tsbpdDelay:                  uint32(request.handshake.recvTSBPDDelay) * 1000,
+			drift:                       0,
 			initialPacketSequenceNumber: request.handshake.initialPacketSequenceNumber,
-			send:          ln.send,
-			onShutdown:    ln.handleShutdown,
+			send:                        ln.send,
+			onShutdown:                  ln.handleShutdown,
 		}
 
 		// kick off the connection
@@ -193,7 +193,7 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 		return conn, mode, nil
 	}
 
-    return nil, REJECT, nil
+	return nil, REJECT, nil
 }
 
 func (ln *listener) handleShutdown(socketId uint32) {
@@ -204,14 +204,14 @@ func (ln *listener) handleShutdown(socketId uint32) {
 
 func (ln *listener) reject(request connRequest, reason uint32) {
 	p := &Packet{
-		addr: request.addr,
+		addr:            request.addr,
 		isControlPacket: true,
 
-		controlType: CTRLTYPE_HANDSHAKE,
-		subType: 0,
+		controlType:  CTRLTYPE_HANDSHAKE,
+		subType:      0,
 		typeSpecific: 0,
 
-		timestamp: uint32(time.Now().Sub(ln.start).Microseconds()),
+		timestamp:           uint32(time.Now().Sub(ln.start).Microseconds()),
 		destinationSocketId: request.socketId,
 	}
 
@@ -224,14 +224,14 @@ func (ln *listener) reject(request connRequest, reason uint32) {
 
 func (ln *listener) accept(request connRequest) {
 	p := &Packet{
-		addr: request.addr,
+		addr:            request.addr,
 		isControlPacket: true,
 
-		controlType: CTRLTYPE_HANDSHAKE,
-		subType: 0,
+		controlType:  CTRLTYPE_HANDSHAKE,
+		subType:      0,
 		typeSpecific: 0,
 
-		timestamp: uint32(time.Now().Sub(request.start).Microseconds()),
+		timestamp:           uint32(time.Now().Sub(request.start).Microseconds()),
 		destinationSocketId: request.socketId,
 	}
 
@@ -253,13 +253,13 @@ func (ln *listener) Close() {
 	}
 	ln.lock.RUnlock()
 
-	ln.stopReader<- struct{}{}
+	ln.stopReader <- struct{}{}
 
 	select {
 	case <-ln.stopReader:
 	}
 
-	ln.stopWriter<- struct{}{}
+	ln.stopWriter <- struct{}{}
 
 	select {
 	case <-ln.stopWriter:
@@ -276,7 +276,7 @@ func (ln *listener) Addr() net.Addr {
 func (ln *listener) reader() {
 	defer func() {
 		log("server: left reader loop\n")
-		ln.stopReader<- struct{}{}
+		ln.stopReader <- struct{}{}
 	}()
 
 	for {
@@ -320,16 +320,16 @@ func (ln *listener) reader() {
 func (ln *listener) send(p *Packet) {
 	// non-blocking
 	select {
-		case ln.sndQueue <- p:
-		default:
-			log("server: send queue is full")
+	case ln.sndQueue <- p:
+	default:
+		log("server: send queue is full")
 	}
 }
 
 func (ln *listener) writer() {
 	defer func() {
 		log("server: left writer loop\n")
-		ln.stopWriter<- struct{}{}
+		ln.stopWriter <- struct{}{}
 	}()
 
 	var data bytes.Buffer
@@ -357,9 +357,9 @@ func (ln *listener) writer() {
 }
 
 type connRequest struct {
-	addr net.Addr
-	start time.Time
-	socketId uint32
+	addr      net.Addr
+	start     time.Time
+	socketId  uint32
 	timestamp uint32
 
 	handshake *CIFHandshake
@@ -441,21 +441,21 @@ func (ln *listener) handleHandshake(p *Packet) {
 		// fill up a struct with all relevant data and put it into the backlog
 
 		c := connRequest{
-			addr:         p.addr,
-			start:        time.Now(),
-			socketId:     cif.srtSocketId,
-			timestamp:    p.timestamp,
+			addr:      p.addr,
+			start:     time.Now(),
+			socketId:  cif.srtSocketId,
+			timestamp: p.timestamp,
 
-			handshake:    cif,
+			handshake: cif,
 		}
 
 		// non-blocking
 		select {
-			case ln.backlog <- c:
-			default:
-				cif.handshakeType = REJ_BACKLOG
-				p.SetCIF(cif)
-				ln.send(p)
+		case ln.backlog <- c:
+		default:
+			cif.handshakeType = REJ_BACKLOG
+			p.SetCIF(cif)
+			ln.send(p)
 		}
 	} else {
 		log("   unknown handshakeType\n")

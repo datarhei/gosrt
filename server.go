@@ -9,8 +9,8 @@ type Server struct {
 	// The address the SRT server should listen on, e.g. ":6001"
 	Addr string
 
-	HandleConnect func(addr net.Addr, streamId string) ConnType
-	HandlePublish func(conn Conn)
+	HandleConnect   func(addr net.Addr, streamId string) ConnType
+	HandlePublish   func(conn Conn)
 	HandleSubscribe func(conn Conn)
 
 	Debug bool
@@ -31,27 +31,27 @@ func (s *Server) ListenAndServe() error {
 	// Listen creates a server
 	ln, err := Listen("udp", s.Addr)
 	if err != nil {
-	    return err
+		return err
 	}
 
 	s.ln = ln
 
 	for {
-	    conn, mode, err := ln.Accept(s.HandleConnect)
-	    if err != nil {
-	       return err
-	    }
+		conn, mode, err := ln.Accept(s.HandleConnect)
+		if err != nil {
+			return err
+		}
 
-	    if conn == nil {
-	        // rejected connection, ignore
-	        continue
-	    }
+		if conn == nil {
+			// rejected connection, ignore
+			continue
+		}
 
-	    if mode == PUBLISH {
-	    	go s.HandlePublish(conn)
-	    } else {
-	   		go s.HandleSubscribe(conn)
-	   	}
+		if mode == PUBLISH {
+			go s.HandlePublish(conn)
+		} else {
+			go s.HandleSubscribe(conn)
+		}
 	}
 
 	s.ln.Close()

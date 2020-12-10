@@ -1,14 +1,14 @@
 package srt
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"math/rand"
 	"net"
-	"time"
-	"errors"
 	"os"
-	"bytes"
-	"fmt"
-	"encoding/binary"
+	"time"
 )
 
 var ErrClientClosed = errors.New("srt: Client closed")
@@ -19,14 +19,14 @@ type DialConfig struct {
 
 // dial will implement the Conn interface
 type dialer struct {
-	pc      *net.UDPConn
+	pc   *net.UDPConn
 	addr net.Addr
 
 	streamId string
 	socketId uint32
 
-	conn      *srtConn
-	connChan  chan connResponse
+	conn     *srtConn
+	connChan chan connResponse
 
 	start time.Time
 
@@ -35,15 +35,15 @@ type dialer struct {
 
 	isShutdown bool
 
-	stopReader     chan struct{}
-	stopWriter     chan struct{}
+	stopReader chan struct{}
+	stopWriter chan struct{}
 
 	doneChan chan error
 }
 
 type connResponse struct {
 	conn *srtConn
-	err error
+	err  error
 }
 
 func Dial(protocol, address string, config DialConfig) (Conn, error) {
@@ -82,7 +82,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	dl.socketId = r.Uint32()
 
 	go func() {
-		buffer := make([]byte, 1500)	// MTU size
+		buffer := make([]byte, 1500) // MTU size
 		index := 0
 
 		for {
@@ -126,10 +126,10 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 
 	log("waiting for response\n")
 
-	timer := time.AfterFunc(3 * time.Second, func() {
-		dl.connChan<- connResponse{
+	timer := time.AfterFunc(3*time.Second, func() {
+		dl.connChan <- connResponse{
 			conn: nil,
-			err: fmt.Errorf("connection timeout. server didn't respond"),
+			err:  fmt.Errorf("connection timeout. server didn't respond"),
 		}
 	})
 
@@ -162,7 +162,7 @@ func (dl *dialer) checkConnection() error {
 func (dl *dialer) reader() {
 	defer func() {
 		log("client: left reader loop\n")
-		dl.stopReader<- struct{}{}
+		dl.stopReader <- struct{}{}
 	}()
 
 	for {
@@ -178,7 +178,7 @@ func (dl *dialer) reader() {
 			//log("%s", hex.Dump(buffer[:16]))
 
 			//if p.isControlPacket == true {
-				//log("%s", p.String())
+			//log("%s", p.String())
 			//}
 
 			if p.destinationSocketId != dl.socketId {
@@ -198,16 +198,16 @@ func (dl *dialer) reader() {
 func (dl *dialer) send(p *Packet) {
 	// non-blocking
 	select {
-		case dl.sndQueue <- p:
-		default:
-			log("client: send queue is full")
+	case dl.sndQueue <- p:
+	default:
+		log("client: send queue is full")
 	}
 }
 
 func (dl *dialer) writer() {
 	defer func() {
 		log("client: left writer loop\n")
-		dl.stopWriter<- struct{}{}
+		dl.stopWriter <- struct{}{}
 	}()
 
 	var data bytes.Buffer
@@ -252,9 +252,9 @@ func (dl *dialer) handleHandshake(p *Packet) {
 	if cif.handshakeType == HSTYPE_INDUCTION {
 		// Verify version
 		if cif.version != 5 {
-			dl.connChan<- connResponse{
+			dl.connChan <- connResponse{
 				conn: nil,
-				err: fmt.Errorf("Peer doesn't support handshake v5"),
+				err:  fmt.Errorf("Peer doesn't support handshake v5"),
 			}
 
 			return
@@ -262,9 +262,9 @@ func (dl *dialer) handleHandshake(p *Packet) {
 
 		// Verify magic number
 		if cif.extensionField != 0x4A17 {
-			dl.connChan<- connResponse{
+			dl.connChan <- connResponse{
 				conn: nil,
-				err: fmt.Errorf("Peer sent the wrong magic number"),
+				err:  fmt.Errorf("Peer sent the wrong magic number"),
 			}
 
 			return
@@ -290,7 +290,7 @@ func (dl *dialer) handleHandshake(p *Packet) {
 		cif.srtFlags.STREAM = false
 		cif.srtFlags.PACKET_FILTER = true
 		cif.recvTSBPDDelay = 0x0078
-      	cif.sendTSBPDDelay = 0x0000
+		cif.sendTSBPDDelay = 0x0000
 
 		cif.hasSID = true
 		cif.streamId = dl.streamId
@@ -305,9 +305,9 @@ func (dl *dialer) handleHandshake(p *Packet) {
 		if cif.version != 5 {
 			dl.sendShutdown(cif.srtSocketId)
 
-			dl.connChan<- connResponse{
+			dl.connChan <- connResponse{
 				conn: nil,
-				err: fmt.Errorf("Peer doesn't support handshake v5"),
+				err:  fmt.Errorf("Peer doesn't support handshake v5"),
 			}
 
 			return
@@ -317,9 +317,9 @@ func (dl *dialer) handleHandshake(p *Packet) {
 		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
 			dl.sendShutdown(cif.srtSocketId)
 
-			dl.connChan<- connResponse{
+			dl.connChan <- connResponse{
 				conn: nil,
-				err: fmt.Errorf("Peer doesn't agree on SRT flags"),
+				err:  fmt.Errorf("Peer doesn't agree on SRT flags"),
 			}
 
 			return
@@ -329,9 +329,9 @@ func (dl *dialer) handleHandshake(p *Packet) {
 		if cif.srtFlags.STREAM == true {
 			dl.sendShutdown(cif.srtSocketId)
 
-			dl.connChan<- connResponse{
+			dl.connChan <- connResponse{
 				conn: nil,
-				err: fmt.Errorf("Peer doesn't support live streaming"),
+				err:  fmt.Errorf("Peer doesn't support live streaming"),
 			}
 
 			return
@@ -340,17 +340,17 @@ func (dl *dialer) handleHandshake(p *Packet) {
 		// fill up a struct with all relevant data and put it into the backlog
 
 		conn := &srtConn{
-			addr:          dl.addr,
-			start:         dl.start,
-			socketId:      dl.socketId,
-			peerSocketId:  cif.srtSocketId,
-			streamId:      dl.streamId,
-			tsbpdTimeBase: uint32(time.Now().Sub(dl.start).Microseconds()),
-			tsbpdDelay:    uint32(cif.recvTSBPDDelay) * 1000,
-			drift:         0,
+			addr:                        dl.addr,
+			start:                       dl.start,
+			socketId:                    dl.socketId,
+			peerSocketId:                cif.srtSocketId,
+			streamId:                    dl.streamId,
+			tsbpdTimeBase:               uint32(time.Now().Sub(dl.start).Microseconds()),
+			tsbpdDelay:                  uint32(cif.recvTSBPDDelay) * 1000,
+			drift:                       0,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
-			send:          dl.send,
-			onShutdown:    func(socketId uint32) {
+			send:                        dl.send,
+			onShutdown: func(socketId uint32) {
 				dl.Close()
 			},
 		}
@@ -360,64 +360,81 @@ func (dl *dialer) handleHandshake(p *Packet) {
 
 		log("new connection: %#08x (%s)\n", conn.SocketId(), conn.StreamId())
 
-		dl.connChan<- connResponse{
+		dl.connChan <- connResponse{
 			conn: conn,
-			err: nil,
+			err:  nil,
 		}
 	} else {
 		var err error
 
 		switch cif.handshakeType {
-		case REJ_UNKNOWN: err = fmt.Errorf("Connection rejected: unknown reason (REJ_UNKNOWN)")
-		case REJ_SYSTEM: err = fmt.Errorf("Connection rejected: system function error (REJ_SYSTEM)")
-		case REJ_PEER: err = fmt.Errorf("Connection rejected: rejected by peer (REJ_PEER)")
-		case REJ_RESOURCE: err = fmt.Errorf("Connection rejected: resource allocation problem (REJ_RESOURCE)")
-		case REJ_ROGUE: err = fmt.Errorf("Connection rejected: incorrect data in handshake (REJ_ROGUE)")
-		case REJ_BACKLOG: err = fmt.Errorf("Connection rejected: listener's backlog exceeded (REJ_BACKLOG)")
-		case REJ_IPE: err = fmt.Errorf("Connection rejected: internal program error (REJ_IPE)")
-		case REJ_CLOSE: err = fmt.Errorf("Connection rejected: socket is closing (REJ_CLOSE)")
-		case REJ_VERSION: err = fmt.Errorf("Connection rejected: peer is older version than agent's min (REJ_VERSION)")
-		case REJ_RDVCOOKIE: err = fmt.Errorf("Connection rejected: rendezvous cookie collision (REJ_RDVCOOKIE)")
-		case REJ_BADSECRET: err = fmt.Errorf("Connection rejected: wrong password (REJ_BADSECRET)")
-		case REJ_UNSECURE: err = fmt.Errorf("Connection rejected: password required or unexpected (REJ_UNSECURE)")
-		case REJ_MESSAGEAPI: err = fmt.Errorf("Connection rejected: stream flag collision (REJ_MESSAGEAPI)")
-		case REJ_CONGESTION: err = fmt.Errorf("Connection rejected: incompatible congestion-controller type (REJ_CONGESTION)")
-		case REJ_FILTER: err = fmt.Errorf("Connection rejected: incompatible packet filter (REJ_FILTER)")
-		case REJ_GROUP: err = fmt.Errorf("Connection rejected: incompatible group (REJ_GROUP)")
-		default: err = fmt.Errorf("Connection rejected: Unknown reason")
+		case REJ_UNKNOWN:
+			err = fmt.Errorf("Connection rejected: unknown reason (REJ_UNKNOWN)")
+		case REJ_SYSTEM:
+			err = fmt.Errorf("Connection rejected: system function error (REJ_SYSTEM)")
+		case REJ_PEER:
+			err = fmt.Errorf("Connection rejected: rejected by peer (REJ_PEER)")
+		case REJ_RESOURCE:
+			err = fmt.Errorf("Connection rejected: resource allocation problem (REJ_RESOURCE)")
+		case REJ_ROGUE:
+			err = fmt.Errorf("Connection rejected: incorrect data in handshake (REJ_ROGUE)")
+		case REJ_BACKLOG:
+			err = fmt.Errorf("Connection rejected: listener's backlog exceeded (REJ_BACKLOG)")
+		case REJ_IPE:
+			err = fmt.Errorf("Connection rejected: internal program error (REJ_IPE)")
+		case REJ_CLOSE:
+			err = fmt.Errorf("Connection rejected: socket is closing (REJ_CLOSE)")
+		case REJ_VERSION:
+			err = fmt.Errorf("Connection rejected: peer is older version than agent's min (REJ_VERSION)")
+		case REJ_RDVCOOKIE:
+			err = fmt.Errorf("Connection rejected: rendezvous cookie collision (REJ_RDVCOOKIE)")
+		case REJ_BADSECRET:
+			err = fmt.Errorf("Connection rejected: wrong password (REJ_BADSECRET)")
+		case REJ_UNSECURE:
+			err = fmt.Errorf("Connection rejected: password required or unexpected (REJ_UNSECURE)")
+		case REJ_MESSAGEAPI:
+			err = fmt.Errorf("Connection rejected: stream flag collision (REJ_MESSAGEAPI)")
+		case REJ_CONGESTION:
+			err = fmt.Errorf("Connection rejected: incompatible congestion-controller type (REJ_CONGESTION)")
+		case REJ_FILTER:
+			err = fmt.Errorf("Connection rejected: incompatible packet filter (REJ_FILTER)")
+		case REJ_GROUP:
+			err = fmt.Errorf("Connection rejected: incompatible group (REJ_GROUP)")
+		default:
+			err = fmt.Errorf("Connection rejected: Unknown reason")
 		}
 
-		dl.connChan<- connResponse{
+		dl.connChan <- connResponse{
 			conn: nil,
-			err: err,
+			err:  err,
 		}
 	}
 }
 
 func (dl *dialer) sendInduction() {
 	p := &Packet{
-		addr: dl.addr,
+		addr:            dl.addr,
 		isControlPacket: true,
 
-		controlType: CTRLTYPE_HANDSHAKE,
-		subType: 0,
+		controlType:  CTRLTYPE_HANDSHAKE,
+		subType:      0,
 		typeSpecific: 0,
 
-		timestamp: uint32(time.Now().Sub(dl.start).Microseconds()),
+		timestamp:           uint32(time.Now().Sub(dl.start).Microseconds()),
 		destinationSocketId: 0,
 	}
 
 	cif := &CIFHandshake{
-		isRequest: true,
-		version: 4,
-		encryptionField: 0,
-		extensionField: 2,
+		isRequest:                   true,
+		version:                     4,
+		encryptionField:             0,
+		extensionField:              2,
 		initialPacketSequenceNumber: 0,
-		maxTransmissionUnitSize: 1500, // MTU size
-		maxFlowWindowSize: 8192,
-		handshakeType: HSTYPE_INDUCTION,
-		srtSocketId: dl.socketId,
-		synCookie: 0,
+		maxTransmissionUnitSize:     1500, // MTU size
+		maxFlowWindowSize:           8192,
+		handshakeType:               HSTYPE_INDUCTION,
+		srtSocketId:                 dl.socketId,
+		synCookie:                   0,
 
 		peerIP0: 0x0100007f, // here we need to set our real IP
 	}
@@ -431,13 +448,13 @@ func (dl *dialer) sendInduction() {
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
 	p := &Packet{
-		addr: dl.addr,
+		addr:            dl.addr,
 		isControlPacket: true,
 
-		controlType: CTRLTYPE_SHUTDOWN,
+		controlType:  CTRLTYPE_SHUTDOWN,
 		typeSpecific: 0,
 
-		timestamp: uint32(time.Now().Sub(dl.start).Microseconds()),
+		timestamp:           uint32(time.Now().Sub(dl.start).Microseconds()),
 		destinationSocketId: peerSocketId,
 
 		data: make([]byte, 4),
@@ -476,13 +493,13 @@ func (dl *dialer) Close() {
 		dl.conn.Close()
 	}
 
-	dl.stopReader<- struct{}{}
+	dl.stopReader <- struct{}{}
 
 	select {
 	case <-dl.stopReader:
 	}
 
-	dl.stopWriter<- struct{}{}
+	dl.stopWriter <- struct{}{}
 
 	select {
 	case <-dl.stopWriter:

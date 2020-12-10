@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sort"
+	"strings"
 )
 
 // Table 1: SRT Control Packet Types
@@ -65,14 +65,14 @@ const (
 
 // Table 5: Handshake Extension Type values
 const (
-	EXTTYPE_HSREQ uint16 = 1
-	EXTTYPE_HSRSP uint16 = 2
-	EXTTYPE_KMREQ uint16 = 3
-	EXTTYPE_KMRSP uint16 = 4
-	EXTTYPE_SID uint16 = 5
+	EXTTYPE_HSREQ      uint16 = 1
+	EXTTYPE_HSRSP      uint16 = 2
+	EXTTYPE_KMREQ      uint16 = 3
+	EXTTYPE_KMRSP      uint16 = 4
+	EXTTYPE_SID        uint16 = 5
 	EXTTYPE_CONGESTION uint16 = 6
-	EXTTYPE_FILTER uint16 = 7
-	EXTTYPE_GROUP uint16 = 8
+	EXTTYPE_FILTER     uint16 = 7
+	EXTTYPE_GROUP      uint16 = 8
 )
 
 type Packet struct {
@@ -173,7 +173,7 @@ func (p *Packet) Unmarshal(data []byte) error {
 	p.timestamp = binary.BigEndian.Uint32(data[8:])
 	p.destinationSocketId = binary.BigEndian.Uint32(data[12:])
 
-	p.data = make([]byte, len(data) - 16)
+	p.data = make([]byte, len(data)-16)
 	copy(p.data, data[16:])
 
 	return nil
@@ -527,15 +527,15 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 }
 
 type CIFACK struct {
-	isLite bool
-	isSmall bool
+	isLite                      bool
+	isSmall                     bool
 	lastACKPacketSequenceNumber uint32
-	rtt uint32
-	rttVar uint32
-	availableBufferSize uint32
-	packetsReceivingRate uint32
-	estimatedLinkCapacity uint32
-	receivingRate uint32
+	rtt                         uint32
+	rttVar                      uint32
+	availableBufferSize         uint32
+	packetsReceivingRate        uint32
+	estimatedLinkCapacity       uint32
+	receivingRate               uint32
 }
 
 func (c CIFACK) String() string {
@@ -623,7 +623,7 @@ func (c CIFNAK) String() string {
 
 	fmt.Fprintf(&b, "NAK\n")
 
-	if len(c.lostPacketSequenceNumber) % 2 != 0 {
+	if len(c.lostPacketSequenceNumber)%2 != 0 {
 		fmt.Fprintf(&b, "   invalid list of sequence numbers\n")
 		return b.String()
 	}
@@ -640,7 +640,7 @@ func (c CIFNAK) String() string {
 }
 
 func (c *CIFNAK) Unmarshal(data []byte) error {
-	if len(data) % 4 != 0 {
+	if len(data)%4 != 0 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
@@ -652,7 +652,7 @@ func (c *CIFNAK) Unmarshal(data []byte) error {
 	for i := 0; i < len(data); i += 4 {
 		sequenceNumber = binary.BigEndian.Uint32(data[i:])
 
-		if sequenceNumber & 0b10000000_00000000_00000000_00000000 == 0 {
+		if sequenceNumber&0b10000000_00000000_00000000_00000000 == 0 {
 			c.lostPacketSequenceNumber = append(c.lostPacketSequenceNumber, sequenceNumber)
 
 			if isRange == false {
@@ -666,7 +666,7 @@ func (c *CIFNAK) Unmarshal(data []byte) error {
 		}
 	}
 
-	if len(c.lostPacketSequenceNumber) % 2 != 0 {
+	if len(c.lostPacketSequenceNumber)%2 != 0 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
@@ -676,7 +676,7 @@ func (c *CIFNAK) Unmarshal(data []byte) error {
 }
 
 func (c *CIFNAK) Marshal(w io.Writer) {
-	if len(c.lostPacketSequenceNumber) % 2 != 0 {
+	if len(c.lostPacketSequenceNumber)%2 != 0 {
 		return
 	}
 
@@ -687,7 +687,7 @@ func (c *CIFNAK) Marshal(w io.Writer) {
 			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i])
 			w.Write(buffer[0:4])
 		} else {
-			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i] | 0b10000000_00000000_00000000_00000000)
+			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i]|0b10000000_00000000_00000000_00000000)
 			binary.BigEndian.PutUint32(buffer[4:], c.lostPacketSequenceNumber[i+1])
 			w.Write(buffer[0:])
 		}

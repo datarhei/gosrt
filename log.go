@@ -3,8 +3,8 @@ package srt
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
 )
 
 func log(format string, args ...interface{}) {

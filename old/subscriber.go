@@ -3,10 +3,10 @@ package old
 import (
 	"encoding/binary"
 	//"encoding/hex"
+	"container/list"
 	"net"
 	"sync"
 	"time"
-	"container/list"
 )
 
 type SubscriberConn struct {
@@ -37,9 +37,9 @@ type SubscriberConn struct {
 	TsbpdDelay    uint32
 	Drift         uint32
 
-	packetQueue chan *Packet
+	packetQueue  chan *Packet
 	deliverQueue chan *Packet
-	deliverTo PacketWriter
+	deliverTo    PacketWriter
 
 	stopReader chan struct{}
 	stopWriter chan struct{}
@@ -71,7 +71,7 @@ func (c *SubscriberConn) ListenAndServe() {
 	c.packetQueue = make(chan *Packet, 128)
 	c.deliverQueue = make(chan *Packet, 1024)
 
-	c.timeout = time.AfterFunc(2 * time.Second, func() {
+	c.timeout = time.AfterFunc(2*time.Second, func() {
 		log("conn %d: no more data received. shutting down\n", c.socketId)
 		c.Shutdown(func() {})
 	})
@@ -88,7 +88,7 @@ func (c *SubscriberConn) ListenAndServe() {
 }
 
 func (c *SubscriberConn) SocketId() uint32 {
-	return c.socketId;
+	return c.socketId
 }
 
 func (c *SubscriberConn) RemoteAddr() net.Addr {
@@ -96,11 +96,11 @@ func (c *SubscriberConn) RemoteAddr() net.Addr {
 }
 
 func (c *SubscriberConn) PeerSocketId() uint32 {
-	return c.peerSocketId;
+	return c.peerSocketId
 }
 
 func (c *SubscriberConn) StreamId() string {
-	return c.streamId;
+	return c.streamId
 }
 
 func (c *SubscriberConn) Push(p *Packet) {
@@ -290,7 +290,7 @@ func (c *SubscriberConn) handleNAK(p *Packet) {
 }
 
 func (c *SubscriberConn) Close() {
-	c.Shutdown(func(){})
+	c.Shutdown(func() {})
 }
 
 func (c *SubscriberConn) Shutdown(bla func()) {
@@ -333,8 +333,8 @@ type SEND struct {
 	nextSequenceNumber uint32
 
 	packetList *list.List
-	lossList *list.List
-	lock sync.RWMutex
+	lossList   *list.List
+	lock       sync.RWMutex
 
 	dropInterval uint32
 
@@ -344,8 +344,8 @@ type SEND struct {
 func NewSEND(initalSequenceNumber, dropInterval uint32) *SEND {
 	s := &SEND{
 		nextSequenceNumber: initalSequenceNumber,
-		packetList: list.New(),
-		lossList: list.New(),
+		packetList:         list.New(),
+		lossList:           list.New(),
 
 		dropInterval: dropInterval, // ticks
 
@@ -394,23 +394,23 @@ func (s *SEND) tick(now uint32) {
 	for e := s.lossList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(*Packet)
 
-		if p.PktTsbpdTime + s.dropInterval <= now {
+		if p.PktTsbpdTime+s.dropInterval <= now {
 			//log("   dropping %d @ %d from losslist (%d, %d)\n", p.packetSequenceNumber, p.PktTsbpdTime, p.PktTsbpdTime + s.dropInterval, now)
 			removeList = append(removeList, e)
 		}
-/*
-		if s.dropInterval > now {
-			if p.PktTsbpdTime > s.dropInterval - now {
-				log("   dropping %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
-				removeList = append(removeList, e)
+		/*
+			if s.dropInterval > now {
+				if p.PktTsbpdTime > s.dropInterval - now {
+					log("   dropping %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
+					removeList = append(removeList, e)
+				}
+			} else {
+				if p.PktTsbpdTime <= now - s.dropInterval {
+					log("   dropping %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
+					removeList = append(removeList, e)
+				}
 			}
-		} else {
-			if p.PktTsbpdTime <= now - s.dropInterval {
-				log("   dropping %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
-				removeList = append(removeList, e)
-			}
-		}
-*/
+		*/
 	}
 
 	for _, e := range removeList {

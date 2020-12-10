@@ -3,16 +3,17 @@ package old
 import (
 	"encoding/binary"
 	//"encoding/hex"
+	"container/list"
 	"fmt"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"time"
-	"container/list"
-	"strings"
 )
 
-type NullWriter struct {}
+type NullWriter struct{}
+
 func (n *NullWriter) Write(p *Packet) {
 	log("writing to NullWriter\n")
 }
@@ -45,9 +46,9 @@ type PublisherConn struct {
 	TsbpdDelay    uint32
 	Drift         uint32
 
-	packetQueue chan *Packet
+	packetQueue  chan *Packet
 	deliverQueue chan *Packet
-	deliverTo PacketWriter
+	deliverTo    PacketWriter
 
 	stopReader chan struct{}
 	stopWriter chan struct{}
@@ -79,7 +80,7 @@ func (c *PublisherConn) ListenAndServe() {
 	c.packetQueue = make(chan *Packet, 128)
 	c.deliverQueue = make(chan *Packet, 1024)
 
-	c.timeout = time.AfterFunc(2 * time.Second, func() {
+	c.timeout = time.AfterFunc(2*time.Second, func() {
 		log("conn %d: no more data received. shutting down\n", c.socketId)
 		c.Shutdown(func() {})
 	})
@@ -88,7 +89,7 @@ func (c *PublisherConn) ListenAndServe() {
 		c.deliverTo = &NullWriter{}
 	}
 
-	c.recv = NewRECV(c.initialPacketSequenceNumber, 10 * 1000, 20 * 1000)
+	c.recv = NewRECV(c.initialPacketSequenceNumber, 10*1000, 20*1000)
 
 	c.recv.sendACK = c.sendACK
 	c.recv.sendNAK = c.sendNAK
@@ -100,7 +101,7 @@ func (c *PublisherConn) ListenAndServe() {
 }
 
 func (c *PublisherConn) SocketId() uint32 {
-	return c.socketId;
+	return c.socketId
 }
 
 func (c *PublisherConn) RemoteAddr() net.Addr {
@@ -108,11 +109,11 @@ func (c *PublisherConn) RemoteAddr() net.Addr {
 }
 
 func (c *PublisherConn) PeerSocketId() uint32 {
-	return c.peerSocketId;
+	return c.peerSocketId
 }
 
 func (c *PublisherConn) StreamId() string {
-	return c.streamId;
+	return c.streamId
 }
 
 func (c *PublisherConn) Push(p *Packet) {
@@ -352,7 +353,7 @@ func (c *PublisherConn) recalculateRTT(rtt time.Duration) {
 }
 
 func (c *PublisherConn) Close() {
-	c.Shutdown(func(){})
+	c.Shutdown(func() {})
 }
 
 func (c *PublisherConn) Shutdown(bla func()) {
@@ -394,8 +395,8 @@ func (c *PublisherConn) Shutdown(bla func()) {
 type RECV struct {
 	maxSeenSequenceNumber uint32
 	lastACKSequenceNumber uint32
-	packetList *list.List
-	lock sync.RWMutex
+	packetList            *list.List
+	lock                  sync.RWMutex
 
 	delay uint32 // config
 	start uint32
@@ -418,7 +419,7 @@ func NewRECV(initialSequenceNumber, periodicACKInterval, periodicNAKInterval uin
 	r := &RECV{
 		maxSeenSequenceNumber: initialSequenceNumber - 1,
 		lastACKSequenceNumber: 0,
-		packetList: list.New(),
+		packetList:            list.New(),
 
 		periodicACKInterval: periodicACKInterval, // ticks
 		periodicNAKInterval: periodicNAKInterval, // ticks
@@ -440,7 +441,7 @@ func (r *RECV) push(packet *Packet) {
 
 	//logIn("new packet %d @ %d, expecting %d\n", packet.packetSequenceNumber, packet.PktTsbpdTime, r.maxSeenSequenceNumber + 1)
 
-	if packet.packetSequenceNumber == r.maxSeenSequenceNumber + 1 {
+	if packet.packetSequenceNumber == r.maxSeenSequenceNumber+1 {
 		r.maxSeenSequenceNumber = packet.packetSequenceNumber
 
 		//logIn("   the packet we expected\n")
@@ -471,7 +472,7 @@ func (r *RECV) push(packet *Packet) {
 		// the sequence number is too big
 		// send a NAK for all sequences that are bigger than the one we know until
 		// the one we have at hand, both ends exluding.
-		r.sendNAK(r.maxSeenSequenceNumber + 1, packet.packetSequenceNumber - 1)
+		r.sendNAK(r.maxSeenSequenceNumber+1, packet.packetSequenceNumber-1)
 		r.maxSeenSequenceNumber = packet.packetSequenceNumber
 
 		//logIn("   there are some missing sequence numbers\n")
@@ -499,7 +500,7 @@ func (r *RECV) tick(now uint32) {
 	}
 	r.lock.Unlock()
 
-	if now - r.lastPeriodicACK > r.periodicACKInterval || r.nPackets >= 64 {
+	if now-r.lastPeriodicACK > r.periodicACKInterval || r.nPackets >= 64 {
 		// send a periodic or light ACK
 		lite := false
 		if r.nPackets >= 64 {
@@ -517,14 +518,14 @@ func (r *RECV) tick(now uint32) {
 
 			for e = e.Next(); e != nil; e = e.Next() {
 				p = e.Value.(*Packet)
-				if p.packetSequenceNumber != ackSequenceNumber + 1 {
+				if p.packetSequenceNumber != ackSequenceNumber+1 {
 					break
 				}
 
 				ackSequenceNumber++
 			}
 
-			r.sendACK(ackSequenceNumber + 1, lite)
+			r.sendACK(ackSequenceNumber+1, lite)
 
 			// keep track of the last ACK's sequence. with this we can faster ignore
 			// packets that come in that have a lower sequence number.
@@ -536,7 +537,7 @@ func (r *RECV) tick(now uint32) {
 		r.nPackets = 0
 	}
 
-	if now - r.lastPeriodicNAK > r.periodicNAKInterval {
+	if now-r.lastPeriodicNAK > r.periodicNAKInterval {
 		// send a periodic NAK
 
 		// find the first sequence number which is missing and send a
@@ -554,9 +555,9 @@ func (r *RECV) tick(now uint32) {
 
 			for e = e.Next(); e != nil; e = e.Next() {
 				p = e.Value.(*Packet)
-				if p.packetSequenceNumber != ackSequenceNumber + 1 {
+				if p.packetSequenceNumber != ackSequenceNumber+1 {
 					nackSequenceNumber := ackSequenceNumber + 1
-					r.sendNAK(nackSequenceNumber, p.packetSequenceNumber - 1)
+					r.sendNAK(nackSequenceNumber, p.packetSequenceNumber-1)
 					break
 				}
 
@@ -580,7 +581,7 @@ func (r *RECV) String(t uint32) string {
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(*Packet)
 
-		b.WriteString(fmt.Sprintf("   %d @ %d (in %d)\n", p.packetSequenceNumber, p.PktTsbpdTime, int64(p.PktTsbpdTime) - int64(t)))
+		b.WriteString(fmt.Sprintf("   %d @ %d (in %d)\n", p.packetSequenceNumber, p.PktTsbpdTime, int64(p.PktTsbpdTime)-int64(t)))
 	}
 	r.lock.RUnlock()
 

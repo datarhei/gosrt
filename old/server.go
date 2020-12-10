@@ -43,7 +43,7 @@ type Server struct {
 
 func New(address string, deliverData bool) Server {
 	s := Server{
-		address: address,
+		address:     address,
 		deliverData: deliverData,
 	}
 
@@ -186,13 +186,13 @@ func (s *Server) createPacket() *Packet {
 
 func (s *Server) recyclePacket(p *Packet) {
 	return
-/*
-	if p == nil {
-		return
-	}
+	/*
+		if p == nil {
+			return
+		}
 
-	s.packetPool.Put(p)
-*/
+		s.packetPool.Put(p)
+	*/
 }
 
 type connectMode int
@@ -219,38 +219,38 @@ func (s *Server) handleConnect(addr net.Addr, streamId string) (connectMode, str
 	return SUBSCRIBE, "something"
 
 	/*
-	accessControl struct {
-		username string
-		resource string
-		hostname string
-		sessionId string
-		purpose string
-		mode string
-		other []string
-	}
+		accessControl struct {
+			username string
+			resource string
+			hostname string
+			sessionId string
+			purpose string
+			mode string
+			other []string
+		}
 
-	// Appendix B.  SRT Access Control
-	purpose := "stream"
-	mode := "request"
+		// Appendix B.  SRT Access Control
+		purpose := "stream"
+		mode := "request"
 
-	if strings.HasPrefix(streamId, "#!::") == true {
-		fields := strings.Split(c.streamId[4:], ",")
+		if strings.HasPrefix(streamId, "#!::") == true {
+			fields := strings.Split(c.streamId[4:], ",")
 
-		for _, f := range fields {
-			switch f[0] {
-			case 'u': c.accessControl.username = f[2:]
-			case 'r': c.accessControl.resource = f[2:]
-			case 'h': c.accessControl.hostname = f[2:]
-			case 's': c.accessControl.sessionId = f[2:]
-			case 't': c.accessControl.purpose = f[2:]
-			case 'm': c.accessControl.mode = f[2:]
-			default:
-				c.accessControl.other = append(c.accessControl.other, f)
+			for _, f := range fields {
+				switch f[0] {
+				case 'u': c.accessControl.username = f[2:]
+				case 'r': c.accessControl.resource = f[2:]
+				case 'h': c.accessControl.hostname = f[2:]
+				case 's': c.accessControl.sessionId = f[2:]
+				case 't': c.accessControl.purpose = f[2:]
+				case 'm': c.accessControl.mode = f[2:]
+				default:
+					c.accessControl.other = append(c.accessControl.other, f)
+				}
 			}
 		}
-	}
 
-	return false
+		return false
 	*/
 }
 
@@ -423,20 +423,20 @@ func (s *Server) handleHandshake(p *Packet) {
 		if mode == PUBLISH {
 			log("new publisher wants to publish on %s\n", id)
 			conn = &PublisherConn{
-				addr:         p.addr,
-				start:        now,
-				socketId:     socketId,
-				peerSocketId: cif.srtSocketId,
-				streamId:     cif.streamId,
-				TsbpdTimeBase:  p.timestamp,
-				TsbpdDelay:    uint32(cif.recvTSBPDDelay) * 1000,
-				Drift:         0,
-				send:          s.send,
-				createPacket:  s.createPacket,
-				recyclePacket: s.recyclePacket,
-				onShutdown:    s.connectionShutdown,
+				addr:                        p.addr,
+				start:                       now,
+				socketId:                    socketId,
+				peerSocketId:                cif.srtSocketId,
+				streamId:                    cif.streamId,
+				TsbpdTimeBase:               p.timestamp,
+				TsbpdDelay:                  uint32(cif.recvTSBPDDelay) * 1000,
+				Drift:                       0,
+				send:                        s.send,
+				createPacket:                s.createPacket,
+				recyclePacket:               s.recyclePacket,
+				onShutdown:                  s.connectionShutdown,
 				initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
-				deliverData: s.deliverData,
+				deliverData:                 s.deliverData,
 			}
 
 			// add connection
@@ -459,17 +459,17 @@ func (s *Server) handleHandshake(p *Packet) {
 		} else {
 			log("new subscriber wants to subscribe to %s\n", id)
 			conn = &SubscriberConn{
-				addr:         p.addr,
-				start:        now,
-				socketId:     socketId,
-				peerSocketId: cif.srtSocketId,
-				streamId:     cif.streamId,
-				send:          s.send,
-				createPacket:  s.createPacket,
-				recyclePacket: s.recyclePacket,
-				onShutdown:    s.connectionShutdown,
+				addr:                        p.addr,
+				start:                       now,
+				socketId:                    socketId,
+				peerSocketId:                cif.srtSocketId,
+				streamId:                    cif.streamId,
+				send:                        s.send,
+				createPacket:                s.createPacket,
+				recyclePacket:               s.recyclePacket,
+				onShutdown:                  s.connectionShutdown,
 				initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
-				deliverData: s.deliverData,
+				deliverData:                 s.deliverData,
 			}
 
 			// add connection
@@ -527,16 +527,16 @@ type PacketWriter interface {
 
 type pubSub struct {
 	conns map[uint32]Conn
-	data chan *Packet
-	done chan struct{}
-	lock sync.RWMutex
+	data  chan *Packet
+	done  chan struct{}
+	lock  sync.RWMutex
 }
 
 func NewPubSub(conn Conn) *pubSub {
 	ps := &pubSub{
 		conns: make(map[uint32]Conn),
-		data: make(chan *Packet, 128),
-		done: make(chan struct{}),
+		data:  make(chan *Packet, 128),
+		done:  make(chan struct{}),
 	}
 
 	conn.DeliverTo(ps)
@@ -590,9 +590,9 @@ func (ps *pubSub) Unsubscribe(conn Conn) {
 func (ps *pubSub) writer() {
 	for {
 		select {
-		case <- ps.done:
+		case <-ps.done:
 			return
-		case p := <- ps.data:
+		case p := <-ps.data:
 			ps.lock.RLock()
 			for _, c := range ps.conns {
 				//log("broadcasting packet to %d\n", c.SocketId())

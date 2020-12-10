@@ -5,17 +5,17 @@ import (
 )
 
 type PubSub struct {
-	incoming chan *Packet
-	abort chan struct{}
-	lock sync.Mutex
+	incoming  chan *Packet
+	abort     chan struct{}
+	lock      sync.Mutex
 	listeners map[uint32]chan *Packet
 }
 
 func NewPubSub() *PubSub {
 	pb := &PubSub{
-		incoming: make(chan *Packet, 1024),
+		incoming:  make(chan *Packet, 1024),
 		listeners: make(map[uint32]chan *Packet),
-		abort: make(chan struct{}),
+		abort:     make(chan struct{}),
 	}
 
 	go pb.broadcast()
@@ -38,7 +38,7 @@ func (pb *PubSub) broadcast() {
 				pp := p.Clone()
 
 				select {
-				case c<-pp:
+				case c <- pp:
 				default:
 					log("broadcast target queue is full\n")
 				}
@@ -59,7 +59,7 @@ func (pb *PubSub) Publish(c Conn) error {
 		}
 
 		select {
-		case pb.incoming<- p:
+		case pb.incoming <- p:
 		default:
 			log("incoming queue is full\n")
 		}

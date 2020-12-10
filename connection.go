@@ -1,13 +1,13 @@
 package srt
 
 import (
-	"net"
+	"bytes"
 	"encoding/binary"
 	"errors"
-	"time"
 	"math"
+	"net"
 	"sync"
-	"bytes"
+	"time"
 )
 
 var EOF = errors.New("EOF")
@@ -55,30 +55,30 @@ type srtConn struct {
 	drift         uint32
 
 	// Queue for packets that are coming from the network
-	networkQueue chan *Packet
+	networkQueue     chan *Packet
 	stopNetworkQueue chan struct{}
 
 	// Queue for packets that are written with WritePacket() and will be send to the network
-	writeQueue chan *Packet
+	writeQueue     chan *Packet
 	stopWriteQueue chan struct{}
-	writeBuffer bytes.Buffer
+	writeBuffer    bytes.Buffer
 
 	// Queue for packets that will be read locally with ReadPacket()
-	readQueue chan *Packet
+	readQueue  chan *Packet
 	readBuffer bytes.Buffer
 
 	stopTicker chan struct{}
 
-	send          func(p *Packet)
-	onShutdown    func(socketId uint32)
+	send       func(p *Packet)
+	onShutdown func(socketId uint32)
 
 	// Congestion control
 	recv *liveRecv
-	snd *liveSend
+	snd  *liveSend
 }
 
 func (c *srtConn) SocketId() uint32 {
-	return c.socketId;
+	return c.socketId
 }
 
 func (c *srtConn) RemoteAddr() net.Addr {
@@ -86,11 +86,11 @@ func (c *srtConn) RemoteAddr() net.Addr {
 }
 
 func (c *srtConn) PeerSocketId() uint32 {
-	return c.peerSocketId;
+	return c.peerSocketId
 }
 
 func (c *srtConn) StreamId() string {
-	return c.streamId;
+	return c.streamId
 }
 
 func (c *srtConn) listenAndServe() {
@@ -120,12 +120,12 @@ func (c *srtConn) listenAndServe() {
 
 	c.stopTicker = make(chan struct{})
 
-	c.timeout = time.AfterFunc(2 * time.Second, func() {
+	c.timeout = time.AfterFunc(2*time.Second, func() {
 		log("conn %d: no more data received. shutting down\n", c.socketId)
 		c.shutdown(func() {})
 	})
 
-	c.recv = newLiveRecv(c.initialPacketSequenceNumber, 10 * 1000, 20 * 1000)
+	c.recv = newLiveRecv(c.initialPacketSequenceNumber, 10*1000, 20*1000)
 	c.snd = newLiveSend(c.initialPacketSequenceNumber, 1000000)
 
 	c.recv.sendACK = c.sendACK
@@ -144,7 +144,7 @@ func (c *srtConn) ticker() {
 	defer ticker.Stop()
 	defer func() {
 		log("conn %d: left ticker loop\n", c.socketId)
-		c.stopTicker<- struct{}{}
+		c.stopTicker <- struct{}{}
 	}()
 
 	for {
@@ -207,7 +207,7 @@ func (c *srtConn) WritePacket(p *Packet) error {
 	p.PktTsbpdTime = uint32(time.Now().Sub(c.start).Microseconds())
 
 	select {
-	case c.writeQueue<- p:
+	case c.writeQueue <- p:
 		return nil
 	default:
 	}
@@ -231,14 +231,14 @@ func (c *srtConn) Write(b []byte) (int, error) {
 		}
 
 		p := &Packet{
-			isControlPacket: false,
-			packetSequenceNumber: 0,
-			packetPositionFlag: singlePacket,
-			orderFlag: false,
-			keyBaseEncryptionFlag: unencryptedPacket,
+			isControlPacket:         false,
+			packetSequenceNumber:    0,
+			packetPositionFlag:      singlePacket,
+			orderFlag:               false,
+			keyBaseEncryptionFlag:   unencryptedPacket,
 			retransmittedPacketFlag: false,
-			messageNumber: 0,
-			data: make([]byte, n * 188),
+			messageNumber:           0,
+			data:                    make([]byte, n*188),
 		}
 
 		if _, err := c.writeBuffer.Read(p.data); err != nil {
@@ -270,7 +270,7 @@ func (c *srtConn) push(p *Packet) {
 
 	// Non-blocking write to the network queue
 	select {
-	case c.networkQueue<- p:
+	case c.networkQueue <- p:
 	default:
 		log("network queue is full")
 	}
@@ -280,7 +280,7 @@ func (c *srtConn) push(p *Packet) {
 func (c *srtConn) networkQueueReader() {
 	defer func() {
 		log("conn %d: left network queue reader loop\n", c.socketId)
-		c.stopNetworkQueue<- struct{}{}
+		c.stopNetworkQueue <- struct{}{}
 	}()
 
 	for {
@@ -296,7 +296,7 @@ func (c *srtConn) networkQueueReader() {
 func (c *srtConn) writeQueueReader() {
 	defer func() {
 		log("conn %d: left write queue reader loop\n", c.socketId)
-		c.stopWriteQueue<- struct{}{}
+		c.stopWriteQueue <- struct{}{}
 	}()
 
 	for {
@@ -317,7 +317,7 @@ func (c *srtConn) deliver(p *Packet) {
 
 	// Non-blocking write to the read queue
 	select {
-	case c.readQueue<- p:
+	case c.readQueue <- p:
 	default:
 		log("readQueue was blocking, dropping packet\n")
 	}
@@ -543,11 +543,11 @@ func (c *srtConn) close() {
 	log("conn %d: stopping reader\n", c.socketId)
 
 	// send nil to the readQueue in order to abort any pending ReadPacket call
-	c.readQueue<- nil
+	c.readQueue <- nil
 
 	log("conn %d: stopping network reader\n", c.socketId)
 
-	c.stopNetworkQueue<- struct{}{}
+	c.stopNetworkQueue <- struct{}{}
 
 	select {
 	case <-c.stopNetworkQueue:
@@ -555,7 +555,7 @@ func (c *srtConn) close() {
 
 	log("conn %d: stopping writer\n", c.socketId)
 
-	c.stopWriteQueue<- struct{}{}
+	c.stopWriteQueue <- struct{}{}
 
 	select {
 	case <-c.stopWriteQueue:
@@ -563,7 +563,7 @@ func (c *srtConn) close() {
 
 	log("conn %d: stopping ticker\n", c.socketId)
 
-	c.stopTicker<- struct{}{}
+	c.stopTicker <- struct{}{}
 
 	select {
 	case <-c.stopTicker:

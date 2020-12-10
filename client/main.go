@@ -2,15 +2,15 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
-	"fmt"
 
 	"github.com/datarhei/gosrt"
 )
 
 type client struct {
-	addr string
+	addr     string
 	streamId string
 }
 
@@ -38,7 +38,7 @@ func main() {
 		for {
 			n, err := conn.Read(buffer)
 			if err != nil {
-				doneChan<- err
+				doneChan <- err
 				return
 			}
 
@@ -47,7 +47,7 @@ func main() {
 			os.Stdout.Write(buffer[:n])
 		}
 
-		doneChan<- nil
+		doneChan <- nil
 	}()
 
 	go func() {
@@ -55,7 +55,7 @@ func main() {
 		signal.Notify(quit, os.Interrupt)
 		<-quit
 
-		doneChan<- nil
+		doneChan <- nil
 	}()
 
 	if err := <-doneChan; err != nil {
