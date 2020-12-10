@@ -72,8 +72,6 @@ type srtConn struct {
 	send          func(p *Packet)
 	onShutdown    func(socketId uint32)
 
-	deliverData bool
-
 	// Congestion control
 	recv *liveRecv
 	snd *liveSend
@@ -424,12 +422,12 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 }
 
 func (c *srtConn) sendShutdown() {
-	p := new(Packet)
+	p := &Packet{}
 
 	p.addr = c.addr
 	p.isControlPacket = true
 
-	p.controlType = 5 // Shutdown
+	p.controlType = CTRLTYPE_SHUTDOWN
 	p.typeSpecific = 0
 
 	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())

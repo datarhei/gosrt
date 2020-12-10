@@ -5,7 +5,7 @@ Similar to the "net" package.
 ```
 // Dial connects to a server
 conn, err := srt.Dial("udp", "localhost:6001", DialConfig{
-    StreamId: "/publish/live/foobar.stream", 
+    StreamId: "publish:/live/stream", 
 })
 
 // Listen creates a server

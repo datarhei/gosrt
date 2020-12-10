@@ -231,6 +231,8 @@ type CIF interface {
 }
 
 type CIFHandshake struct {
+	isRequest bool
+
 	version                     uint32
 	encryptionField             uint16
 	extensionField              uint16
@@ -356,7 +358,7 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 		extensionType := binary.BigEndian.Uint16(pivot[0:])
 		extensionLength := int(binary.BigEndian.Uint16(pivot[2:]))
 
-		if extensionType == EXTTYPE_HSREQ {
+		if extensionType == EXTTYPE_HSREQ || extensionType == EXTTYPE_HSRSP {
 			if extensionLength != 3 || len(pivot[4:]) < extensionLength*4 {
 				return fmt.Errorf("invalid extension length")
 			}
@@ -444,7 +446,12 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 	w.Write(buffer[0:])
 
 	if c.hasHS == true {
-		binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSRSP)
+		if c.isRequest == true {
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSREQ)
+		} else {
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSRSP)
+		}
+
 		binary.BigEndian.PutUint16(buffer[2:], 3)
 
 		binary.BigEndian.PutUint32(buffer[4:], c.srtVersion)

@@ -181,7 +181,7 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 		request.handshake.srtFlags.STREAM = false
 		request.handshake.srtFlags.PACKET_FILTER = true
 
-		logOut("%s\n", request.handshake.String())
+		log("outgoing: %s\n", request.handshake.String())
 
 		ln.accept(request)
 
@@ -369,11 +369,11 @@ func (ln *listener) handleHandshake(p *Packet) {
 	cif := &CIFHandshake{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
-		logIn("cif error: %s\n", err)
+		log("cif error: %s\n", err)
 		return
 	}
 
-	logIn("%s\n", cif.String())
+	log("incoming: %s\n", cif.String())
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 
@@ -398,7 +398,7 @@ func (ln *listener) handleHandshake(p *Packet) {
 
 		p.SetCIF(cif)
 
-		logOut("%s\n", cif.String())
+		log("outgoing: %s\n", cif.String())
 
 		ln.send(p)
 	} else if cif.handshakeType == HSTYPE_CONCLUSION {
@@ -453,6 +453,9 @@ func (ln *listener) handleHandshake(p *Packet) {
 		select {
 			case ln.backlog <- c:
 			default:
+				cif.handshakeType = REJ_BACKLOG
+				p.SetCIF(cif)
+				ln.send(p)
 		}
 	} else {
 		log("   unknown handshakeType\n")
