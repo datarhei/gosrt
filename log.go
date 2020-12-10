@@ -7,10 +7,6 @@ import (
 	"path/filepath"
 )
 
-func Log(format string, args ...interface{}) {
-	log(format, args...)
-}
-
 func log(format string, args ...interface{}) {
 	_, fn, line, _ := runtime.Caller(1)
 

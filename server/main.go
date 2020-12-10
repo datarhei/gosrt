@@ -4,94 +4,67 @@ import (
 	"os"
 	"os/signal"
 	"flag"
-	"runtime"
-	"runtime/pprof"
-	"runtime/trace"
 	"net"
+	"net/url"
+	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/datarhei/gosrt"
 )
 
+// server is an implementation of the Server interface
+type server struct {
+	// Configuration parameter taken from the Config
+	addr   string
+	app    string
+	token  string
+
+	server *srt.Server
+
+	// Map of publishing channels and a lock to serialize
+	// access to the map.
+	channels map[string]*srt.PubSub
+	lock     sync.RWMutex
+}
+
+func (s *server) ListenAndServe() error {
+	if len(s.app) == 0 {
+		s.app = "/"
+	}
+
+	return s.server.ListenAndServe()
+}
+
+func (s *server) Shutdown() {
+	s.server.Shutdown()
+}
+
 func main() {
-	var deliverData = flag.Bool("deliver", false, "Deliver packet data to stdout")
-	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
-	var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
-	var traceprofile = flag.String("traceprofile", "", "write trace profile to `file`")
+	s := server{
+		channels: make(map[string]*srt.PubSub),
+	}
+
+	flag.StringVar(&s.addr, "addr", "", "Address to listen on")
+	flag.StringVar(&s.app, "app", "", "write cpu profile to `file`")
+	flag.StringVar(&s.token, "token", "", "write memory profile to `file`")
 
 	flag.Parse()
 
-	if *cpuprofile != "" {
-        f, err := os.Create(*cpuprofile)
-        if err != nil {
-            srt.Log("could not create CPU profile: %s\n", err)
-            os.Exit(1)
-        }
-        defer f.Close()
-        if err := pprof.StartCPUProfile(f); err != nil {
-            srt.Log("could not start CPU profile: %s\n", err)
-            os.Exit(1)
-        }
-        defer pprof.StopCPUProfile()
-    }
-
-    if *traceprofile != "" {
-    	f, err := os.Create(*traceprofile)
-		if err != nil {
-			srt.Log("failed to create trace output file: %v\n", err)
-			os.Exit(1)
-		}
-		defer func() {
-			if err := f.Close(); err != nil {
-				srt.Log("failed to close trace file: %v\n", err)
-				os.Exit(1)
-			}
-		}()
-
-		if err := trace.Start(f); err != nil {
-			srt.Log("failed to start trace: %v\n", err)
-			os.Exit(1)
-		}
-		defer trace.Stop()
-    }
-
-    srt.Log("listening on udp://:6001\n")
-
-	// Listen creates a server
-	ln, err := srt.Listen("udp", ":6001")
-	if err != nil {
-	    // handle error
-	    srt.Log("failed starting server: %v\n", err)
-	    os.Exit(1)
+	s.server = &srt.Server{
+		Addr: s.addr,
+		HandleConnect: s.handleConnect,
+		HandlePublish: s.handlePublish,
+		HandleSubscribe: s.handleSubscribe,
+		Debug: false,
 	}
 
+	fmt.Fprintf(os.Stderr, "Listening on %s\n", s.addr)
+
 	go func() {
-		for {
-		    conn, mode, err := ln.Accept(func(addr net.Addr, streamId string) srt.ConnType {
-		    	if streamId == "publish" {
-		    		return srt.PUBLISH
-		    	}
-
-		    	if streamId == "subscribe" {
-		    		return srt.SUBSCRIBE
-		    	}
-
-		        return srt.REJECT
-		    })
-
-		    if err != nil {
-		        // handle error
-		    }
-
-		    if conn == nil {
-		        // rejected connection
-		        continue
-		    }
-
-		    if mode == srt.PUBLISH {
-		    	go handlePublish(conn, *deliverData)
-		    } else {
-		   		go handleSubscribe(conn, *deliverData)
-		   	}
+		if err := s.ListenAndServe(); err != nil && err != srt.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "SRT Server: %s\n", err)
+			os.Exit(2)
 		}
 	}()
 
@@ -99,64 +72,124 @@ func main() {
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
-	ln.Close()
-
-	srt.Log("Server exited\n")
-
-	if *memprofile != "" {
-        f, err := os.Create(*memprofile)
-        if err != nil {
-            srt.Log("could not create memory profile: %s\n", err)
-            os.Exit(1)
-        }
-        defer f.Close() // error handling omitted for example
-        runtime.GC() // get up-to-date statistics
-        if err := pprof.WriteHeapProfile(f); err != nil {
-            srt.Log("could not write memory profile: %s\n", err)
-            os.Exit(1)
-        }
-    }
+	s.Shutdown()
 
 	return
 }
 
-var pubsub *srt.PubSub = srt.NewPubSub()
+func (s *server) log(who, action, path, message string, client net.Addr) {
+	fmt.Fprintf(os.Stderr, "%-10s %10s %s (%s) %s\n", who, action, path, client, message)
+}
 
-func handlePublish(conn srt.Conn, deliverData bool) {
-	srt.Log("got PUBLISH connection\n")
+func (s *server) handleConnect (client net.Addr, streamId string) srt.ConnType {
+	var mode srt.ConnType = srt.SUBSCRIBE
+	path := streamId
 
-	if deliverData == true {
-		totalbytes := 0
-
-		// publishing
-		for {
-			p, err := conn.ReadPacket()
-			if err != nil {
-				srt.Log("got %11d bytes in total\n", totalbytes)
-				break
-			}
-
-			if deliverData == true {
-				totalbytes += len(p.Data())
-				srt.Log("got %11d bytes\r", totalbytes)
-				//os.Stdout.Write(p.data)
-			}
-		}
-	} else {
-		pubsub.Publish(conn)
+	if strings.HasPrefix(streamId, "publish:") == true {
+		mode = srt.PUBLISH
+		path = strings.TrimPrefix(streamId, "publish:")
+	} else if strings.HasPrefix(streamId, "subscribe:") == true {
+		path = strings.TrimPrefix(streamId, "subscribe:")
 	}
 
-	srt.Log("leaving PUBLISH connection\n")
+	u, err := url.Parse(path)
+	if err != nil {
+		return srt.REJECT
+	}
+
+	// Check the token
+	token := u.Query().Get("token")
+	if len(s.token) != 0 && s.token != token {
+		s.log("CONNECT", "FORBIDDEN", u.Path, "invalid token ("+token+")", client)
+		return srt.REJECT
+	}
+
+	// Check the app patch
+	if !strings.HasPrefix(u.Path, s.app) {
+		s.log("CONNECT", "FORBIDDEN", u.Path, "invalid app", client)
+		return srt.REJECT
+	}
+
+	if len(strings.TrimPrefix(u.Path, s.app)) == 0 {
+		s.log("CONNECT", "INVALID", u.Path, "stream name not provided", client)
+		return srt.REJECT
+	}
+
+	s.lock.RLock()
+	pubsub := s.channels[u.Path]
+	s.lock.RUnlock()
+
+	if mode == srt.PUBLISH && pubsub != nil {
+		s.log("CONNECT", "CONFLICT", u.Path, "already publishing", client)
+		return srt.REJECT
+	}
+
+	if mode == srt.SUBSCRIBE && pubsub == nil {
+		s.log("CONNECT", "NOTFOUND", u.Path, "", client)
+		return srt.REJECT
+	}
+
+	return mode
+}
+
+func (s *server) handlePublish(conn srt.Conn) {
+	streamId := conn.StreamId()
+	client := conn.RemoteAddr()
+	path := strings.TrimPrefix(streamId, "publish:")
+	u, _ := url.Parse(path)
+
+	// Look for the stream
+	s.lock.Lock()
+	pubsub := s.channels[u.Path]
+	if pubsub == nil {
+		pubsub = srt.NewPubSub()
+		s.channels[u.Path] = pubsub
+	} else {
+		pubsub = nil
+	}
+	s.lock.Unlock()
+
+	if pubsub == nil {
+		s.log("PUBLISH", "CONFLICT", u.Path, "already publishing", client)
+		conn.Close()
+		return
+	}
+
+	s.log("PUBLISH", "START", u.Path, "", client)
+
+	pubsub.Publish(conn)
+
+	s.lock.Lock()
+	delete(s.channels, u.Path)
+	s.lock.Unlock()
+
+	s.log("PUBLISH", "STOP", u.Path, "", client)
 
 	conn.Close()
 }
 
-func handleSubscribe(conn srt.Conn, deliverData bool) {
-	srt.Log("got SUBSCRIBE connection\n")
+func (s *server) handleSubscribe(conn srt.Conn) {
+	streamId := conn.StreamId()
+	client := conn.RemoteAddr()
+	path := strings.TrimPrefix(streamId, "subscribe:")
+	u, _ := url.Parse(path)
+
+	s.log("SUBSCRIBE", "START", u.Path, "", client)
+
+	// Look for the stream
+	s.lock.RLock()
+	pubsub := s.channels[u.Path]
+	s.lock.RUnlock()
+
+	if pubsub == nil {
+		s.log("SUBSCRIBE", "NOTFOUND", u.Path, "", client)
+		conn.Close()
+		return
+	}
 
 	pubsub.Subscribe(conn)
 
-	srt.Log("leaving SUBSCRIBE connection\n")
+	s.log("SUBSCRIBE", "STOP", u.Path, "", client)
 
 	conn.Close()
 }

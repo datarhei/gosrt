@@ -75,11 +75,6 @@ const (
 	EXTTYPE_GROUP uint16 = 8
 )
 
-type RawPacket struct {
-	addr net.Addr
-	data bytes.Buffer
-}
-
 type Packet struct {
 	addr            net.Addr
 	isControlPacket bool
@@ -143,30 +138,12 @@ func (p Packet) String() string {
 }
 
 func (p *Packet) Clone() *Packet {
-	clone := &Packet{
-		addr: p.addr,
-		isControlPacket: p.isControlPacket,
-		PktTsbpdTime: p.PktTsbpdTime,
-
-		controlType: p.controlType,
-		subType: p.subType,
-		typeSpecific: p.typeSpecific,
-
-		packetSequenceNumber: p.packetSequenceNumber,
-		packetPositionFlag: p.packetPositionFlag,
-		orderFlag: p.orderFlag,
-		keyBaseEncryptionFlag: p.keyBaseEncryptionFlag,
-		retransmittedPacketFlag: p.retransmittedPacketFlag,
-		messageNumber: p.messageNumber,
-
-		timestamp: p.timestamp,
-		destinationSocketId: p.destinationSocketId,
-	}
+	clone := *p
 
 	clone.data = make([]byte, len(p.data))
 	copy(clone.data, p.data)
 
-	return clone
+	return &clone
 }
 
 func (p *Packet) Data() []byte {

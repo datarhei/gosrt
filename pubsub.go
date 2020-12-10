@@ -13,7 +13,7 @@ type PubSub struct {
 
 func NewPubSub() *PubSub {
 	pb := &PubSub{
-		incoming: make(chan *Packet, 128),
+		incoming: make(chan *Packet, 1024),
 		listeners: make(map[uint32]chan *Packet),
 		abort: make(chan struct{}),
 	}
@@ -71,7 +71,7 @@ func (pb *PubSub) Publish(c Conn) error {
 }
 
 func (pb *PubSub) Subscribe(c Conn) error {
-	l := make(chan *Packet, 128)
+	l := make(chan *Packet, 1024)
 	socketId := c.SocketId()
 
 	pb.lock.Lock()

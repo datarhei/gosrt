@@ -54,39 +54,39 @@ Start ffmpeg pumping a mpegts stream to an UDP address:
 ffmpeg -f lavfi -re -i testsrc2=rate=25:size=640x360 -codec:v libx264 -b:v 1024k -maxrate:v 1024k -bufsize:v 1024k -preset ultrafast -r 25 -g 50 -pix_fmt yuv420p -vsync 1 -flags2 local_header -f mpegts "udp://127.0.0.1:6000?pkt_size=1316"
 ```
 
-Then start the server:
+Then start the SRT server:
 
 ```
-./server
+./server -addr :6001
 ```
 
-The server will listen on udp://127.0.0.1:6001 (this is currently hard-coded).
+The server will listen on udp://127.0.0.1:6001
 
 Now send the video data to the server:
 
 ```
-srt-live-transmit udp://:6000 'srt://127.0.0.1:6001?streamid=publish' -v
+srt-live-transmit udp://:6000 'srt://127.0.0.1:6001?streamid=publish:/live/stream' -v
 ```
 
 You should see some messages on the screen like
 
 ```
-Media path: 'udp://:6000' --> 'srt://127.0.0.1:6001?streamid=publish'
+Media path: 'udp://:6000' --> 'srt://127.0.0.1:6001?streamid=publish:/live/stream'
 SRT parameters specified:
 
-    streamid = 'publish'
+    streamid = 'publish:/live/stream'
 Opening SRT target caller on 127.0.0.1:6001
 Connecting to 127.0.0.1:6001
 SRT target connected 
 ```
 
-The console where the `gosrt` server is running should also show something about handshake and so on.
+The console where the SRT server is running should also show something about handshake and so on.
 
 Now start the client to get the stream from the server and pipe it into ffplay:
 
 ```
 cd contrib
-./client 127.0.0.1 6001 subscribe | ffplay -f mpegts -i -
+./client 127.0.0.1 6001 /live/stream | ffplay -f mpegts -i -
 ```
 
 You will first see some error messages from ffplay because the stream will most likely not start at a key frame. But then the window

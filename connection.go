@@ -7,6 +7,7 @@ import (
 	"time"
 	"math"
 	"sync"
+	"bytes"
 )
 
 var EOF = errors.New("EOF")
@@ -19,9 +20,9 @@ type Conn interface {
 	StreamId() string
 	Close()
 
-	//Read(p []byte) (n int, err error)
+	Read(p []byte) (n int, err error)
 	ReadPacket() (*Packet, error)
-	//Write(p []byte) (n int, err error)
+	Write(p []byte) (n int, err error)
 	WritePacket(p *Packet) error
 }
 
@@ -60,9 +61,11 @@ type srtConn struct {
 	// Queue for packets that are written with WritePacket() and will be send to the network
 	writeQueue chan *Packet
 	stopWriteQueue chan struct{}
+	writeBuffer bytes.Buffer
 
 	// Queue for packets that will be read locally with ReadPacket()
 	readQueue chan *Packet
+	readBuffer bytes.Buffer
 
 	stopTicker chan struct{}
 
@@ -109,7 +112,7 @@ func (c *srtConn) listenAndServe() {
 
 	c.nakInterval = float64((20 * time.Millisecond).Microseconds())
 
-	c.networkQueue = make(chan *Packet, 128)
+	c.networkQueue = make(chan *Packet, 1024)
 	c.stopNetworkQueue = make(chan struct{})
 
 	c.writeQueue = make(chan *Packet, 1024)
@@ -176,6 +179,23 @@ func (c *srtConn) ReadPacket() (*Packet, error) {
 	return nil, EOF
 }
 
+func (c *srtConn) Read(b []byte) (int, error) {
+	if c.readBuffer.Len() != 0 {
+		return c.readBuffer.Read(b)
+	}
+
+	c.readBuffer.Reset()
+
+	p, err := c.ReadPacket()
+	if err != nil {
+		return 0, err
+	}
+
+	c.readBuffer.Write(p.data)
+
+	return c.readBuffer.Read(b)
+}
+
 func (c *srtConn) WritePacket(p *Packet) error {
 	if c.isShutdown == true {
 		return EOF
@@ -195,6 +215,53 @@ func (c *srtConn) WritePacket(p *Packet) error {
 	}
 
 	return EAGAIN
+}
+
+func (c *srtConn) Write(b []byte) (int, error) {
+	c.writeBuffer.Write(b)
+
+	bufferlen := c.writeBuffer.Len()
+
+	if bufferlen < 188 {
+		return len(b), nil
+	}
+
+	for {
+		n := bufferlen % 188
+		if n > 7 {
+			n = 7
+		}
+
+		p := &Packet{
+			isControlPacket: false,
+			packetSequenceNumber: 0,
+			packetPositionFlag: singlePacket,
+			orderFlag: false,
+			keyBaseEncryptionFlag: unencryptedPacket,
+			retransmittedPacketFlag: false,
+			messageNumber: 0,
+			data: make([]byte, n * 188),
+		}
+
+		if _, err := c.writeBuffer.Read(p.data); err != nil {
+			return 0, err
+		}
+
+		if err := c.WritePacket(p); err != nil {
+			return 0, err
+		}
+
+		bufferlen = c.writeBuffer.Len()
+		if bufferlen < 188 {
+			break
+		}
+	}
+
+	if bufferlen == 0 {
+		c.writeBuffer.Reset()
+	}
+
+	return len(b), nil
 }
 
 // This is where packets from the network come in

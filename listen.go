@@ -20,6 +20,8 @@ const (
 	SUBSCRIBE
 )
 
+var ErrServerClosed = errors.New("srt: Server closed")
+
 type Listener interface {
 	Accept(func(addr net.Addr, streamId string) ConnType) (Conn, ConnType, error)
 	Close()
@@ -64,8 +66,8 @@ func Listen(protocol, address string) (Listener, error) {
 
 	ln.backlog = make(chan connRequest, 128)
 
-	ln.rcvQueue = make(chan *Packet, 128)
-	ln.sndQueue = make(chan *Packet, 128)
+	ln.rcvQueue = make(chan *Packet, 1024)
+	ln.sndQueue = make(chan *Packet, 1024)
 
 	ln.syncookie = NewSYNCookie(ln.addr.String())
 
@@ -82,7 +84,7 @@ func Listen(protocol, address string) (Listener, error) {
 
 		for {
 			if ln.isShutdown == true {
-				ln.doneChan <- nil
+				ln.doneChan <- ErrServerClosed
 				return
 			}
 
@@ -91,6 +93,11 @@ func Listen(protocol, address string) (Listener, error) {
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) == true {
 					continue
+				}
+
+				if ln.isShutdown == true {
+					ln.doneChan <- ErrServerClosed
+					return
 				}
 
 				ln.doneChan <- err
@@ -117,10 +124,19 @@ func Listen(protocol, address string) (Listener, error) {
 // if the backlog is full, just ignore any handshake attempts
 
 func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType) (Conn, ConnType, error) {
+	if ln.isShutdown == true {
+		return nil, REJECT, ErrServerClosed
+	}
+
 	select {
 	case err := <- ln.doneChan:
 		return nil, REJECT, err
 	case request := <-ln.backlog:
+		if accept == nil {
+			ln.reject(request, REJ_PEER)
+			return nil, REJECT, nil
+		}
+
 		mode := accept(request.addr, request.handshake.streamId)
 		if mode == REJECT {
 			ln.reject(request, REJ_PEER)
@@ -225,6 +241,10 @@ func (ln *listener) accept(request connRequest) {
 }
 
 func (ln *listener) Close() {
+	if ln.isShutdown == true {
+		return
+	}
+
 	ln.isShutdown = true
 
 	ln.lock.RLock()
@@ -295,6 +315,54 @@ func (ln *listener) reader() {
 			conn.push(p)
 		}
 	}
+}
+
+func (ln *listener) send(p *Packet) {
+	// non-blocking
+	select {
+		case ln.sndQueue <- p:
+		default:
+			log("server: send queue is full")
+	}
+}
+
+func (ln *listener) writer() {
+	defer func() {
+		log("server: left writer loop\n")
+		ln.stopWriter<- struct{}{}
+	}()
+
+	var data bytes.Buffer
+
+	for {
+		select {
+		case <-ln.stopWriter:
+			return
+		case p := <-ln.sndQueue:
+			data.Reset()
+
+			p.Marshal(&data)
+
+			buffer := data.Bytes()
+
+			//logOut("packet-send: bytes=%d to=%s\n", len(buffer), b.addr.String())
+			//logOut("%s", hex.Dump(buffer))
+
+			//addr, _ := net.ResolveUDPAddr("udp", b.addr)
+
+			// Write the packet's contents back to the client.
+			ln.pc.WriteTo(buffer, p.addr)
+		}
+	}
+}
+
+type connRequest struct {
+	addr net.Addr
+	start time.Time
+	socketId uint32
+	timestamp uint32
+
+	handshake *CIFHandshake
 }
 
 func (ln *listener) handleHandshake(p *Packet) {
@@ -388,52 +456,5 @@ func (ln *listener) handleHandshake(p *Packet) {
 		}
 	} else {
 		log("   unknown handshakeType\n")
-	}
-}
-
-type connRequest struct {
-	addr net.Addr
-	start time.Time
-	socketId uint32
-	timestamp uint32
-
-	handshake *CIFHandshake
-}
-
-func (ln *listener) send(p *Packet) {
-	// non-blocking
-	select {
-		case ln.sndQueue <- p:
-		default:
-	}
-}
-
-func (ln *listener) writer() {
-	defer func() {
-		log("server: left writer loop\n")
-		ln.stopWriter<- struct{}{}
-	}()
-
-	var data bytes.Buffer
-
-	for {
-		select {
-		case <-ln.stopWriter:
-			return
-		case p := <-ln.sndQueue:
-			data.Reset()
-
-			p.Marshal(&data)
-
-			buffer := data.Bytes()
-
-			//logOut("packet-send: bytes=%d to=%s\n", len(buffer), b.addr.String())
-			//logOut("%s", hex.Dump(buffer))
-
-			//addr, _ := net.ResolveUDPAddr("udp", b.addr)
-
-			// Write the packet's contents back to the client.
-			ln.pc.WriteTo(buffer, p.addr)
-		}
 	}
 }
