@@ -6,8 +6,10 @@ import (
 	"errors"
 	"math"
 	"net"
-	"sync"
+	gosync "sync"
 	"time"
+
+	"github.com/datarhei/gosrt/sync"
 )
 
 var EOF = errors.New("EOF")
@@ -54,7 +56,7 @@ type srtConn struct {
 
 	nakInterval float64
 
-	ackLock   sync.RWMutex
+	ackLock   gosync.RWMutex
 	ackNumber uint32
 	ackLast   time.Time
 
@@ -66,18 +68,18 @@ type srtConn struct {
 
 	// Queue for packets that are coming from the network
 	networkQueue     chan *packet
-	stopNetworkQueue chan struct{}
+	stopNetworkQueue sync.Stopper
 
 	// Queue for packets that are written with WritePacket() and will be send to the network
 	writeQueue     chan *packet
-	stopWriteQueue chan struct{}
+	stopWriteQueue sync.Stopper
 	writeBuffer    bytes.Buffer
 
 	// Queue for packets that will be read locally with ReadPacket()
 	readQueue  chan *packet
 	readBuffer bytes.Buffer
 
-	stopTicker chan struct{}
+	stopTicker sync.Stopper
 
 	send       func(p *packet)
 	onShutdown func(socketId uint32)
@@ -127,14 +129,14 @@ func (c *srtConn) listenAndServe() {
 	c.nakInterval = float64((20 * time.Millisecond).Microseconds())
 
 	c.networkQueue = make(chan *packet, 1024)
-	c.stopNetworkQueue = make(chan struct{})
+	c.stopNetworkQueue = sync.NewStopper()
 
 	c.writeQueue = make(chan *packet, 1024)
-	c.stopWriteQueue = make(chan struct{})
+	c.stopWriteQueue = sync.NewStopper()
 
 	c.readQueue = make(chan *packet, 1024)
 
-	c.stopTicker = make(chan struct{})
+	c.stopTicker = sync.NewStopper()
 
 	c.timeout = time.AfterFunc(2*time.Second, func() {
 		log("conn %d: no more data received. shutting down\n", c.socketId)
@@ -160,12 +162,12 @@ func (c *srtConn) ticker() {
 	defer ticker.Stop()
 	defer func() {
 		log("conn %d: left ticker loop\n", c.socketId)
-		c.stopTicker <- struct{}{}
+		c.stopTicker.Done()
 	}()
 
 	for {
 		select {
-		case <-c.stopTicker:
+		case <-c.stopTicker.Check():
 			return
 		case t := <-ticker.C:
 			tickTime := uint32(t.Sub(c.start).Microseconds())
@@ -296,12 +298,12 @@ func (c *srtConn) push(p *packet) {
 func (c *srtConn) networkQueueReader() {
 	defer func() {
 		log("conn %d: left network queue reader loop\n", c.socketId)
-		c.stopNetworkQueue <- struct{}{}
+		c.stopNetworkQueue.Done()
 	}()
 
 	for {
 		select {
-		case <-c.stopNetworkQueue:
+		case <-c.stopNetworkQueue.Check():
 			return
 		case p := <-c.networkQueue:
 			c.handlePacket(p)
@@ -312,12 +314,12 @@ func (c *srtConn) networkQueueReader() {
 func (c *srtConn) writeQueueReader() {
 	defer func() {
 		log("conn %d: left write queue reader loop\n", c.socketId)
-		c.stopWriteQueue <- struct{}{}
+		c.stopWriteQueue.Done()
 	}()
 
 	for {
 		select {
-		case <-c.stopWriteQueue:
+		case <-c.stopWriteQueue.Check():
 			return
 		case p := <-c.writeQueue:
 			// Put the packet into the send congestion control
@@ -565,27 +567,15 @@ func (c *srtConn) close() {
 
 	log("conn %d: stopping network reader\n", c.socketId)
 
-	c.stopNetworkQueue <- struct{}{}
-
-	select {
-	case <-c.stopNetworkQueue:
-	}
+	c.stopNetworkQueue.Stop()
 
 	log("conn %d: stopping writer\n", c.socketId)
 
-	c.stopWriteQueue <- struct{}{}
-
-	select {
-	case <-c.stopWriteQueue:
-	}
+	c.stopWriteQueue.Stop()
 
 	log("conn %d: stopping ticker\n", c.socketId)
 
-	c.stopTicker <- struct{}{}
-
-	select {
-	case <-c.stopTicker:
-	}
+	c.stopTicker.Stop()
 
 	log("conn %d: closing queues\n", c.socketId)
 

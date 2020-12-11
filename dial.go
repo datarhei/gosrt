@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/datarhei/gosrt/sync"
 )
 
 var ErrClientClosed = errors.New("srt: Client closed")
@@ -37,8 +39,8 @@ type dialer struct {
 
 	isShutdown bool
 
-	stopReader chan struct{}
-	stopWriter chan struct{}
+	stopReader sync.Stopper
+	stopWriter sync.Stopper
 
 	doneChan chan error
 }
@@ -74,8 +76,8 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	dl.rcvQueue = make(chan *packet, 1024)
 	dl.sndQueue = make(chan *packet, 1024)
 
-	dl.stopReader = make(chan struct{}, 1)
-	dl.stopWriter = make(chan struct{}, 1)
+	dl.stopReader = sync.NewStopper()
+	dl.stopWriter = sync.NewStopper()
 
 	dl.doneChan = make(chan error)
 
@@ -166,12 +168,12 @@ func (dl *dialer) checkConnection() error {
 func (dl *dialer) reader() {
 	defer func() {
 		log("client: left reader loop\n")
-		dl.stopReader <- struct{}{}
+		dl.stopReader.Done()
 	}()
 
 	for {
 		select {
-		case <-dl.stopReader:
+		case <-dl.stopReader.Check():
 			return
 		case p := <-dl.rcvQueue:
 			if dl.isShutdown == true {
@@ -211,14 +213,14 @@ func (dl *dialer) send(p *packet) {
 func (dl *dialer) writer() {
 	defer func() {
 		log("client: left writer loop\n")
-		dl.stopWriter <- struct{}{}
+		dl.stopWriter.Done()
 	}()
 
 	var data bytes.Buffer
 
 	for {
 		select {
-		case <-dl.stopWriter:
+		case <-dl.stopWriter.Check():
 			return
 		case p := <-dl.sndQueue:
 			data.Reset()
@@ -502,17 +504,8 @@ func (dl *dialer) Close() error {
 		dl.conn.Close()
 	}
 
-	dl.stopReader <- struct{}{}
-
-	select {
-	case <-dl.stopReader:
-	}
-
-	dl.stopWriter <- struct{}{}
-
-	select {
-	case <-dl.stopWriter:
-	}
+	dl.stopReader.Stop()
+	dl.stopWriter.Stop()
 
 	log("client: closing socket\n")
 	dl.pc.Close()

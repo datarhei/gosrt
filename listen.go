@@ -8,8 +8,10 @@ import (
 	"errors"
 	"net"
 	"os"
-	"sync"
+	gosync "sync"
 	"time"
+
+	"github.com/datarhei/gosrt/sync"
 )
 
 type ConnType int
@@ -34,7 +36,7 @@ type listener struct {
 
 	backlog chan connRequest
 	conns   map[uint32]*srtConn
-	lock    sync.RWMutex
+	lock    gosync.RWMutex
 
 	start time.Time
 
@@ -45,8 +47,8 @@ type listener struct {
 
 	isShutdown bool
 
-	stopReader chan struct{}
-	stopWriter chan struct{}
+	stopReader sync.Stopper
+	stopWriter sync.Stopper
 
 	doneChan chan error
 }
@@ -71,8 +73,8 @@ func Listen(protocol, address string) (Listener, error) {
 
 	ln.syncookie = NewSYNCookie(ln.addr.String())
 
-	ln.stopReader = make(chan struct{}, 1)
-	ln.stopWriter = make(chan struct{}, 1)
+	ln.stopReader = sync.NewStopper()
+	ln.stopWriter = sync.NewStopper()
 
 	ln.doneChan = make(chan error)
 
@@ -254,17 +256,8 @@ func (ln *listener) Close() {
 	}
 	ln.lock.RUnlock()
 
-	ln.stopReader <- struct{}{}
-
-	select {
-	case <-ln.stopReader:
-	}
-
-	ln.stopWriter <- struct{}{}
-
-	select {
-	case <-ln.stopWriter:
-	}
+	ln.stopReader.Stop()
+	ln.stopWriter.Stop()
 
 	log("server: closing socket\n")
 	ln.pc.Close()
@@ -277,12 +270,12 @@ func (ln *listener) Addr() net.Addr {
 func (ln *listener) reader() {
 	defer func() {
 		log("server: left reader loop\n")
-		ln.stopReader <- struct{}{}
+		ln.stopReader.Done()
 	}()
 
 	for {
 		select {
-		case <-ln.stopReader:
+		case <-ln.stopReader.Check():
 			return
 		case p := <-ln.rcvQueue:
 			if ln.isShutdown == true {
@@ -330,14 +323,14 @@ func (ln *listener) send(p *packet) {
 func (ln *listener) writer() {
 	defer func() {
 		log("server: left writer loop\n")
-		ln.stopWriter <- struct{}{}
+		ln.stopWriter.Done()
 	}()
 
 	var data bytes.Buffer
 
 	for {
 		select {
-		case <-ln.stopWriter:
+		case <-ln.stopWriter.Check():
 			return
 		case p := <-ln.sndQueue:
 			data.Reset()
