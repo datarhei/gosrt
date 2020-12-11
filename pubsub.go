@@ -7,6 +7,7 @@ package srt
 import (
 	"fmt"
 	"sync"
+	"io"
 )
 
 type PubSub interface {
@@ -105,7 +106,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 	for {
 		select {
 		case <-pb.abort:
-			return EOF
+			return io.EOF
 		case p := <-l:
 			if err := conn.WritePacket(p); err != nil {
 				return err

@@ -12,11 +12,11 @@ import (
 	"net"
 	gosync "sync"
 	"time"
+	"io"
 
 	"github.com/datarhei/gosrt/sync"
 )
 
-var EOF = errors.New("EOF")
 var EAGAIN = errors.New("EAGAIN")
 
 type Conn interface {
@@ -184,7 +184,7 @@ func (c *srtConn) ticker() {
 
 func (c *srtConn) ReadPacket() (*packet, error) {
 	if c.isShutdown == true {
-		return nil, EOF
+		return nil, io.EOF
 	}
 
 	select {
@@ -196,7 +196,7 @@ func (c *srtConn) ReadPacket() (*packet, error) {
 		return p, nil
 	}
 
-	return nil, EOF
+	return nil, io.EOF
 }
 
 func (c *srtConn) Read(b []byte) (int, error) {
@@ -218,7 +218,7 @@ func (c *srtConn) Read(b []byte) (int, error) {
 
 func (c *srtConn) WritePacket(p *packet) error {
 	if c.isShutdown == true {
-		return EOF
+		return io.EOF
 	}
 
 	p.addr = c.remoteAddr
