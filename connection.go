@@ -7,17 +7,14 @@ package srt
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
+	"io"
 	"math"
 	"net"
 	gosync "sync"
 	"time"
-	"io"
 
 	"github.com/datarhei/gosrt/sync"
 )
-
-var EAGAIN = errors.New("EAGAIN")
 
 type Conn interface {
 	Read(p []byte) (int, error)
@@ -234,7 +231,7 @@ func (c *srtConn) WritePacket(p *packet) error {
 	default:
 	}
 
-	return EAGAIN
+	return io.EOF
 }
 
 func (c *srtConn) Write(b []byte) (int, error) {

@@ -61,5 +61,3 @@ Check out the Server type that wraps the Listen and Accept into a
 convenient framework for your own SRT server.
 */
 package srt
-
-

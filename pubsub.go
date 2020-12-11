@@ -6,8 +6,8 @@ package srt
 
 import (
 	"fmt"
-	"sync"
 	"io"
+	"sync"
 )
 
 type PubSub interface {
