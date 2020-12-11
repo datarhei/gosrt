@@ -33,10 +33,10 @@ func main() {
 	doneChan := make(chan error)
 
 	go func() {
-		buffer := make([]byte, 1500)
+		wr := srt.NewNonblockingWriter(os.Stdout)
 
 		for {
-			n, err := conn.Read(buffer)
+			n, err := conn.ReadPacket()
 			if err != nil {
 				doneChan <- err
 				return
@@ -44,8 +44,10 @@ func main() {
 
 			//fmt.Fprintf(os.Stderr, "read: got %d bytes\n", n)
 
-			os.Stdout.Write(buffer[:n])
+			wr.Write(n.Data())
 		}
+
+		wr.Close()
 
 		doneChan <- nil
 	}()
