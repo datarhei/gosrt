@@ -19,8 +19,10 @@ type DialConfig struct {
 
 // dial will implement the Conn interface
 type dialer struct {
-	pc   *net.UDPConn
-	addr net.Addr
+	pc *net.UDPConn
+
+	localAddr  net.Addr
+	remoteAddr net.Addr
 
 	streamId string
 	socketId uint32
@@ -62,7 +64,9 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	}
 
 	dl.pc = pc
-	dl.addr = pc.LocalAddr()
+
+	dl.localAddr = pc.LocalAddr()
+	dl.remoteAddr = pc.RemoteAddr()
 
 	dl.conn = nil
 	dl.connChan = make(chan connResponse)
@@ -92,7 +96,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 			}
 
 			pc.SetReadDeadline(time.Now().Add(3 * time.Second))
-			n, addr, err := pc.ReadFrom(buffer)
+			n, _, err := pc.ReadFrom(buffer)
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) == true {
 					continue
@@ -107,7 +111,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 				return
 			}
 
-			p := newPacket(addr, buffer[:n])
+			p := newPacket(dl.remoteAddr, buffer[:n])
 			if p == nil {
 				continue
 			}
@@ -340,7 +344,8 @@ func (dl *dialer) handleHandshake(p *packet) {
 		// fill up a struct with all relevant data and put it into the backlog
 
 		conn := &srtConn{
-			addr:                        dl.addr,
+			localAddr:                   dl.localAddr,
+			remoteAddr:                  dl.remoteAddr,
 			start:                       dl.start,
 			socketId:                    dl.socketId,
 			peerSocketId:                cif.srtSocketId,
@@ -413,7 +418,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 
 func (dl *dialer) sendInduction() {
 	p := &packet{
-		addr:            dl.addr,
+		addr:            dl.remoteAddr,
 		isControlPacket: true,
 
 		controlType:  CTRLTYPE_HANDSHAKE,
@@ -448,7 +453,7 @@ func (dl *dialer) sendInduction() {
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
 	p := &packet{
-		addr:            dl.addr,
+		addr:            dl.remoteAddr,
 		isControlPacket: true,
 
 		controlType:  CTRLTYPE_SHUTDOWN,
@@ -466,8 +471,12 @@ func (dl *dialer) sendShutdown(peerSocketId uint32) {
 }
 
 // Implementation of the Conn interface
+func (dl *dialer) LocalAddr() net.Addr {
+	return dl.conn.LocalAddr()
+}
+
 func (dl *dialer) RemoteAddr() net.Addr {
-	return dl.addr
+	return dl.conn.RemoteAddr()
 }
 
 func (dl *dialer) SocketId() uint32 {
@@ -482,9 +491,9 @@ func (dl *dialer) StreamId() string {
 	return dl.conn.StreamId()
 }
 
-func (dl *dialer) Close() {
+func (dl *dialer) Close() error {
 	if dl.isShutdown == true {
-		return
+		return nil
 	}
 
 	dl.isShutdown = true
@@ -512,6 +521,8 @@ func (dl *dialer) Close() {
 	case <-dl.doneChan:
 	default:
 	}
+
+	return nil
 }
 
 func (dl *dialer) Read(p []byte) (n int, err error) {
@@ -545,3 +556,7 @@ func (dl *dialer) WritePacket(p *packet) error {
 
 	return dl.conn.WritePacket(p)
 }
+
+func (dl *dialer) SetDeadline(t time.Time) error      { return dl.conn.SetDeadline(t) }
+func (dl *dialer) SetReadDeadline(t time.Time) error  { return dl.conn.SetReadDeadline(t) }
+func (dl *dialer) SetWriteDeadline(t time.Time) error { return dl.conn.SetWriteDeadline(t) }

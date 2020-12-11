@@ -78,6 +78,9 @@ func Listen(protocol, address string) (Listener, error) {
 
 	ln.start = time.Now()
 
+	go ln.reader()
+	go ln.writer()
+
 	go func() {
 		buffer := make([]byte, 1500) // MTU size
 		index := 0
@@ -115,9 +118,6 @@ func Listen(protocol, address string) (Listener, error) {
 		}
 	}()
 
-	go ln.reader()
-	go ln.writer()
-
 	return ln, nil
 }
 
@@ -149,7 +149,8 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 
 		// new connection
 		conn := &srtConn{
-			addr:                        request.addr,
+			localAddr:                   ln.addr,
+			remoteAddr:                  request.addr,
 			start:                       request.start,
 			socketId:                    socketId,
 			peerSocketId:                request.handshake.srtSocketId,

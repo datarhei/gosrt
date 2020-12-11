@@ -14,18 +14,30 @@ var EOF = errors.New("EOF")
 var EAGAIN = errors.New("EAGAIN")
 
 type Conn interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+
+	Close() error
+
+	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
+
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+
 	SocketId() uint32
 	PeerSocketId() uint32
 	StreamId() string
-	Close()
-
-	Read(p []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
 }
 
+// Check if we implemenet the net.Conn interface
+var _ net.Conn = &srtConn{}
+
 type srtConn struct {
-	addr  net.Addr
+	localAddr  net.Addr
+	remoteAddr net.Addr
+
 	start time.Time
 
 	isShutdown bool
@@ -75,12 +87,18 @@ type srtConn struct {
 	snd  *liveSend
 }
 
-func (c *srtConn) SocketId() uint32 {
-	return c.socketId
+func (c *srtConn) LocalAddr() net.Addr {
+	addr, _ := net.ResolveUDPAddr("udp", c.localAddr.String())
+	return addr
 }
 
 func (c *srtConn) RemoteAddr() net.Addr {
-	return c.addr
+	addr, _ := net.ResolveUDPAddr("udp", c.remoteAddr.String())
+	return addr
+}
+
+func (c *srtConn) SocketId() uint32 {
+	return c.socketId
 }
 
 func (c *srtConn) PeerSocketId() uint32 {
@@ -197,7 +215,7 @@ func (c *srtConn) WritePacket(p *packet) error {
 		return EOF
 	}
 
-	p.addr = c.addr
+	p.addr = c.remoteAddr
 	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
 	p.destinationSocketId = c.peerSocketId
 
@@ -420,18 +438,18 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 }
 
 func (c *srtConn) sendShutdown() {
-	p := &packet{}
+	p := &packet{
+		addr:            c.remoteAddr,
+		isControlPacket: true,
 
-	p.addr = c.addr
-	p.isControlPacket = true
+		controlType:  CTRLTYPE_SHUTDOWN,
+		typeSpecific: 0,
 
-	p.controlType = CTRLTYPE_SHUTDOWN
-	p.typeSpecific = 0
+		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
+		destinationSocketId: c.peerSocketId,
 
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
-
-	p.data = make([]byte, 4)
+		data: make([]byte, 4),
+	}
 
 	binary.BigEndian.PutUint32(p.data[0:], 0)
 
@@ -439,15 +457,15 @@ func (c *srtConn) sendShutdown() {
 }
 
 func (c *srtConn) sendNAK(from, to uint32) {
-	p := &packet{}
+	p := &packet{
+		addr:            c.remoteAddr,
+		isControlPacket: true,
 
-	p.addr = c.addr
-	p.isControlPacket = true
+		controlType: CTRLTYPE_NAK,
 
-	p.controlType = CTRLTYPE_NAK
-
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
+		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
+		destinationSocketId: c.peerSocketId,
+	}
 
 	// Appendix A
 	if from == to {
@@ -467,15 +485,15 @@ func (c *srtConn) sendNAK(from, to uint32) {
 }
 
 func (c *srtConn) sendACK(seq uint32, lite bool) {
-	p := &packet{}
+	p := &packet{
+		addr:            c.remoteAddr,
+		isControlPacket: true,
 
-	p.addr = c.addr
-	p.isControlPacket = true
+		controlType: CTRLTYPE_ACK,
 
-	p.controlType = CTRLTYPE_ACK
-
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
+		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
+		destinationSocketId: c.peerSocketId,
+	}
 
 	if lite == true {
 		p.typeSpecific = 0
@@ -504,23 +522,25 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 }
 
 func (c *srtConn) sendACKACK(ackSequence uint32) {
-	p := &packet{}
+	p := &packet{
+		addr:            c.remoteAddr,
+		isControlPacket: true,
 
-	p.addr = c.addr
-	p.isControlPacket = true
+		controlType: CTRLTYPE_ACKACK,
 
-	p.controlType = CTRLTYPE_ACKACK
+		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
+		destinationSocketId: c.peerSocketId,
 
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
-
-	p.typeSpecific = ackSequence
+		typeSpecific: ackSequence,
+	}
 
 	c.send(p)
 }
 
-func (c *srtConn) Close() {
+func (c *srtConn) Close() error {
 	c.close()
+
+	return nil
 }
 
 func (c *srtConn) close() {
@@ -587,3 +607,7 @@ func (c *srtConn) shutdown(callback func()) {
 		callback()
 	}()
 }
+
+func (c *srtConn) SetDeadline(t time.Time) error      { return nil }
+func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }

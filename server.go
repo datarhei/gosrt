@@ -34,6 +34,8 @@ func (s *Server) ListenAndServe() error {
 		return err
 	}
 
+	defer s.ln.Close()
+
 	s.ln = ln
 
 	for {
@@ -53,8 +55,6 @@ func (s *Server) ListenAndServe() error {
 			go s.HandleSubscribe(conn)
 		}
 	}
-
-	s.ln.Close()
 
 	return nil
 }

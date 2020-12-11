@@ -1,23 +1,23 @@
 package srt
 
 import (
-	"io"
 	"bytes"
+	"io"
 	"sync"
 	"time"
 )
 
 type nonblockingWriter struct {
-	dst io.Writer
-	buf *bytes.Buffer
+	dst  io.Writer
+	buf  *bytes.Buffer
 	lock sync.RWMutex
 	done bool
 }
 
 func NewNonblockingWriter(wr io.Writer) *nonblockingWriter {
 	u := &nonblockingWriter{
-		dst: wr,
-		buf: new(bytes.Buffer),
+		dst:  wr,
+		buf:  new(bytes.Buffer),
 		done: false,
 	}
 

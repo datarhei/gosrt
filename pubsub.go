@@ -1,19 +1,24 @@
 package srt
 
 import (
-	"sync"
 	"fmt"
+	"sync"
 )
 
-type PubSub struct {
+type PubSub interface {
+	Publish(c Conn) error
+	Subscribe(c Conn) error
+}
+
+type pubSub struct {
 	incoming  chan *packet
 	abort     chan struct{}
 	lock      sync.Mutex
 	listeners map[uint32]chan *packet
 }
 
-func NewPubSub() *PubSub {
-	pb := &PubSub{
+func NewPubSub() PubSub {
+	pb := &pubSub{
 		incoming:  make(chan *packet, 1024),
 		listeners: make(map[uint32]chan *packet),
 		abort:     make(chan struct{}),
@@ -24,7 +29,7 @@ func NewPubSub() *PubSub {
 	return pb
 }
 
-func (pb *PubSub) broadcast() {
+func (pb *pubSub) broadcast() {
 	defer func() {
 		log("exiting broadcast loop\n")
 	}()
@@ -49,7 +54,7 @@ func (pb *PubSub) broadcast() {
 	}
 }
 
-func (pb *PubSub) Publish(c Conn) error {
+func (pb *pubSub) Publish(c Conn) error {
 	var p *packet
 	var err error
 	conn, ok := c.(*srtConn)
@@ -75,7 +80,7 @@ func (pb *PubSub) Publish(c Conn) error {
 	return err
 }
 
-func (pb *PubSub) Subscribe(c Conn) error {
+func (pb *pubSub) Subscribe(c Conn) error {
 	l := make(chan *packet, 1024)
 	socketId := c.SocketId()
 	conn, ok := c.(*srtConn)
