@@ -1,7 +1,8 @@
-package srt
+// Copyright 2020 FOSS GmbH. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
 
-// Context, abort
-// https://github.com/golang/go/issues/38261#issuecomment-609479495
+package srt
 
 import (
 	"bytes"
