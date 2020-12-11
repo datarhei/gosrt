@@ -100,7 +100,7 @@ or with the golang client:
 
 ```
 cd client
-./client -addr 127.0.0.1:6001 -streamid /live/stream | ffplay -f mpegts -i -
+./client -from "srt://127.0.0.1:6001/?streamid=/live/stream" -to - | ffplay -f mpegts -i -
 ```
 
 You will first see some error messages from ffplay because the stream will most likely not start at a key frame. But then the window
