@@ -24,7 +24,7 @@ type server struct {
 
 	// Map of publishing channels and a lock to serialize
 	// access to the map.
-	channels map[string]*srt.PubSub
+	channels map[string]srt.PubSub
 	lock     sync.RWMutex
 }
 
@@ -42,7 +42,7 @@ func (s *server) Shutdown() {
 
 func main() {
 	s := server{
-		channels: make(map[string]*srt.PubSub),
+		channels: make(map[string]srt.PubSub),
 	}
 
 	flag.StringVar(&s.addr, "addr", "", "Address to listen on")
