@@ -75,10 +75,10 @@ const (
 	EXTTYPE_GROUP      uint16 = 8
 )
 
-type Packet struct {
+type packet struct {
 	addr            net.Addr
 	isControlPacket bool
-	PktTsbpdTime    uint32
+	pktTsbpdTime    uint32
 
 	// control packet fields
 	controlType  uint16
@@ -100,8 +100,8 @@ type Packet struct {
 	data []byte
 }
 
-func NewPacket(addr net.Addr, data []byte) *Packet {
-	p := &Packet{
+func newPacket(addr net.Addr, data []byte) *packet {
+	p := &packet{
 		addr: addr,
 	}
 
@@ -112,7 +112,7 @@ func NewPacket(addr net.Addr, data []byte) *Packet {
 	return p
 }
 
-func (p Packet) String() string {
+func (p packet) String() string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "timestamp=%#08x, destId=%#08x\n", p.timestamp, p.destinationSocketId)
@@ -137,7 +137,7 @@ func (p Packet) String() string {
 	return b.String()
 }
 
-func (p *Packet) Clone() *Packet {
+func (p *packet) Clone() *packet {
 	clone := *p
 
 	clone.data = make([]byte, len(p.data))
@@ -146,11 +146,7 @@ func (p *Packet) Clone() *Packet {
 	return &clone
 }
 
-func (p *Packet) Data() []byte {
-	return p.data
-}
-
-func (p *Packet) Unmarshal(data []byte) error {
+func (p *packet) Unmarshal(data []byte) error {
 	if len(data) < 16 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
@@ -179,7 +175,7 @@ func (p *Packet) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (p *Packet) Marshal(w io.Writer) {
+func (p *packet) Marshal(w io.Writer) {
 	var buffer [16]byte
 
 	if p.isControlPacket == true {
@@ -214,7 +210,7 @@ func (p *Packet) Marshal(w io.Writer) {
 	w.Write(p.data)
 }
 
-func (p *Packet) SetCIF(c CIF) {
+func (p *packet) SetCIF(c cifInterface) {
 	if p.isControlPacket == false {
 		return
 	}
@@ -226,11 +222,11 @@ func (p *Packet) SetCIF(c CIF) {
 	p.data = b.Bytes()
 }
 
-type CIF interface {
+type cifInterface interface {
 	Marshal(w io.Writer)
 }
 
-type CIFHandshake struct {
+type cifHandshake struct {
 	isRequest bool
 
 	version                     uint32
@@ -268,7 +264,7 @@ type CIFHandshake struct {
 	streamId string
 }
 
-func (c CIFHandshake) String() string {
+func (c cifHandshake) String() string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "handshake\n")
@@ -311,7 +307,7 @@ func (c CIFHandshake) String() string {
 	return b.String()
 }
 
-func (c *CIFHandshake) Unmarshal(data []byte) error {
+func (c *cifHandshake) Unmarshal(data []byte) error {
 	if len(data) < 48 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
@@ -410,7 +406,7 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (c *CIFHandshake) Marshal(w io.Writer) {
+func (c *cifHandshake) Marshal(w io.Writer) {
 	var buffer [48]byte
 
 	if len(c.streamId) == 0 {
@@ -526,7 +522,7 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 	return
 }
 
-type CIFACK struct {
+type cifACK struct {
 	isLite                      bool
 	isSmall                     bool
 	lastACKPacketSequenceNumber uint32
@@ -538,7 +534,7 @@ type CIFACK struct {
 	receivingRate               uint32
 }
 
-func (c CIFACK) String() string {
+func (c cifACK) String() string {
 	var b strings.Builder
 
 	ackType := "full"
@@ -564,7 +560,7 @@ func (c CIFACK) String() string {
 	return b.String()
 }
 
-func (c *CIFACK) Unmarshal(data []byte) error {
+func (c *cifACK) Unmarshal(data []byte) error {
 	c.isLite = false
 	c.isSmall = false
 
@@ -600,7 +596,7 @@ func (c *CIFACK) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (c *CIFACK) Marshal(w io.Writer) {
+func (c *cifACK) Marshal(w io.Writer) {
 	var buffer [28]byte
 
 	binary.BigEndian.PutUint32(buffer[0:], c.lastACKPacketSequenceNumber)
@@ -614,11 +610,11 @@ func (c *CIFACK) Marshal(w io.Writer) {
 	w.Write(buffer[0:])
 }
 
-type CIFNAK struct {
+type cifNAK struct {
 	lostPacketSequenceNumber []uint32
 }
 
-func (c CIFNAK) String() string {
+func (c cifNAK) String() string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "NAK\n")
@@ -639,7 +635,7 @@ func (c CIFNAK) String() string {
 	return b.String()
 }
 
-func (c *CIFNAK) Unmarshal(data []byte) error {
+func (c *cifNAK) Unmarshal(data []byte) error {
 	if len(data)%4 != 0 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
@@ -675,7 +671,7 @@ func (c *CIFNAK) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (c *CIFNAK) Marshal(w io.Writer) {
+func (c *cifNAK) Marshal(w io.Writer) {
 	if len(c.lostPacketSequenceNumber)%2 != 0 {
 		return
 	}

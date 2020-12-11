@@ -38,8 +38,8 @@ type listener struct {
 
 	start time.Time
 
-	rcvQueue chan *Packet
-	sndQueue chan *Packet
+	rcvQueue chan *packet
+	sndQueue chan *packet
 
 	syncookie SYNCookie
 
@@ -66,8 +66,8 @@ func Listen(protocol, address string) (Listener, error) {
 
 	ln.backlog = make(chan connRequest, 128)
 
-	ln.rcvQueue = make(chan *Packet, 1024)
-	ln.sndQueue = make(chan *Packet, 1024)
+	ln.rcvQueue = make(chan *packet, 1024)
+	ln.sndQueue = make(chan *packet, 1024)
 
 	ln.syncookie = NewSYNCookie(ln.addr.String())
 
@@ -104,7 +104,7 @@ func Listen(protocol, address string) (Listener, error) {
 				return
 			}
 
-			p := NewPacket(addr, buffer[:n])
+			p := newPacket(addr, buffer[:n])
 			if p == nil {
 				continue
 			}
@@ -203,7 +203,7 @@ func (ln *listener) handleShutdown(socketId uint32) {
 }
 
 func (ln *listener) reject(request connRequest, reason uint32) {
-	p := &Packet{
+	p := &packet{
 		addr:            request.addr,
 		isControlPacket: true,
 
@@ -223,7 +223,7 @@ func (ln *listener) reject(request connRequest, reason uint32) {
 }
 
 func (ln *listener) accept(request connRequest) {
-	p := &Packet{
+	p := &packet{
 		addr:            request.addr,
 		isControlPacket: true,
 
@@ -317,7 +317,7 @@ func (ln *listener) reader() {
 	}
 }
 
-func (ln *listener) send(p *Packet) {
+func (ln *listener) send(p *packet) {
 	// non-blocking
 	select {
 	case ln.sndQueue <- p:
@@ -362,11 +362,11 @@ type connRequest struct {
 	socketId  uint32
 	timestamp uint32
 
-	handshake *CIFHandshake
+	handshake *cifHandshake
 }
 
-func (ln *listener) handleHandshake(p *Packet) {
-	cif := &CIFHandshake{}
+func (ln *listener) handleHandshake(p *packet) {
+	cif := &cifHandshake{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
 		log("cif error: %s\n", err)

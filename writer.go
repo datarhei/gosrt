@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-type NonblockingWriter struct {
+type nonblockingWriter struct {
 	dst io.Writer
 	buf *bytes.Buffer
 	lock sync.RWMutex
 	done bool
 }
 
-func NewNonblockingWriter(wr io.Writer) *NonblockingWriter {
-	u := &NonblockingWriter{
+func NewNonblockingWriter(wr io.Writer) *nonblockingWriter {
+	u := &nonblockingWriter{
 		dst: wr,
 		buf: new(bytes.Buffer),
 		done: false,
@@ -26,7 +26,7 @@ func NewNonblockingWriter(wr io.Writer) *NonblockingWriter {
 	return u
 }
 
-func (u *NonblockingWriter) Write(p []byte) (int, error) {
+func (u *nonblockingWriter) Write(p []byte) (int, error) {
 	if u.done == true {
 		return 0, io.EOF
 	}
@@ -37,13 +37,13 @@ func (u *NonblockingWriter) Write(p []byte) (int, error) {
 	return u.buf.Write(p)
 }
 
-func (u *NonblockingWriter) Close() error {
+func (u *nonblockingWriter) Close() error {
 	u.done = true
 
 	return nil
 }
 
-func (u *NonblockingWriter) writer() {
+func (u *nonblockingWriter) writer() {
 	p := make([]byte, 2048)
 
 	for {

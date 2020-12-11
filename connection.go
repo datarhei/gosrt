@@ -21,9 +21,7 @@ type Conn interface {
 	Close()
 
 	Read(p []byte) (n int, err error)
-	ReadPacket() (*Packet, error)
 	Write(p []byte) (n int, err error)
-	WritePacket(p *Packet) error
 }
 
 type srtConn struct {
@@ -55,21 +53,21 @@ type srtConn struct {
 	drift         uint32
 
 	// Queue for packets that are coming from the network
-	networkQueue     chan *Packet
+	networkQueue     chan *packet
 	stopNetworkQueue chan struct{}
 
 	// Queue for packets that are written with WritePacket() and will be send to the network
-	writeQueue     chan *Packet
+	writeQueue     chan *packet
 	stopWriteQueue chan struct{}
 	writeBuffer    bytes.Buffer
 
 	// Queue for packets that will be read locally with ReadPacket()
-	readQueue  chan *Packet
+	readQueue  chan *packet
 	readBuffer bytes.Buffer
 
 	stopTicker chan struct{}
 
-	send       func(p *Packet)
+	send       func(p *packet)
 	onShutdown func(socketId uint32)
 
 	// Congestion control
@@ -95,7 +93,7 @@ func (c *srtConn) StreamId() string {
 
 func (c *srtConn) listenAndServe() {
 	if c.send == nil {
-		c.send = func(p *Packet) {}
+		c.send = func(p *packet) {}
 	}
 
 	if c.onShutdown == nil {
@@ -110,13 +108,13 @@ func (c *srtConn) listenAndServe() {
 
 	c.nakInterval = float64((20 * time.Millisecond).Microseconds())
 
-	c.networkQueue = make(chan *Packet, 1024)
+	c.networkQueue = make(chan *packet, 1024)
 	c.stopNetworkQueue = make(chan struct{})
 
-	c.writeQueue = make(chan *Packet, 1024)
+	c.writeQueue = make(chan *packet, 1024)
 	c.stopWriteQueue = make(chan struct{})
 
-	c.readQueue = make(chan *Packet, 1024)
+	c.readQueue = make(chan *packet, 1024)
 
 	c.stopTicker = make(chan struct{})
 
@@ -160,7 +158,7 @@ func (c *srtConn) ticker() {
 	}
 }
 
-func (c *srtConn) ReadPacket() (*Packet, error) {
+func (c *srtConn) ReadPacket() (*packet, error) {
 	if c.isShutdown == true {
 		return nil, EOF
 	}
@@ -194,7 +192,7 @@ func (c *srtConn) Read(b []byte) (int, error) {
 	return c.readBuffer.Read(b)
 }
 
-func (c *srtConn) WritePacket(p *Packet) error {
+func (c *srtConn) WritePacket(p *packet) error {
 	if c.isShutdown == true {
 		return EOF
 	}
@@ -204,7 +202,7 @@ func (c *srtConn) WritePacket(p *Packet) error {
 	p.destinationSocketId = c.peerSocketId
 
 	// Give the packet a deliver timestamp
-	p.PktTsbpdTime = uint32(time.Now().Sub(c.start).Microseconds())
+	p.pktTsbpdTime = uint32(time.Now().Sub(c.start).Microseconds())
 
 	select {
 	case c.writeQueue <- p:
@@ -230,7 +228,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 			n = 7
 		}
 
-		p := &Packet{
+		p := &packet{
 			isControlPacket:         false,
 			packetSequenceNumber:    0,
 			packetPositionFlag:      singlePacket,
@@ -263,7 +261,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 }
 
 // This is where packets from the network come in
-func (c *srtConn) push(p *Packet) {
+func (c *srtConn) push(p *packet) {
 	if c.isShutdown == true {
 		return
 	}
@@ -310,7 +308,7 @@ func (c *srtConn) writeQueueReader() {
 	}
 }
 
-func (c *srtConn) deliver(p *Packet) {
+func (c *srtConn) deliver(p *packet) {
 	if c.isShutdown == true {
 		return
 	}
@@ -323,7 +321,7 @@ func (c *srtConn) deliver(p *Packet) {
 	}
 }
 
-func (c *srtConn) handlePacket(p *Packet) {
+func (c *srtConn) handlePacket(p *packet) {
 	if p == nil {
 		return
 	}
@@ -343,12 +341,12 @@ func (c *srtConn) handlePacket(p *Packet) {
 			c.handleACKACK(p)
 		}
 	} else {
-		p.PktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
+		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
 		c.recv.push(p)
 	}
 }
 
-func (c *srtConn) handleKeepAlive(p *Packet) {
+func (c *srtConn) handleKeepAlive(p *packet) {
 	log("handle keepalive\n")
 
 	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
@@ -357,14 +355,14 @@ func (c *srtConn) handleKeepAlive(p *Packet) {
 	c.send(p)
 }
 
-func (c *srtConn) handleShutdown(p *Packet) {
+func (c *srtConn) handleShutdown(p *packet) {
 	log("handle shutdown\n")
 
 	c.close()
 }
 
-func (c *srtConn) handleACK(p *Packet) {
-	cif := &CIFACK{}
+func (c *srtConn) handleACK(p *packet) {
+	cif := &cifACK{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
 		return
@@ -379,8 +377,8 @@ func (c *srtConn) handleACK(p *Packet) {
 	}
 }
 
-func (c *srtConn) handleNAK(p *Packet) {
-	cif := &CIFNAK{}
+func (c *srtConn) handleNAK(p *packet) {
+	cif := &cifNAK{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
 		return
@@ -391,7 +389,7 @@ func (c *srtConn) handleNAK(p *Packet) {
 	c.snd.nak(cif.lostPacketSequenceNumber)
 }
 
-func (c *srtConn) handleACKACK(p *Packet) {
+func (c *srtConn) handleACKACK(p *packet) {
 	c.ackLock.RLock()
 	defer c.ackLock.RUnlock()
 
@@ -422,7 +420,7 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 }
 
 func (c *srtConn) sendShutdown() {
-	p := &Packet{}
+	p := &packet{}
 
 	p.addr = c.addr
 	p.isControlPacket = true
@@ -441,7 +439,7 @@ func (c *srtConn) sendShutdown() {
 }
 
 func (c *srtConn) sendNAK(from, to uint32) {
-	p := new(Packet)
+	p := &packet{}
 
 	p.addr = c.addr
 	p.isControlPacket = true
@@ -469,7 +467,7 @@ func (c *srtConn) sendNAK(from, to uint32) {
 }
 
 func (c *srtConn) sendACK(seq uint32, lite bool) {
-	p := new(Packet)
+	p := &packet{}
 
 	p.addr = c.addr
 	p.isControlPacket = true
@@ -506,7 +504,7 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 }
 
 func (c *srtConn) sendACKACK(ackSequence uint32) {
-	p := new(Packet)
+	p := &packet{}
 
 	p.addr = c.addr
 	p.isControlPacket = true

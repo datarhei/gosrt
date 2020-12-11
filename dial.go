@@ -30,8 +30,8 @@ type dialer struct {
 
 	start time.Time
 
-	rcvQueue chan *Packet
-	sndQueue chan *Packet
+	rcvQueue chan *packet
+	sndQueue chan *packet
 
 	isShutdown bool
 
@@ -67,8 +67,8 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	dl.conn = nil
 	dl.connChan = make(chan connResponse)
 
-	dl.rcvQueue = make(chan *Packet, 1024)
-	dl.sndQueue = make(chan *Packet, 1024)
+	dl.rcvQueue = make(chan *packet, 1024)
+	dl.sndQueue = make(chan *packet, 1024)
 
 	dl.stopReader = make(chan struct{}, 1)
 	dl.stopWriter = make(chan struct{}, 1)
@@ -107,7 +107,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 				return
 			}
 
-			p := NewPacket(addr, buffer[:n])
+			p := newPacket(addr, buffer[:n])
 			if p == nil {
 				continue
 			}
@@ -195,7 +195,7 @@ func (dl *dialer) reader() {
 	}
 }
 
-func (dl *dialer) send(p *Packet) {
+func (dl *dialer) send(p *packet) {
 	// non-blocking
 	select {
 	case dl.sndQueue <- p:
@@ -231,11 +231,11 @@ func (dl *dialer) writer() {
 	}
 }
 
-func (dl *dialer) handleHandshake(p *Packet) {
-	cif := &CIFHandshake{}
+func (dl *dialer) handleHandshake(p *packet) {
+	cif := &cifHandshake{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
-		logIn("cif error: %s\n", err)
+		log("cif error: %s\n", err)
 		return
 	}
 
@@ -412,7 +412,7 @@ func (dl *dialer) handleHandshake(p *Packet) {
 }
 
 func (dl *dialer) sendInduction() {
-	p := &Packet{
+	p := &packet{
 		addr:            dl.addr,
 		isControlPacket: true,
 
@@ -424,7 +424,7 @@ func (dl *dialer) sendInduction() {
 		destinationSocketId: 0,
 	}
 
-	cif := &CIFHandshake{
+	cif := &cifHandshake{
 		isRequest:                   true,
 		version:                     4,
 		encryptionField:             0,
@@ -447,7 +447,7 @@ func (dl *dialer) sendInduction() {
 }
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
-	p := &Packet{
+	p := &packet{
 		addr:            dl.addr,
 		isControlPacket: true,
 
@@ -522,7 +522,7 @@ func (dl *dialer) Read(p []byte) (n int, err error) {
 	return dl.conn.Read(p)
 }
 
-func (dl *dialer) ReadPacket() (*Packet, error) {
+func (dl *dialer) ReadPacket() (*packet, error) {
 	if err := dl.checkConnection(); err != nil {
 		return nil, err
 	}
@@ -538,7 +538,7 @@ func (dl *dialer) Write(p []byte) (n int, err error) {
 	return dl.conn.Write(p)
 }
 
-func (dl *dialer) WritePacket(p *Packet) error {
+func (dl *dialer) WritePacket(p *packet) error {
 	if err := dl.checkConnection(); err != nil {
 		return err
 	}

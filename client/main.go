@@ -34,9 +34,12 @@ func main() {
 
 	go func() {
 		wr := srt.NewNonblockingWriter(os.Stdout)
+		defer wr.Close()
+
+		buffer := make([]byte, 2048)
 
 		for {
-			n, err := conn.ReadPacket()
+			n, err := conn.Read(buffer)
 			if err != nil {
 				doneChan <- err
 				return
@@ -44,10 +47,11 @@ func main() {
 
 			//fmt.Fprintf(os.Stderr, "read: got %d bytes\n", n)
 
-			wr.Write(n.Data())
+			if _, err := wr.Write(buffer[:n]); err != nil {
+				doneChan <- err
+				return
+			}
 		}
-
-		wr.Close()
 
 		doneChan <- nil
 	}()

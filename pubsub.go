@@ -2,19 +2,20 @@ package srt
 
 import (
 	"sync"
+	"fmt"
 )
 
 type PubSub struct {
-	incoming  chan *Packet
+	incoming  chan *packet
 	abort     chan struct{}
 	lock      sync.Mutex
-	listeners map[uint32]chan *Packet
+	listeners map[uint32]chan *packet
 }
 
 func NewPubSub() *PubSub {
 	pb := &PubSub{
-		incoming:  make(chan *Packet, 1024),
-		listeners: make(map[uint32]chan *Packet),
+		incoming:  make(chan *packet, 1024),
+		listeners: make(map[uint32]chan *packet),
 		abort:     make(chan struct{}),
 	}
 
@@ -49,11 +50,15 @@ func (pb *PubSub) broadcast() {
 }
 
 func (pb *PubSub) Publish(c Conn) error {
-	var p *Packet
+	var p *packet
 	var err error
+	conn, ok := c.(*srtConn)
+	if !ok {
+		return fmt.Errorf("The provided connection is not a SRT connection")
+	}
 
 	for {
-		p, err = c.ReadPacket()
+		p, err = conn.ReadPacket()
 		if err != nil {
 			break
 		}
@@ -71,8 +76,12 @@ func (pb *PubSub) Publish(c Conn) error {
 }
 
 func (pb *PubSub) Subscribe(c Conn) error {
-	l := make(chan *Packet, 1024)
+	l := make(chan *packet, 1024)
 	socketId := c.SocketId()
+	conn, ok := c.(*srtConn)
+	if !ok {
+		return fmt.Errorf("The provided connection is not a SRT connection")
+	}
 
 	pb.lock.Lock()
 	pb.listeners[socketId] = l
@@ -89,7 +98,7 @@ func (pb *PubSub) Subscribe(c Conn) error {
 		case <-pb.abort:
 			return EOF
 		case p := <-l:
-			if err := c.WritePacket(p); err != nil {
+			if err := conn.WritePacket(p); err != nil {
 				return err
 			}
 		}
