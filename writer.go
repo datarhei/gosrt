@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+type NonblockingWriter interface {
+	Write(p []byte) (int, error)
+	Close() error
+}
+
 type nonblockingWriter struct {
 	dst  io.Writer
 	buf  *bytes.Buffer
@@ -18,7 +23,7 @@ type nonblockingWriter struct {
 	done bool
 }
 
-func NewNonblockingWriter(wr io.Writer) *nonblockingWriter {
+func NewNonblockingWriter(wr io.Writer) NonblockingWriter {
 	u := &nonblockingWriter{
 		dst:  wr,
 		buf:  new(bytes.Buffer),

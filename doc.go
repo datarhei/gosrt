@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 /*
-Package net provides an interface for network I/O using the
+Package srt provides an interface for network I/O using the
 SRT protocol (https://github.com/Haivision/srt).
 
 The package gives access to the basic interface provided
@@ -12,8 +12,8 @@ Conn and Listener interfaces.
 
 The Dial function connects to a server:
 
-	conn, err := srt.Dial("udp", "golang.org:6000", srt.Config{
-		StreamId: "..."
+	conn, err := srt.Dial("udp", "golang.org:6000", srt.DialConfig{
+		StreamId: "...",
 	})
 	if err != nil {
 		// handle error
@@ -43,6 +43,11 @@ The Listen function creates servers:
 		conn, mode, err := ln.Accept(handleConnect)
 		if err != nil {
 			// handle error
+		}
+
+		if mode == srt.REJECT {
+			// rejected connection, ignore
+			continue
 		}
 
 		if mode == srt.PUBLISH {

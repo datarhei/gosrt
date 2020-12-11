@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-type SYNCookie struct {
+type synCookie struct {
 	secret1 string
 	secret2 string
 	daddr   string
 }
 
-func NewSYNCookie(daddr string) SYNCookie {
-	s := SYNCookie{
+func newSYNCookie(daddr string) synCookie {
+	s := synCookie{
 		daddr: daddr,
 	}
 
@@ -41,11 +41,11 @@ func NewSYNCookie(daddr string) SYNCookie {
 	return s
 }
 
-func (s *SYNCookie) Get(saddr string) uint32 {
+func (s *synCookie) Get(saddr string) uint32 {
 	return s.calculate(s.counter(), saddr)
 }
 
-func (s *SYNCookie) Verify(cookie uint32, saddr string) bool {
+func (s *synCookie) Verify(cookie uint32, saddr string) bool {
 	counter := s.counter()
 
 	if s.calculate(counter, saddr) == cookie {
@@ -59,7 +59,7 @@ func (s *SYNCookie) Verify(cookie uint32, saddr string) bool {
 	return false
 }
 
-func (s *SYNCookie) calculate(counter int64, saddr string) uint32 {
+func (s *synCookie) calculate(counter int64, saddr string) uint32 {
 	data := s.secret1 + s.daddr + saddr + s.secret2 + strconv.FormatInt(counter, 10)
 
 	md5sum := md5.Sum([]byte(data))
@@ -67,6 +67,6 @@ func (s *SYNCookie) calculate(counter int64, saddr string) uint32 {
 	return binary.BigEndian.Uint32(md5sum[0:])
 }
 
-func (s *SYNCookie) counter() int64 {
+func (s *synCookie) counter() int64 {
 	return time.Now().Unix() >> 6
 }

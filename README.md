@@ -46,6 +46,13 @@ clang -Wall -O2 -o client client.c -lsrt -L/usr/local/Cellar/openssl@1.1/1.1.1h/
 
 You may need to adjust the path to the OpenSSL libs as the version might change meanwhile.
 
+Alternatively you can use the pure golang client:
+
+```
+cd client
+og build
+```
+
 ## Connect the pieces
 
 Start ffmpeg pumping a mpegts stream to an UDP address:
@@ -87,6 +94,13 @@ Now start the client to get the stream from the server and pipe it into ffplay:
 ```
 cd contrib
 ./client 127.0.0.1 6001 /live/stream | ffplay -f mpegts -i -
+```
+
+or with the golang client:
+
+```
+cd client
+./client -addr 127.0.0.1:6001 -streamid /live/stream | ffplay -f mpegts -i -
 ```
 
 You will first see some error messages from ffplay because the stream will most likely not start at a key frame. But then the window

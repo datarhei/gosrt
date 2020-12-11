@@ -44,7 +44,7 @@ type listener struct {
 	rcvQueue chan *packet
 	sndQueue chan *packet
 
-	syncookie SYNCookie
+	syncookie synCookie
 
 	isShutdown bool
 
@@ -72,7 +72,7 @@ func Listen(protocol, address string) (Listener, error) {
 	ln.rcvQueue = make(chan *packet, 1024)
 	ln.sndQueue = make(chan *packet, 1024)
 
-	ln.syncookie = NewSYNCookie(ln.addr.String())
+	ln.syncookie = newSYNCookie(ln.addr.String())
 
 	ln.stopReader = sync.NewStopper()
 	ln.stopWriter = sync.NewStopper()
