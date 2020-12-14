@@ -50,7 +50,7 @@ Alternatively you can use the pure golang client:
 
 ```
 cd client
-og build
+go build
 ```
 
 ## Connect the pieces
@@ -88,6 +88,13 @@ SRT target connected
 ```
 
 The console where the SRT server is running should also show something about handshake and so on.
+
+Alternatively your can use the golang client:
+
+```
+cd client
+./client -from udp://:6000 -to "srt://127.0.0.1:6001/?streamid=publish:/live/stream"
+```
 
 Now start the client to get the stream from the server and pipe it into ffplay:
 

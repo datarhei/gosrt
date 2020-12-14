@@ -27,13 +27,13 @@ func main() {
 
 	r, err := openReader(from)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reader: %v\n", err)
+		fmt.Fprintf(os.Stderr, "from: %v\n", err)
 		os.Exit(1)
 	}
 
 	w, err := openWriter(to)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "writer: %v\n", err)
+		fmt.Fprintf(os.Stderr, "to: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -72,7 +72,7 @@ func main() {
 	}()
 
 	if err := <-doneChan; err != nil {
-		fmt.Fprintf(os.Stderr, "read: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 	}
 
 	r.Close()
@@ -95,14 +95,40 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 
 	if u.Scheme == "srt" {
 		streamId := u.Query().Get("streamid")
-		conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-			StreamId: streamId,
-		})
-		if err != nil {
-			return nil, err
-		}
+		mode := u.Query().Get("mode")
 
-		return conn, nil
+		if mode == "listener" {
+			ln, err := srt.Listen("udp", u.Host)
+			if err != nil {
+				return nil, err
+			}
+
+			conn, _, err := ln.Accept(func(addr net.Addr, id string) srt.ConnType {
+				if id != streamId {
+					return srt.REJECT
+				}
+
+				return srt.PUBLISH
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			if conn == nil {
+				return nil, fmt.Errorf("Incoming connection rejected")
+			}
+
+			return conn, nil
+		} else {
+			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
+				StreamId: streamId,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			return conn, nil
+		}
 	}
 
 	if u.Scheme == "udp" {
@@ -138,14 +164,40 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 
 	if u.Scheme == "srt" {
 		streamId := u.Query().Get("streamid")
-		conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-			StreamId: streamId,
-		})
-		if err != nil {
-			return nil, err
-		}
+		mode := u.Query().Get("mode")
 
-		return conn, nil
+		if mode == "listener" {
+			ln, err := srt.Listen("udp", u.Host)
+			if err != nil {
+				return nil, err
+			}
+
+			conn, _, err := ln.Accept(func(addr net.Addr, id string) srt.ConnType {
+				if id != streamId {
+					return srt.REJECT
+				}
+
+				return srt.SUBSCRIBE
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			if conn == nil {
+				return nil, fmt.Errorf("Incoming connection rejected")
+			}
+
+			return conn, nil
+		} else {
+			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
+				StreamId: streamId,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			return conn, nil
+		}
 	}
 
 	if u.Scheme == "udp" {
