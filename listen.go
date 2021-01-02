@@ -363,12 +363,14 @@ type connRequest struct {
 func (ln *listener) handleHandshake(p *packet) {
 	cif := &cifHandshake{}
 
-	if err := cif.Unmarshal(p.data); err != nil {
+	err := cif.Unmarshal(p.data)
+
+	log("incoming: %s\n", cif.String())
+
+	if err != nil {
 		log("cif error: %s\n", err)
 		return
 	}
-
-	log("incoming: %s\n", cif.String())
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 

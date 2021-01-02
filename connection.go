@@ -360,6 +360,9 @@ func (c *srtConn) handlePacket(p *packet) {
 			c.handleACK(p)
 		} else if p.controlType == CTRLTYPE_ACKACK {
 			c.handleACKACK(p)
+		} else if p.controlType == CTRLTYPE_USER && (p.subType == EXTTYPE_KMREQ || p.subType == EXTTYPE_KMRSP) {
+			// 3.2.2.  Key Material
+			c.handleKM(p)
 		}
 	} else {
 		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
@@ -420,6 +423,10 @@ func (c *srtConn) handleACKACK(p *packet) {
 	}
 
 	c.recalculateRTT(time.Now().Sub(c.ackLast))
+}
+
+func (c *srtConn) handleKM(p *packet) {
+	return
 }
 
 func (c *srtConn) recalculateRTT(rtt time.Duration) {

@@ -55,6 +55,11 @@ func main() {
 
 	flag.Parse()
 
+	if len(s.addr) == 0 {
+		fmt.Fprintf(os.Stderr, "Provide a listen address with -addr\n")
+		os.Exit(1)
+	}
+
 	s.server = &srt.Server{
 		Addr:            s.addr,
 		HandleConnect:   s.handleConnect,

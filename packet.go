@@ -265,6 +265,8 @@ type cifHandshake struct {
 	recvTSBPDDelay uint16
 	sendTSBPDDelay uint16
 
+	srtKM *cifKM
+
 	streamId string
 }
 
@@ -301,6 +303,28 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.srtFlags.PACKET_FILTER)
 		fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x\n", c.recvTSBPDDelay)
 		fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x\n", c.sendTSBPDDelay)
+	}
+
+	if c.hasKM == true {
+		fmt.Fprintf(&b, "   SRT_CMD_KM(REQ/RSP)\n")
+		fmt.Fprintf(&b, "      s: %d\n", c.srtKM.s)
+		fmt.Fprintf(&b, "      version: %d\n", c.srtKM.version)
+		fmt.Fprintf(&b, "      packetType: %d\n", c.srtKM.packetType)
+		fmt.Fprintf(&b, "      sign: %#08x\n", c.srtKM.sign)
+		fmt.Fprintf(&b, "      resv1: %d\n", c.srtKM.resv1)
+		fmt.Fprintf(&b, "      keyBasedEncryption: %d\n", c.srtKM.keyBasedEncryption)
+		fmt.Fprintf(&b, "      keyEncryptionKeyIndex: %d\n", c.srtKM.keyEncryptionKeyIndex)
+		fmt.Fprintf(&b, "      cipher: %d\n", c.srtKM.cipher)
+		fmt.Fprintf(&b, "      authentication: %d\n", c.srtKM.authentication)
+		fmt.Fprintf(&b, "      streamEncapsulation: %d\n", c.srtKM.streamEncapsulation)
+		fmt.Fprintf(&b, "      resv2: %d\n", c.srtKM.resv2)
+		fmt.Fprintf(&b, "      resv3: %d\n", c.srtKM.resv3)
+		fmt.Fprintf(&b, "      sLen: %d (%d)\n", c.srtKM.sLen, c.srtKM.sLen/4)
+		fmt.Fprintf(&b, "      kLen: %d (%d)\n", c.srtKM.kLen, c.srtKM.kLen/4)
+		fmt.Fprintf(&b, "      salt: %#08x\n", c.srtKM.salt)
+		fmt.Fprintf(&b, "      wrapICV: %#08x\n", c.srtKM.wrapICV)
+		fmt.Fprintf(&b, "      xSEK: %#08x\n", c.srtKM.xSEK)
+		fmt.Fprintf(&b, "      oSEK: %#08x\n", c.srtKM.oSEK)
 	}
 
 	if c.hasSID == true {
@@ -352,21 +376,33 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
+	switch c.encryptionField {
+	case 0:
+	case 2:
+	case 3:
+	case 4:
+	default:
+		return fmt.Errorf("invalid encryption field value (%d)", c.encryptionField)
+	}
+
 	pivot := data[48:]
 
 	for {
 		extensionType := binary.BigEndian.Uint16(pivot[0:])
-		extensionLength := int(binary.BigEndian.Uint16(pivot[2:]))
+		extensionLength := int(binary.BigEndian.Uint16(pivot[2:])) * 4
+
+		pivot = pivot[4:]
 
 		if extensionType == EXTTYPE_HSREQ || extensionType == EXTTYPE_HSRSP {
-			if extensionLength != 3 || len(pivot[4:]) < extensionLength*4 {
+			// 3.2.1.1.  Handshake Extension Message
+			if extensionLength != 12 || len(pivot) < extensionLength {
 				return fmt.Errorf("invalid extension length")
 			}
 
 			c.hasHS = true
 
-			c.srtVersion = binary.BigEndian.Uint32(pivot[4:])
-			srtFlags := binary.BigEndian.Uint32(pivot[8:])
+			c.srtVersion = binary.BigEndian.Uint32(pivot[0:])
+			srtFlags := binary.BigEndian.Uint32(pivot[4:])
 
 			c.srtFlags.TSBPDSND = (srtFlags&SRTFLAG_TSBPDSND != 0)
 			c.srtFlags.TSBPDRCV = (srtFlags&SRTFLAG_TSBPDRCV != 0)
@@ -377,10 +413,37 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 			c.srtFlags.STREAM = (srtFlags&SRTFLAG_STREAM != 0)
 			c.srtFlags.PACKET_FILTER = (srtFlags&SRTFLAG_PACKET_FILTER != 0)
 
-			c.recvTSBPDDelay = binary.BigEndian.Uint16(pivot[12:])
-			c.sendTSBPDDelay = binary.BigEndian.Uint16(pivot[14:])
+			c.recvTSBPDDelay = binary.BigEndian.Uint16(pivot[8:])
+			c.sendTSBPDDelay = binary.BigEndian.Uint16(pivot[10:])
+		} else if extensionType == EXTTYPE_KMREQ || extensionType == EXTTYPE_KMRSP {
+			// 3.2.1.2.  Key Material Extension Message
+			if len(pivot) < extensionLength {
+				return fmt.Errorf("invalid extension length")
+			}
+
+			c.hasKM = true
+
+			c.srtKM = &cifKM{}
+
+			if err := c.srtKM.Unmarshal(pivot); err != nil {
+				return err
+			}
+
+			if c.encryptionField == 0 {
+				// using default cipher family and key size (AES-128)
+				c.encryptionField = 2
+			}
+
+			if c.encryptionField == 2 && c.srtKM.kLen != 16 {
+				return fmt.Errorf("invalid key length for AES-128 (%d bit)", c.srtKM.kLen*8)
+			} else if c.encryptionField == 3 && c.srtKM.kLen != 24 {
+				return fmt.Errorf("invalid key length for AES-192 (%d bit)", c.srtKM.kLen*8)
+			} else if c.encryptionField == 4 && c.srtKM.kLen != 32 {
+				return fmt.Errorf("invalid key length for AES-256 (%d bit)", c.srtKM.kLen*8)
+			}
 		} else if extensionType == EXTTYPE_SID {
-			if extensionLength > 128 || len(pivot[4:]) < extensionLength*4 {
+			// 3.2.1.3.  Stream ID Extension Message
+			if extensionLength > 512 || len(pivot) < extensionLength {
 				return fmt.Errorf("invalid extension length")
 			}
 
@@ -388,11 +451,11 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 
 			var b strings.Builder
 
-			for i := 0; i < extensionLength*4; i += 4 {
-				b.WriteByte(pivot[4+i+3])
-				b.WriteByte(pivot[4+i+2])
-				b.WriteByte(pivot[4+i+1])
-				b.WriteByte(pivot[4+i+0])
+			for i := 0; i < extensionLength; i += 4 {
+				b.WriteByte(pivot[i+3])
+				b.WriteByte(pivot[i+2])
+				b.WriteByte(pivot[i+1])
+				b.WriteByte(pivot[i+0])
 			}
 
 			c.streamId = strings.TrimRight(b.String(), "\x00")
@@ -400,8 +463,8 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 			return fmt.Errorf("unimplemented extension (%d)\n", extensionType)
 		}
 
-		if len(pivot) > extensionLength*4+4 {
-			pivot = pivot[extensionLength*4+4:]
+		if len(pivot) > extensionLength {
+			pivot = pivot[extensionLength:]
 		} else {
 			break
 		}
@@ -411,7 +474,7 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 }
 
 func (c *cifHandshake) Marshal(w io.Writer) {
-	var buffer [48]byte
+	var buffer [128]byte
 
 	if len(c.streamId) == 0 {
 		c.hasSID = false
@@ -423,6 +486,10 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 
 	if c.hasHS == true {
 		c.extensionField = c.extensionField | 1
+	}
+
+	if c.hasKM == true {
+		c.extensionField = c.extensionField | 2
 	}
 
 	if c.hasSID == true {
@@ -493,7 +560,24 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		binary.BigEndian.PutUint16(buffer[12:], c.recvTSBPDDelay)
 		binary.BigEndian.PutUint16(buffer[14:], c.sendTSBPDDelay)
 
-		w.Write(buffer[0:16])
+		w.Write(buffer[:16])
+	}
+
+	if c.hasKM == true {
+		var data bytes.Buffer
+
+		c.srtKM.Marshal(&data)
+
+		if c.isRequest == true {
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMREQ)
+		} else {
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMRSP)
+		}
+
+		binary.BigEndian.PutUint16(buffer[2:], uint16(data.Len()/4))
+
+		w.Write(buffer[:4])
+		w.Write(data.Bytes())
 	}
 
 	if c.hasSID == true {
@@ -509,7 +593,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_SID)
 		binary.BigEndian.PutUint16(buffer[2:], uint16(streamId.Len()/4))
 
-		w.Write(buffer[0:4])
+		w.Write(buffer[:4])
 
 		b := streamId.Bytes()
 
@@ -519,11 +603,201 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 			buffer[2] = b[i+1]
 			buffer[3] = b[i+0]
 
-			w.Write(buffer[0:4])
+			w.Write(buffer[:4])
 		}
 	}
 
 	return
+}
+
+type cifKM struct {
+	s                     uint8
+	version               uint8
+	packetType            uint8
+	sign                  uint16
+	resv1                 uint8
+	keyBasedEncryption    uint8
+	keyEncryptionKeyIndex uint32
+	cipher                uint8
+	authentication        uint8
+	streamEncapsulation   uint8
+	resv2                 uint8
+	resv3                 uint16
+	sLen                  uint16
+	kLen                  uint16
+	salt                  [16]byte
+	wrapICV               [8]byte
+	xSEK                  []byte
+	oSEK                  []byte
+}
+
+func (c cifKM) String() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "KM\n")
+
+	fmt.Fprintf(&b, "   s: %d\n", c.s)
+	fmt.Fprintf(&b, "   version: %d\n", c.version)
+	fmt.Fprintf(&b, "   packetType: %d\n", c.packetType)
+	fmt.Fprintf(&b, "   sign: %#08x\n", c.sign)
+	fmt.Fprintf(&b, "   resv1: %d\n", c.resv1)
+	fmt.Fprintf(&b, "   keyBasedEncryption: %d\n", c.keyBasedEncryption)
+	fmt.Fprintf(&b, "   keyEncryptionKeyIndex: %d\n", c.keyEncryptionKeyIndex)
+	fmt.Fprintf(&b, "   cipher: %d\n", c.cipher)
+	fmt.Fprintf(&b, "   authentication: %d\n", c.authentication)
+	fmt.Fprintf(&b, "   streamEncapsulation: %d\n", c.streamEncapsulation)
+	fmt.Fprintf(&b, "   resv2: %d\n", c.resv2)
+	fmt.Fprintf(&b, "   resv3: %d\n", c.resv3)
+	fmt.Fprintf(&b, "   sLen: %d (%d)\n", c.sLen, c.sLen/4)
+	fmt.Fprintf(&b, "   kLen: %d (%d)\n", c.kLen, c.kLen/4)
+	fmt.Fprintf(&b, "   salt: %#08x\n", c.salt)
+	fmt.Fprintf(&b, "   wrapICV: %#08x\n", c.wrapICV)
+	fmt.Fprintf(&b, "   xSEK: %#08x\n", c.xSEK)
+	fmt.Fprintf(&b, "   oSEK: %#08x\n", c.oSEK)
+
+	return b.String()
+}
+
+func (c *cifKM) Unmarshal(data []byte) error {
+	if len(data) < 16 {
+		return fmt.Errorf("data too short to unmarshal")
+	}
+
+	c.s = uint8(data[0] & 0b1000_0000 >> 7)
+	if c.s != 0 {
+		return fmt.Errorf("invalid value for S")
+	}
+
+	c.version = uint8(data[0] & 0b0111_0000 >> 4)
+	if c.version != 1 {
+		return fmt.Errorf("invalid version")
+	}
+
+	c.packetType = uint8(data[0] & 0b0000_1111)
+	if c.packetType != 2 {
+		return fmt.Errorf("invalid packet type (%d)", c.packetType)
+	}
+
+	c.sign = binary.BigEndian.Uint16(data[1:])
+	if c.sign != 0x2029 {
+		return fmt.Errorf("invalid signature (%#08x)", c.sign)
+	}
+
+	c.resv1 = uint8(data[3] & 0b1111_1100 >> 2)
+	c.keyBasedEncryption = uint8(data[3] & 0b0000_0011)
+	if c.keyBasedEncryption == 0 {
+		return fmt.Errorf("invalid extension format (KK must not be 0)")
+	}
+
+	c.keyEncryptionKeyIndex = binary.BigEndian.Uint32(data[4:])
+	if c.keyEncryptionKeyIndex != 0 {
+		return fmt.Errorf("invalid key encryption key index (%d)", c.keyEncryptionKeyIndex)
+	}
+
+	c.cipher = uint8(data[8])
+	c.authentication = uint8(data[9])
+	c.streamEncapsulation = uint8(data[10])
+	if c.streamEncapsulation != 2 {
+		return fmt.Errorf("invalid stream encapsulation (%d)", c.streamEncapsulation)
+	}
+
+	c.resv2 = uint8(data[11])
+	c.resv3 = binary.BigEndian.Uint16(data[12:])
+	c.sLen = uint16(data[14]) * 4
+	c.kLen = uint16(data[15]) * 4
+
+	switch c.kLen {
+	case 16:
+	case 24:
+	case 32:
+	default:
+		return fmt.Errorf("invalid key length")
+	}
+
+	offset := 16
+
+	if c.sLen != 0 {
+		if c.sLen != 16 {
+			return fmt.Errorf("invalid salt length")
+		}
+
+		if len(data[offset:]) < 16 {
+			return fmt.Errorf("data too short to unmarshal")
+		}
+
+		copy(c.salt[0:], data[offset:])
+
+		offset += 16
+	}
+
+	n := 1
+	if c.keyBasedEncryption == 3 {
+		n = 2
+	}
+
+	if len(data[offset:]) < n*int(c.kLen)+8 {
+		return fmt.Errorf("data too short to unmarshal")
+	}
+
+	copy(c.wrapICV[0:], data[offset:])
+
+	c.xSEK = make([]byte, c.kLen)
+	copy(c.xSEK, data[offset+8:])
+
+	if n == 3 {
+		c.oSEK = make([]byte, c.kLen)
+		copy(c.oSEK, data[offset+8+int(c.kLen):])
+	}
+
+	return nil
+}
+
+func (c *cifKM) Marshal(w io.Writer) {
+	var buffer [128]byte
+
+	b := byte(0)
+
+	b |= (c.s << 7) & 0b1000_0000
+	b |= (c.version << 4) & 0b0111_0000
+	b |= c.packetType & 0b0000_1111
+
+	buffer[0] = b
+	binary.BigEndian.PutUint16(buffer[1:], c.sign)
+
+	b = 0
+	b |= (c.resv1 << 2) & 0b1111_1100
+	b |= c.keyBasedEncryption & 0b0000_0011
+
+	buffer[3] = b
+	binary.BigEndian.PutUint32(buffer[4:], c.keyEncryptionKeyIndex)
+
+	buffer[8] = byte(c.cipher)
+	buffer[9] = byte(c.authentication)
+	buffer[10] = byte(c.streamEncapsulation)
+	buffer[11] = byte(c.resv2)
+
+	binary.BigEndian.PutUint16(buffer[12:], c.resv3)
+
+	buffer[14] = byte(c.sLen / 4)
+	buffer[15] = byte(c.kLen / 4)
+
+	offset := 16
+
+	if c.sLen != 0 {
+		copy(buffer[offset:], c.salt[0:])
+		offset += len(c.salt)
+	}
+
+	copy(buffer[offset:], c.wrapICV[0:])
+	offset += len(c.wrapICV)
+
+	copy(buffer[offset:], c.xSEK)
+	offset += len(c.xSEK)
+
+	copy(buffer[offset:], c.oSEK)
+	offset += len(c.oSEK)
+
+	w.Write(buffer[:offset])
 }
 
 type cifACK struct {
