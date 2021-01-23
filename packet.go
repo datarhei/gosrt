@@ -322,9 +322,7 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "      sLen: %d (%d)\n", c.srtKM.sLen, c.srtKM.sLen/4)
 		fmt.Fprintf(&b, "      kLen: %d (%d)\n", c.srtKM.kLen, c.srtKM.kLen/4)
 		fmt.Fprintf(&b, "      salt: %#08x\n", c.srtKM.salt)
-		fmt.Fprintf(&b, "      wrapICV: %#08x\n", c.srtKM.wrapICV)
-		fmt.Fprintf(&b, "      xSEK: %#08x\n", c.srtKM.xSEK)
-		fmt.Fprintf(&b, "      oSEK: %#08x\n", c.srtKM.oSEK)
+		fmt.Fprintf(&b, "      wrap: %#08x\n", c.srtKM.wrap)
 	}
 
 	if c.hasSID == true {
@@ -510,7 +508,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[40:], c.peerIP2)                    // peerIP2
 	binary.BigEndian.PutUint32(buffer[44:], c.peerIP3)                    // peerIP3
 
-	w.Write(buffer[0:])
+	w.Write(buffer[:48])
 
 	if c.hasHS == true {
 		if c.isRequest == true {
@@ -616,7 +614,7 @@ type cifKM struct {
 	packetType            uint8
 	sign                  uint16
 	resv1                 uint8
-	keyBasedEncryption    uint8
+	keyBasedEncryption    packetEncryption
 	keyEncryptionKeyIndex uint32
 	cipher                uint8
 	authentication        uint8
@@ -625,10 +623,8 @@ type cifKM struct {
 	resv3                 uint16
 	sLen                  uint16
 	kLen                  uint16
-	salt                  [16]byte
-	wrapICV               [8]byte
-	xSEK                  []byte
-	oSEK                  []byte
+	salt                  []byte
+	wrap                  []byte
 }
 
 func (c cifKM) String() string {
@@ -641,7 +637,7 @@ func (c cifKM) String() string {
 	fmt.Fprintf(&b, "   packetType: %d\n", c.packetType)
 	fmt.Fprintf(&b, "   sign: %#08x\n", c.sign)
 	fmt.Fprintf(&b, "   resv1: %d\n", c.resv1)
-	fmt.Fprintf(&b, "   keyBasedEncryption: %d\n", c.keyBasedEncryption)
+	fmt.Fprintf(&b, "   keyBasedEncryption: %s\n", c.keyBasedEncryption)
 	fmt.Fprintf(&b, "   keyEncryptionKeyIndex: %d\n", c.keyEncryptionKeyIndex)
 	fmt.Fprintf(&b, "   cipher: %d\n", c.cipher)
 	fmt.Fprintf(&b, "   authentication: %d\n", c.authentication)
@@ -651,9 +647,7 @@ func (c cifKM) String() string {
 	fmt.Fprintf(&b, "   sLen: %d (%d)\n", c.sLen, c.sLen/4)
 	fmt.Fprintf(&b, "   kLen: %d (%d)\n", c.kLen, c.kLen/4)
 	fmt.Fprintf(&b, "   salt: %#08x\n", c.salt)
-	fmt.Fprintf(&b, "   wrapICV: %#08x\n", c.wrapICV)
-	fmt.Fprintf(&b, "   xSEK: %#08x\n", c.xSEK)
-	fmt.Fprintf(&b, "   oSEK: %#08x\n", c.oSEK)
+	fmt.Fprintf(&b, "   wrap: %#08x\n", c.wrap)
 
 	return b.String()
 }
@@ -684,8 +678,8 @@ func (c *cifKM) Unmarshal(data []byte) error {
 	}
 
 	c.resv1 = uint8(data[3] & 0b1111_1100 >> 2)
-	c.keyBasedEncryption = uint8(data[3] & 0b0000_0011)
-	if c.keyBasedEncryption == 0 {
+	c.keyBasedEncryption = packetEncryption(data[3] & 0b0000_0011)
+	if c.keyBasedEncryption.IsValid() == false || c.keyBasedEncryption == unencryptedPacket {
 		return fmt.Errorf("invalid extension format (KK must not be 0)")
 	}
 
@@ -725,13 +719,14 @@ func (c *cifKM) Unmarshal(data []byte) error {
 			return fmt.Errorf("data too short to unmarshal")
 		}
 
-		copy(c.salt[0:], data[offset:])
+		c.salt = make([]byte, 16)
+		copy(c.salt, data[offset:])
 
 		offset += 16
 	}
 
 	n := 1
-	if c.keyBasedEncryption == 3 {
+	if c.keyBasedEncryption == evenAndOddKey {
 		n = 2
 	}
 
@@ -739,15 +734,8 @@ func (c *cifKM) Unmarshal(data []byte) error {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
-	copy(c.wrapICV[0:], data[offset:])
-
-	c.xSEK = make([]byte, c.kLen)
-	copy(c.xSEK, data[offset+8:])
-
-	if n == 3 {
-		c.oSEK = make([]byte, c.kLen)
-		copy(c.oSEK, data[offset+8+int(c.kLen):])
-	}
+	c.wrap = make([]byte, n*int(c.kLen)+8)
+	copy(c.wrap, data[offset:])
 
 	return nil
 }
@@ -766,7 +754,7 @@ func (c *cifKM) Marshal(w io.Writer) {
 
 	b = 0
 	b |= (c.resv1 << 2) & 0b1111_1100
-	b |= c.keyBasedEncryption & 0b0000_0011
+	b |= uint8(c.keyBasedEncryption) & 0b0000_0011
 
 	buffer[3] = b
 	binary.BigEndian.PutUint32(buffer[4:], c.keyEncryptionKeyIndex)
@@ -788,14 +776,8 @@ func (c *cifKM) Marshal(w io.Writer) {
 		offset += len(c.salt)
 	}
 
-	copy(buffer[offset:], c.wrapICV[0:])
-	offset += len(c.wrapICV)
-
-	copy(buffer[offset:], c.xSEK)
-	offset += len(c.xSEK)
-
-	copy(buffer[offset:], c.oSEK)
-	offset += len(c.oSEK)
+	copy(buffer[offset:], c.wrap)
+	offset += len(c.wrap)
 
 	w.Write(buffer[:offset])
 }
@@ -992,12 +974,17 @@ func (p packetPosition) String() string {
 	return `¯\_(ツ)_/¯`
 }
 
+func (p packetPosition) IsValid() bool {
+	return p < 4
+}
+
 type packetEncryption uint
 
 const (
 	unencryptedPacket packetEncryption = 0
 	evenKeyEncrypted  packetEncryption = 1
 	oddKeyEncrypted   packetEncryption = 2
+	evenAndOddKey        packetEncryption = 3
 )
 
 func (p packetEncryption) String() string {
@@ -1008,7 +995,13 @@ func (p packetEncryption) String() string {
 		return "even key"
 	case 2:
 		return "odd key"
+	case 3:
+		return "even and odd key"
 	}
 
 	return `¯\_(ツ)_/¯`
+}
+
+func (p packetEncryption) IsValid() bool {
+	return p < 4
 }

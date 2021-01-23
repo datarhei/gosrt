@@ -4,16 +4,12 @@
 
 package srt
 
-import (
-	"net"
-)
-
 // server is an implementation of the Server interface
 type Server struct {
 	// The address the SRT server should listen on, e.g. ":6001"
 	Addr string
 
-	HandleConnect   func(addr net.Addr, streamId string) ConnType
+	HandleConnect   func(cr ConnRequest) ConnType
 	HandlePublish   func(conn Conn)
 	HandleSubscribe func(conn Conn)
 

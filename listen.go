@@ -26,7 +26,7 @@ const (
 var ErrServerClosed = errors.New("srt: Server closed")
 
 type Listener interface {
-	Accept(func(addr net.Addr, streamId string) ConnType) (Conn, ConnType, error)
+	Accept(func(req ConnRequest) ConnType) (Conn, ConnType, error)
 	Close()
 	Addr() net.Addr
 }
@@ -124,9 +124,52 @@ func Listen(protocol, address string) (Listener, error) {
 	return ln, nil
 }
 
-// if the backlog is full, just ignore any handshake attempts
+type ConnRequest interface {
+	RemoteAddr() net.Addr
+	StreamId() string
+	IsEncrypted() bool
+	SetPassphrase(p string) error
+}
 
-func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType) (Conn, ConnType, error) {
+type connRequest struct {
+	addr      net.Addr
+	start     time.Time
+	socketId  uint32
+	timestamp uint32
+
+	handshake *cifHandshake
+	crypto *crypto
+	passphrase string
+}
+
+func (req *connRequest) RemoteAddr() net.Addr {
+	addr, _ := net.ResolveUDPAddr("udp", req.addr.String())
+	return addr
+}
+
+func (req *connRequest) StreamId() string {
+	return req.handshake.streamId
+}
+
+func (req *connRequest) IsEncrypted() bool {
+	return req.crypto != nil
+}
+
+func (req *connRequest) SetPassphrase(passphrase string) error {
+	if req.crypto == nil {
+		return nil
+	}
+
+	if err := req.crypto.UnmarshalKM(req.handshake.srtKM, passphrase); err !=  nil {
+		return err
+	}
+
+	req.passphrase = passphrase
+
+	return nil
+}
+
+func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnType, error) {
 	if ln.isShutdown == true {
 		return nil, REJECT, ErrServerClosed
 	}
@@ -135,14 +178,20 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 	case err := <-ln.doneChan:
 		return nil, REJECT, err
 	case request := <-ln.backlog:
-		if accept == nil {
+		if acceptFn == nil {
 			ln.reject(request, REJ_PEER)
 			return nil, REJECT, nil
 		}
 
-		mode := accept(request.addr, request.handshake.streamId)
-		if mode == REJECT {
+		mode := acceptFn(&request)
+		if mode != PUBLISH && mode != SUBSCRIBE {
 			ln.reject(request, REJ_PEER)
+
+			return nil, REJECT, nil
+		}
+
+		if request.crypto != nil && len(request.passphrase) == 0 {
+			ln.reject(request, REJ_BADSECRET)
 
 			return nil, REJECT, nil
 		}
@@ -162,6 +211,9 @@ func (ln *listener) Accept(accept func(addr net.Addr, streamId string) ConnType)
 			tsbpdDelay:                  uint32(request.handshake.recvTSBPDDelay) * 1000,
 			drift:                       0,
 			initialPacketSequenceNumber: request.handshake.initialPacketSequenceNumber,
+			crypto:                      request.crypto,
+			passphrase:                  request.passphrase,
+			keyBaseEncryption:           evenKeyEncrypted,
 			send:                        ln.send,
 			onShutdown:                  ln.handleShutdown,
 		}
@@ -351,15 +403,6 @@ func (ln *listener) writer() {
 	}
 }
 
-type connRequest struct {
-	addr      net.Addr
-	start     time.Time
-	socketId  uint32
-	timestamp uint32
-
-	handshake *cifHandshake
-}
-
 func (ln *listener) handleHandshake(p *packet) {
 	cif := &cifHandshake{}
 
@@ -444,6 +487,19 @@ func (ln *listener) handleHandshake(p *packet) {
 			timestamp: p.timestamp,
 
 			handshake: cif,
+		}
+
+		if cif.srtKM != nil {
+			cr, err := newCrypto(int(cif.srtKM.kLen))
+			if err != nil {
+				cif.handshakeType = REJ_ROGUE
+				p.SetCIF(cif)
+				ln.send(p)
+
+				return
+			}
+
+			c.crypto = cr
 		}
 
 		// non-blocking

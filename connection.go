@@ -12,6 +12,8 @@ import (
 	"net"
 	gosync "sync"
 	"time"
+	"fmt"
+	//"os"
 
 	"github.com/datarhei/gosrt/sync"
 )
@@ -49,6 +51,10 @@ type srtConn struct {
 	peerSocketId uint32
 
 	streamId string
+
+	passphrase string
+	crypto *crypto
+	keyBaseEncryption packetEncryption
 
 	timeout *time.Timer
 
@@ -151,7 +157,7 @@ func (c *srtConn) listenAndServe() {
 	c.recv.sendNAK = c.sendNAK
 	c.recv.deliver = c.deliver
 
-	c.snd.deliver = c.send
+	c.snd.deliver = c.pop
 
 	go c.networkQueueReader()
 	go c.writeQueueReader()
@@ -281,7 +287,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// This is where packets from the network come in
+// This is where packets come in from the network
 func (c *srtConn) push(p *packet) {
 	if c.isShutdown == true {
 		return
@@ -293,6 +299,18 @@ func (c *srtConn) push(p *packet) {
 	default:
 		log("network queue is full")
 	}
+}
+
+// This is where packets go out to the network
+func (c *srtConn) pop(p *packet) {
+	if p.isControlPacket == false && c.crypto != nil {
+		p.keyBaseEncryptionFlag = c.keyBaseEncryption
+		//fmt.Printf("encrypting payload (%s): %#08x -> ", p.keyBaseEncryptionFlag, p.data[:32])
+		c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
+		//fmt.Printf("%#08x\n", p.data[:32])
+	}
+
+	c.send(p)
 }
 
 // reads from the network queue
@@ -362,10 +380,22 @@ func (c *srtConn) handlePacket(p *packet) {
 			c.handleACKACK(p)
 		} else if p.controlType == CTRLTYPE_USER && (p.subType == EXTTYPE_KMREQ || p.subType == EXTTYPE_KMRSP) {
 			// 3.2.2.  Key Material
+			fmt.Printf("handle KM\n")
 			c.handleKM(p)
 		}
 	} else {
 		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
+/*
+		fmt.Printf("packet:\n%s\n", p)
+		fmt.Printf("data: %#08x\n", p.data)
+		os.Exit(1)
+*/
+		if p.keyBaseEncryptionFlag != 0 && c.crypto != nil {
+			//fmt.Printf("decrypting payload (%s): %#08x -> ", p.keyBaseEncryptionFlag, p.data[:32])
+			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
+			//fmt.Printf("%#08x\n", p.data[:32])
+		}
+
 		c.recv.push(p)
 	}
 }
@@ -376,7 +406,7 @@ func (c *srtConn) handleKeepAlive(p *packet) {
 	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
 	p.destinationSocketId = c.peerSocketId
 
-	c.send(p)
+	c.pop(p)
 }
 
 func (c *srtConn) handleShutdown(p *packet) {
@@ -426,6 +456,22 @@ func (c *srtConn) handleACKACK(p *packet) {
 }
 
 func (c *srtConn) handleKM(p *packet) {
+	if c.crypto == nil {
+		return
+	}
+
+	cif := &cifKM{}
+
+	if err := cif.Unmarshal(p.data); err != nil {
+		return
+	}
+
+	if err := c.crypto.UnmarshalKM(cif, c.passphrase); err != nil {
+		return
+	}
+
+	c.pop(p)
+
 	return
 }
 
@@ -463,7 +509,7 @@ func (c *srtConn) sendShutdown() {
 
 	binary.BigEndian.PutUint32(p.data[0:], 0)
 
-	c.send(p)
+	c.pop(p)
 }
 
 func (c *srtConn) sendNAK(from, to uint32) {
@@ -491,7 +537,7 @@ func (c *srtConn) sendNAK(from, to uint32) {
 		binary.BigEndian.PutUint32(p.data[4:], to)
 	}
 
-	c.send(p)
+	c.pop(p)
 }
 
 func (c *srtConn) sendACK(seq uint32, lite bool) {
@@ -528,7 +574,7 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 	c.ackNumber++
 	c.ackLast = time.Now()
 
-	c.send(p)
+	c.pop(p)
 }
 
 func (c *srtConn) sendACKACK(ackSequence uint32) {
@@ -544,7 +590,7 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 		typeSpecific: ackSequence,
 	}
 
-	c.send(p)
+	c.pop(p)
 }
 
 func (c *srtConn) Close() error {

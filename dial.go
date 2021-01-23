@@ -21,6 +21,7 @@ var ErrClientClosed = errors.New("srt: Client closed")
 
 type DialConfig struct {
 	StreamId string
+	Passphrase string
 }
 
 // dial will implement the Conn interface
@@ -31,7 +32,12 @@ type dialer struct {
 	remoteAddr net.Addr
 
 	streamId string
+
 	socketId uint32
+	initialPacketSequenceNumber uint32
+
+	crypto *crypto
+	passphrase string
 
 	conn     *srtConn
 	connChan chan connResponse
@@ -57,6 +63,21 @@ type connResponse struct {
 func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	dl := &dialer{
 		streamId: config.StreamId,
+	}
+
+	l := len(dl.streamId)
+	if l <= 0 || l > 512 {
+		return nil, fmt.Errorf("invalid streamid. must be between 1 and 512 bytes long")
+	}
+
+	if len(config.Passphrase) != 0 {
+		dl.passphrase = config.Passphrase
+		cr, err := newCrypto(16)
+		if err != nil {
+			return nil, err
+		}
+
+		dl.crypto = cr
 	}
 
 	raddr, err := net.ResolveUDPAddr("udp", address)
@@ -90,6 +111,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	// create a new socket ID
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	dl.socketId = r.Uint32()
+	dl.initialPacketSequenceNumber = r.Uint32()
 
 	go func() {
 		buffer := make([]byte, 1500) // MTU size
@@ -284,7 +306,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 
 		cif.isRequest = true
 		cif.handshakeType = HSTYPE_CONCLUSION
-		cif.initialPacketSequenceNumber = 0
+		cif.initialPacketSequenceNumber = dl.initialPacketSequenceNumber
 		cif.maxTransmissionUnitSize = 1500 // MTU size
 		cif.maxFlowWindowSize = 8192
 		cif.srtSocketId = dl.socketId
@@ -304,6 +326,20 @@ func (dl *dialer) handleHandshake(p *packet) {
 
 		cif.hasSID = true
 		cif.streamId = dl.streamId
+
+		if dl.crypto != nil {
+			cif.hasKM = true
+			cif.srtKM = &cifKM{}
+
+			if err := dl.crypto.MarshalKM(cif.srtKM, dl.passphrase, evenKeyEncrypted); err != nil {
+				dl.connChan <- connResponse{
+					conn: nil,
+					err:  err,
+				}
+
+				return
+			}
+		}
 
 		p.SetCIF(cif)
 
@@ -360,6 +396,9 @@ func (dl *dialer) handleHandshake(p *packet) {
 			tsbpdDelay:                  uint32(cif.recvTSBPDDelay) * 1000,
 			drift:                       0,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
+			crypto:                      dl.crypto,
+			passphrase:                  dl.passphrase,
+			keyBaseEncryption:           evenKeyEncrypted,
 			send:                        dl.send,
 			onShutdown: func(socketId uint32) {
 				dl.Close()

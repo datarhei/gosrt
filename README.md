@@ -96,7 +96,7 @@ cd client
 ./client -from udp://:6000 -to "srt://127.0.0.1:6001/?streamid=publish:/live/stream"
 ```
 
-Now start the client to get the stream from the server and pipe it into ffplay:
+Now start the client (C, based on libsrt) to get the stream from the server and pipe it into ffplay:
 
 ```
 cd contrib
@@ -113,3 +113,24 @@ cd client
 You will first see some error messages from ffplay because the stream will most likely not start at a key frame. But then the window
 with the video stream should pop up.
 
+## Encryption
+
+The stream can be encrypted with a passphrase. First start the server with a passphrase (the passphrase has to be at least 10 characters long
+otherwise `srt-live-transmit` will not accept it):
+
+```
+./server -addr :6001 -passphrase foobarfoobar
+```
+
+Send an encrpyted stream to the server:
+
+```
+srt-live-transmit udp://:6000 'srt://127.0.0.1:6001?streamid=publish:/live/stream&passphrase=foobarfoobar' -v
+```
+
+Receive an encrypted stream from the server:
+
+```
+cd client
+./client -from "srt://127.0.0.1:6001/?streamid=/live/stream&passphrase=foobarfoobar" -to - | ffplay -f mpegts -i -
+``` 

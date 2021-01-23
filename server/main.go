@@ -23,6 +23,7 @@ type server struct {
 	addr  string
 	app   string
 	token string
+	passphrase string
 
 	server *srt.Server
 
@@ -50,8 +51,9 @@ func main() {
 	}
 
 	flag.StringVar(&s.addr, "addr", "", "Address to listen on")
-	flag.StringVar(&s.app, "app", "", "write cpu profile to `file`")
-	flag.StringVar(&s.token, "token", "", "write memory profile to `file`")
+	flag.StringVar(&s.app, "app", "", "path prefix for streamid")
+	flag.StringVar(&s.token, "token", "", "token query param for streamid")
+	flag.StringVar(&s.passphrase, "passphrase", "", "passphrase for de- and enrcypting the data")
 
 	flag.Parse()
 
@@ -90,8 +92,10 @@ func (s *server) log(who, action, path, message string, client net.Addr) {
 	fmt.Fprintf(os.Stderr, "%-10s %10s %s (%s) %s\n", who, action, path, client, message)
 }
 
-func (s *server) handleConnect(client net.Addr, streamId string) srt.ConnType {
+func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	var mode srt.ConnType = srt.SUBSCRIBE
+	client := req.RemoteAddr()
+	streamId := req.StreamId()
 	path := streamId
 
 	if strings.HasPrefix(streamId, "publish:") == true {
@@ -105,6 +109,8 @@ func (s *server) handleConnect(client net.Addr, streamId string) srt.ConnType {
 	if err != nil {
 		return srt.REJECT
 	}
+
+	req.SetPassphrase(s.passphrase)
 
 	// Check the token
 	token := u.Query().Get("token")

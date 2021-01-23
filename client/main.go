@@ -95,6 +95,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 
 	if u.Scheme == "srt" {
 		streamId := u.Query().Get("streamid")
+		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
@@ -103,10 +104,12 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 				return nil, err
 			}
 
-			conn, _, err := ln.Accept(func(addr net.Addr, id string) srt.ConnType {
-				if id != streamId {
+			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
+				if streamId != req.StreamId() {
 					return srt.REJECT
 				}
+
+				req.SetPassphrase(passphrase)
 
 				return srt.PUBLISH
 			})
@@ -122,6 +125,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 		} else {
 			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
 				StreamId: streamId,
+				Passphrase: passphrase,
 			})
 			if err != nil {
 				return nil, err
@@ -164,6 +168,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 
 	if u.Scheme == "srt" {
 		streamId := u.Query().Get("streamid")
+		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
@@ -172,10 +177,12 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 				return nil, err
 			}
 
-			conn, _, err := ln.Accept(func(addr net.Addr, id string) srt.ConnType {
-				if id != streamId {
+			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
+				if streamId != req.StreamId() {
 					return srt.REJECT
 				}
+
+				req.SetPassphrase(passphrase)
 
 				return srt.SUBSCRIBE
 			})
@@ -191,6 +198,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 		} else {
 			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
 				StreamId: streamId,
+				Passphrase: passphrase,
 			})
 			if err != nil {
 				return nil, err
