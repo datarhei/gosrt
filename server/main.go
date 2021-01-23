@@ -20,9 +20,9 @@ import (
 // server is an implementation of the Server interface
 type server struct {
 	// Configuration parameter taken from the Config
-	addr  string
-	app   string
-	token string
+	addr       string
+	app        string
+	token      string
 	passphrase string
 
 	server *srt.Server

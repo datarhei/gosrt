@@ -7,12 +7,12 @@ package srt
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"net"
 	gosync "sync"
 	"time"
-	"fmt"
 	//"os"
 
 	"github.com/datarhei/gosrt/sync"
@@ -52,8 +52,8 @@ type srtConn struct {
 
 	streamId string
 
-	passphrase string
-	crypto *crypto
+	passphrase        string
+	crypto            *crypto
 	keyBaseEncryption packetEncryption
 
 	timeout *time.Timer
@@ -385,11 +385,11 @@ func (c *srtConn) handlePacket(p *packet) {
 		}
 	} else {
 		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
-/*
-		fmt.Printf("packet:\n%s\n", p)
-		fmt.Printf("data: %#08x\n", p.data)
-		os.Exit(1)
-*/
+		/*
+			fmt.Printf("packet:\n%s\n", p)
+			fmt.Printf("data: %#08x\n", p.data)
+			os.Exit(1)
+		*/
 		if p.keyBaseEncryptionFlag != 0 && c.crypto != nil {
 			//fmt.Printf("decrypting payload (%s): %#08x -> ", p.keyBaseEncryptionFlag, p.data[:32])
 			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)

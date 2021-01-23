@@ -20,7 +20,7 @@ import (
 var ErrClientClosed = errors.New("srt: Client closed")
 
 type DialConfig struct {
-	StreamId string
+	StreamId   string
 	Passphrase string
 }
 
@@ -33,10 +33,10 @@ type dialer struct {
 
 	streamId string
 
-	socketId uint32
+	socketId                    uint32
 	initialPacketSequenceNumber uint32
 
-	crypto *crypto
+	crypto     *crypto
 	passphrase string
 
 	conn     *srtConn

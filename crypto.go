@@ -5,23 +5,23 @@
 package srt
 
 import (
-	"fmt"
-	"crypto/sha1"
-	"crypto/rand"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha1"
 	"encoding/binary"
+	"fmt"
 
-	"golang.org/x/crypto/pbkdf2"
 	"github.com/benburkert/openpgp/aes/keywrap"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 type crypto struct {
-	salt []byte
+	salt      []byte
 	keyLength int
 
 	evenSEK []byte
-	oddSEK []byte
+	oddSEK  []byte
 }
 
 func newCrypto(keyLength int) (*crypto, error) {
@@ -99,7 +99,7 @@ func (c *crypto) MarshalKM(km *cifKM, passphrase string, key packetEncryption) e
 	km.version = 1
 	km.packetType = 2
 	km.sign = 0x2029
-	km.keyBasedEncryption = key  // even or odd key
+	km.keyBasedEncryption = key // even or odd key
 	km.keyEncryptionKeyIndex = 0
 	km.cipher = 2
 	km.authentication = 0
@@ -147,18 +147,18 @@ func (c *crypto) MarshalKM(km *cifKM, passphrase string, key packetEncryption) e
 func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, packetSequenceNumber uint32) error {
 	// 6.1.2.  AES Counter
 	//    0   1   2   3   4   5  6   7   8   9   10  11  12  13  14  15
-    // +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
-    // |                   0s                  |      psn      |  0   0|
-    // +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
-    //                            XOR
-    // +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
-    // |                    MSB(112, Salt)                     |
-    // +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
-    //
-    // psn    (32 bit): packet sequence number
-    // ctr    (16 bit): block counter, all zeros
-    // nonce (112 bit): 14 most significant bytes of the salt
-    //
+	// +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+	// |                   0s                  |      psn      |  0   0|
+	// +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+	//                            XOR
+	// +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+	// |                    MSB(112, Salt)                     |
+	// +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+	//
+	// psn    (32 bit): packet sequence number
+	// ctr    (16 bit): block counter, all zeros
+	// nonce (112 bit): 14 most significant bytes of the salt
+	//
 	// CTR = (MSB(112, Salt) XOR psn) << 16
 
 	ctr := make([]byte, 16)
@@ -174,7 +174,7 @@ func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, pack
 		sek = c.evenSEK
 	} else if key == oddKeyEncrypted {
 		sek = c.oddSEK
-	}  else {
+	} else {
 		return fmt.Errorf("Invalid SEK selected. Must be either even or odd")
 	}
 

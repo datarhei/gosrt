@@ -984,7 +984,7 @@ const (
 	unencryptedPacket packetEncryption = 0
 	evenKeyEncrypted  packetEncryption = 1
 	oddKeyEncrypted   packetEncryption = 2
-	evenAndOddKey        packetEncryption = 3
+	evenAndOddKey     packetEncryption = 3
 )
 
 func (p packetEncryption) String() string {

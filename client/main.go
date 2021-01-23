@@ -124,7 +124,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 			return conn, nil
 		} else {
 			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-				StreamId: streamId,
+				StreamId:   streamId,
 				Passphrase: passphrase,
 			})
 			if err != nil {
@@ -197,7 +197,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 			return conn, nil
 		} else {
 			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-				StreamId: streamId,
+				StreamId:   streamId,
 				Passphrase: passphrase,
 			})
 			if err != nil {

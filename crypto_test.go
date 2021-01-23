@@ -5,9 +5,9 @@
 package srt
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
-	"bytes"
 )
 
 func TestUnwrap(t *testing.T) {

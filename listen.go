@@ -137,8 +137,8 @@ type connRequest struct {
 	socketId  uint32
 	timestamp uint32
 
-	handshake *cifHandshake
-	crypto *crypto
+	handshake  *cifHandshake
+	crypto     *crypto
 	passphrase string
 }
 
@@ -160,7 +160,7 @@ func (req *connRequest) SetPassphrase(passphrase string) error {
 		return nil
 	}
 
-	if err := req.crypto.UnmarshalKM(req.handshake.srtKM, passphrase); err !=  nil {
+	if err := req.crypto.UnmarshalKM(req.handshake.srtKM, passphrase); err != nil {
 		return err
 	}
 
