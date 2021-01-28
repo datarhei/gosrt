@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	gosync "sync"
+	"syscall"
 	"time"
 
 	"github.com/datarhei/gosrt/sync"
@@ -32,7 +33,7 @@ type Listener interface {
 }
 
 type listener struct {
-	pc   net.PacketConn
+	pc   *net.UDPConn
 	addr net.Addr
 
 	backlog chan connRequest
@@ -54,10 +55,36 @@ type listener struct {
 	doneChan chan error
 }
 
-func Listen(protocol, address string) (Listener, error) {
+func Listen(protocol, address string, config Config) (Listener, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
 	ln := &listener{}
 
-	pc, err := net.ListenPacket("udp", address)
+	raddr, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		return nil, err
+	}
+
+	pc, err := net.ListenUDP("udp", raddr)
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := pc.File()
+	if err != nil {
+		return nil, err
+	}
+
+	// Set TOS
+	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set TTL
+	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -180,20 +207,18 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 	case request := <-ln.backlog:
 		if acceptFn == nil {
 			ln.reject(request, REJ_PEER)
-			return nil, REJECT, nil
+			break
 		}
 
 		mode := acceptFn(&request)
 		if mode != PUBLISH && mode != SUBSCRIBE {
 			ln.reject(request, REJ_PEER)
-
-			return nil, REJECT, nil
+			break
 		}
 
 		if request.crypto != nil && len(request.passphrase) == 0 {
 			ln.reject(request, REJ_BADSECRET)
-
-			return nil, REJECT, nil
+			break
 		}
 
 		// create a new socket ID

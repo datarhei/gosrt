@@ -113,6 +113,4 @@ func (pb *pubSub) Subscribe(c Conn) error {
 			}
 		}
 	}
-
-	return nil
 }

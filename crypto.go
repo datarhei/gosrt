@@ -165,7 +165,7 @@ func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, pack
 
 	binary.BigEndian.PutUint32(ctr[10:], packetSequenceNumber)
 
-	for i, _ := range ctr[:14] {
+	for i := range ctr[:14] {
 		ctr[i] ^= c.salt[i]
 	}
 

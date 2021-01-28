@@ -29,7 +29,7 @@ func newLiveSend(initalSequenceNumber, dropInterval uint32) *liveSend {
 		packetList:         list.New(),
 		lossList:           list.New(),
 
-		dropInterval: dropInterval, // ticks
+		dropInterval: dropInterval, // microseconds
 
 		deliver: func(p *packet) {},
 	}
@@ -150,7 +150,6 @@ type liveRecv struct {
 	packetList            *list.List
 	lock                  sync.RWMutex
 
-	delay uint32 // config
 	start uint32
 	ticks uint32
 
@@ -173,8 +172,8 @@ func newLiveRecv(initialSequenceNumber, periodicACKInterval, periodicNAKInterval
 		lastACKSequenceNumber: 0,
 		packetList:            list.New(),
 
-		periodicACKInterval: periodicACKInterval, // ticks
-		periodicNAKInterval: periodicNAKInterval, // ticks
+		periodicACKInterval: periodicACKInterval, // microseconds
+		periodicNAKInterval: periodicNAKInterval, // microseconds
 	}
 
 	r.sendACK = func(seq uint32, light bool) {}

@@ -7,7 +7,6 @@ package srt
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -50,6 +49,8 @@ type srtConn struct {
 	socketId     uint32
 	peerSocketId uint32
 
+	config Config
+
 	streamId string
 
 	passphrase        string
@@ -90,6 +91,8 @@ type srtConn struct {
 
 	send       func(p *packet)
 	onShutdown func(socketId uint32)
+
+	tick time.Duration
 
 	// Congestion control
 	recv *liveRecv
@@ -150,7 +153,13 @@ func (c *srtConn) listenAndServe() {
 		c.shutdown(func() {})
 	})
 
-	c.recv = newLiveRecv(c.initialPacketSequenceNumber, 10*1000, 20*1000)
+	c.tick = 10 * time.Millisecond
+
+	// 4.8.1.  Packet Acknowledgement (ACKs, ACKACKs) -> periodicACK = 10 milliseconds
+	// 4.8.2.  Packet Retransmission (NAKs) -> periodicNAK at least 20 milliseconds
+	c.recv = newLiveRecv(c.initialPacketSequenceNumber, 10000, 20000)
+
+	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
 	c.snd = newLiveSend(c.initialPacketSequenceNumber, 1000000)
 
 	c.recv.sendACK = c.sendACK
@@ -165,7 +174,7 @@ func (c *srtConn) listenAndServe() {
 }
 
 func (c *srtConn) ticker() {
-	ticker := time.NewTicker(10 * time.Millisecond)
+	ticker := time.NewTicker(c.tick)
 	defer ticker.Stop()
 	defer func() {
 		log("conn %d: left ticker loop\n", c.socketId)
@@ -224,9 +233,10 @@ func (c *srtConn) WritePacket(p *packet) error {
 		return io.EOF
 	}
 
-	p.addr = c.remoteAddr
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
+	if p.isControlPacket == true {
+		// Ignore control packets
+		return nil
+	}
 
 	// Give the packet a deliver timestamp
 	p.pktTsbpdTime = uint32(time.Now().Sub(c.start).Microseconds())
@@ -303,13 +313,16 @@ func (c *srtConn) push(p *packet) {
 
 // This is where packets go out to the network
 func (c *srtConn) pop(p *packet) {
+	p.addr = c.remoteAddr
+	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
+	p.destinationSocketId = c.peerSocketId
+
 	if p.isControlPacket == false && c.crypto != nil {
 		p.keyBaseEncryptionFlag = c.keyBaseEncryption
-		//fmt.Printf("encrypting payload (%s): %#08x -> ", p.keyBaseEncryptionFlag, p.data[:32])
 		c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
-		//fmt.Printf("%#08x\n", p.data[:32])
 	}
 
+	// Send the packet on the wire
 	c.send(p)
 }
 
@@ -380,31 +393,23 @@ func (c *srtConn) handlePacket(p *packet) {
 			c.handleACKACK(p)
 		} else if p.controlType == CTRLTYPE_USER && (p.subType == EXTTYPE_KMREQ || p.subType == EXTTYPE_KMRSP) {
 			// 3.2.2.  Key Material
-			fmt.Printf("handle KM\n")
+			log("handle KM\n")
 			c.handleKM(p)
 		}
 	} else {
 		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
-		/*
-			fmt.Printf("packet:\n%s\n", p)
-			fmt.Printf("data: %#08x\n", p.data)
-			os.Exit(1)
-		*/
+
 		if p.keyBaseEncryptionFlag != 0 && c.crypto != nil {
-			//fmt.Printf("decrypting payload (%s): %#08x -> ", p.keyBaseEncryptionFlag, p.data[:32])
 			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
-			//fmt.Printf("%#08x\n", p.data[:32])
 		}
 
+		// Put the packet into receive congestion control
 		c.recv.push(p)
 	}
 }
 
 func (c *srtConn) handleKeepAlive(p *packet) {
 	log("handle keepalive\n")
-
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
-	p.destinationSocketId = c.peerSocketId
 
 	c.pop(p)
 }
@@ -440,6 +445,7 @@ func (c *srtConn) handleNAK(p *packet) {
 
 	//logIn("%s\n", cif.String())
 
+	// Inform congestion control about lost packets
 	c.snd.nak(cif.lostPacketSequenceNumber)
 }
 
@@ -466,7 +472,7 @@ func (c *srtConn) handleKM(p *packet) {
 		return
 	}
 
-	if err := c.crypto.UnmarshalKM(cif, c.passphrase); err != nil {
+	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
 		return
 	}
 
@@ -501,9 +507,6 @@ func (c *srtConn) sendShutdown() {
 		controlType:  CTRLTYPE_SHUTDOWN,
 		typeSpecific: 0,
 
-		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
-		destinationSocketId: c.peerSocketId,
-
 		data: make([]byte, 4),
 	}
 
@@ -518,9 +521,6 @@ func (c *srtConn) sendNAK(from, to uint32) {
 		isControlPacket: true,
 
 		controlType: CTRLTYPE_NAK,
-
-		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
-		destinationSocketId: c.peerSocketId,
 	}
 
 	// Appendix A
@@ -546,9 +546,6 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		isControlPacket: true,
 
 		controlType: CTRLTYPE_ACK,
-
-		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
-		destinationSocketId: c.peerSocketId,
 	}
 
 	if lite == true {

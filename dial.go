@@ -12,17 +12,13 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/datarhei/gosrt/sync"
 )
 
 var ErrClientClosed = errors.New("srt: Client closed")
-
-type DialConfig struct {
-	StreamId   string
-	Passphrase string
-}
 
 // dial will implement the Conn interface
 type dialer struct {
@@ -31,13 +27,12 @@ type dialer struct {
 	localAddr  net.Addr
 	remoteAddr net.Addr
 
-	streamId string
+	config Config
 
 	socketId                    uint32
 	initialPacketSequenceNumber uint32
 
-	crypto     *crypto
-	passphrase string
+	crypto *crypto
 
 	conn     *srtConn
 	connChan chan connResponse
@@ -60,19 +55,17 @@ type connResponse struct {
 	err  error
 }
 
-func Dial(protocol, address string, config DialConfig) (Conn, error) {
-	dl := &dialer{
-		streamId: config.StreamId,
+func Dial(protocol, address string, config Config) (Conn, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
 	}
 
-	l := len(dl.streamId)
-	if l <= 0 || l > 512 {
-		return nil, fmt.Errorf("invalid streamid. must be between 1 and 512 bytes long")
+	dl := &dialer{
+		config: config,
 	}
 
 	if len(config.Passphrase) != 0 {
-		dl.passphrase = config.Passphrase
-		cr, err := newCrypto(16)
+		cr, err := newCrypto(config.PBKeylen)
 		if err != nil {
 			return nil, err
 		}
@@ -86,6 +79,23 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	}
 
 	pc, err := net.DialUDP("udp", nil, raddr)
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := pc.File()
+	if err != nil {
+		return nil, err
+	}
+
+	// Set TOS
+	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set TTL
+	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +124,7 @@ func Dial(protocol, address string, config DialConfig) (Conn, error) {
 	dl.initialPacketSequenceNumber = r.Uint32()
 
 	go func() {
-		buffer := make([]byte, 1500) // MTU size
+		buffer := make([]byte, config.MSS) // MTU size
 		index := 0
 
 		for {
@@ -185,7 +195,6 @@ func (dl *dialer) checkConnection() error {
 		dl.Close()
 		return err
 	default:
-		return nil
 	}
 
 	return nil
@@ -315,7 +324,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 		cif.srtVersion = 0x00010402
 		cif.srtFlags.TSBPDSND = true
 		cif.srtFlags.TSBPDRCV = true
-		cif.srtFlags.CRYPT = true
+		cif.srtFlags.CRYPT = true // must always set to true
 		cif.srtFlags.TLPKTDROP = true
 		cif.srtFlags.PERIODICNAK = true
 		cif.srtFlags.REXMITFLG = true
@@ -325,13 +334,13 @@ func (dl *dialer) handleHandshake(p *packet) {
 		cif.sendTSBPDDelay = 0x0000
 
 		cif.hasSID = true
-		cif.streamId = dl.streamId
+		cif.streamId = dl.config.StreamId
 
 		if dl.crypto != nil {
 			cif.hasKM = true
 			cif.srtKM = &cifKM{}
 
-			if err := dl.crypto.MarshalKM(cif.srtKM, dl.passphrase, evenKeyEncrypted); err != nil {
+			if err := dl.crypto.MarshalKM(cif.srtKM, dl.config.Passphrase, evenKeyEncrypted); err != nil {
 				dl.connChan <- connResponse{
 					conn: nil,
 					err:  err,
@@ -391,13 +400,13 @@ func (dl *dialer) handleHandshake(p *packet) {
 			start:                       dl.start,
 			socketId:                    dl.socketId,
 			peerSocketId:                cif.srtSocketId,
-			streamId:                    dl.streamId,
+			streamId:                    dl.config.StreamId,
 			tsbpdTimeBase:               uint32(time.Now().Sub(dl.start).Microseconds()),
 			tsbpdDelay:                  uint32(cif.recvTSBPDDelay) * 1000,
 			drift:                       0,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
 			crypto:                      dl.crypto,
-			passphrase:                  dl.passphrase,
+			passphrase:                  dl.config.Passphrase,
 			keyBaseEncryption:           evenKeyEncrypted,
 			send:                        dl.send,
 			onShutdown: func(socketId uint32) {

@@ -9,6 +9,8 @@ type Server struct {
 	// The address the SRT server should listen on, e.g. ":6001"
 	Addr string
 
+	Config *Config
+
 	HandleConnect   func(cr ConnRequest) ConnType
 	HandlePublish   func(conn Conn)
 	HandleSubscribe func(conn Conn)
@@ -28,8 +30,12 @@ func (s *Server) ListenAndServe() error {
 		s.HandleSubscribe = s.defaultHandler
 	}
 
+	if s.Config == nil {
+		s.Config = &DefaultConfig
+	}
+
 	// Listen creates a server
-	ln, err := Listen("udp", s.Addr)
+	ln, err := Listen("udp", s.Addr, *s.Config)
 	if err != nil {
 		return err
 	}
@@ -55,8 +61,6 @@ func (s *Server) ListenAndServe() error {
 			go s.HandleSubscribe(conn)
 		}
 	}
-
-	return nil
 }
 
 func (s *Server) Shutdown() {

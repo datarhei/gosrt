@@ -59,8 +59,6 @@ func main() {
 				return
 			}
 		}
-
-		doneChan <- nil
 	}()
 
 	go func() {
@@ -98,8 +96,12 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
 
+		config := srt.DefaultConfig
+		config.StreamId = streamId
+		config.Passphrase = passphrase
+
 		if mode == "listener" {
-			ln, err := srt.Listen("udp", u.Host)
+			ln, err := srt.Listen("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -123,10 +125,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else {
-			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-				StreamId:   streamId,
-				Passphrase: passphrase,
-			})
+			conn, err := srt.Dial("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -171,8 +170,12 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
 
+		config := srt.DefaultConfig
+		config.StreamId = streamId
+		config.Passphrase = passphrase
+
 		if mode == "listener" {
-			ln, err := srt.Listen("udp", u.Host)
+			ln, err := srt.Listen("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -196,10 +199,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else {
-			conn, err := srt.Dial("udp", u.Host, srt.DialConfig{
-				StreamId:   streamId,
-				Passphrase: passphrase,
-			})
+			conn, err := srt.Dial("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
