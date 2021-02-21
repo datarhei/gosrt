@@ -15,6 +15,9 @@ import (
 	"strings"
 )
 
+const MAX_SEQUENCENUMBER uint32 = 0b01111111_11111111_11111111_11111111
+const MAX_TIMESTAMP uint32 = 0b11111111_11111111_11111111_11111111
+
 // Table 1: SRT Control Packet Types
 const (
 	CTRLTYPE_HANDSHAKE uint16 = 0x0000
@@ -90,7 +93,7 @@ type packet struct {
 	typeSpecific uint32
 
 	// data packet fields
-	packetSequenceNumber    uint32
+	packetSequenceNumber    circular
 	packetPositionFlag      packetPosition
 	orderFlag               bool
 	keyBaseEncryptionFlag   packetEncryption
@@ -128,7 +131,7 @@ func (p packet) String() string {
 		fmt.Fprintf(&b, "   typeSpecific=%#08x\n", p.typeSpecific)
 	} else {
 		fmt.Fprintf(&b, "data packet:\n")
-		fmt.Fprintf(&b, "   packetSequenceNumber=%#08x (%d)\n", p.packetSequenceNumber, p.packetSequenceNumber)
+		fmt.Fprintf(&b, "   packetSequenceNumber=%#08x (%d)\n", p.packetSequenceNumber.Val(), p.packetSequenceNumber.Val())
 		fmt.Fprintf(&b, "   packetPositionFlag=%s\n", p.packetPositionFlag)
 		fmt.Fprintf(&b, "   orderFlag=%v\n", p.orderFlag)
 		fmt.Fprintf(&b, "   keyBaseEncryptionFlag=%s\n", p.keyBaseEncryptionFlag)
@@ -162,7 +165,7 @@ func (p *packet) Unmarshal(data []byte) error {
 		p.subType = binary.BigEndian.Uint16(data[2:])
 		p.typeSpecific = binary.BigEndian.Uint32(data[4:])
 	} else {
-		p.packetSequenceNumber = binary.BigEndian.Uint32(data[0:])
+		p.packetSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:]), MAX_SEQUENCENUMBER)
 		p.packetPositionFlag = packetPosition((data[4] & 0b11000000) >> 6)
 		p.orderFlag = (data[4] & 0b00100000) != 0
 		p.keyBaseEncryptionFlag = packetEncryption((data[4] & 0b00011000) >> 3)
@@ -189,7 +192,7 @@ func (p *packet) Marshal(w io.Writer) {
 
 		buffer[0] |= 0x80
 	} else {
-		binary.BigEndian.PutUint32(buffer[0:], p.packetSequenceNumber) // sequence number
+		binary.BigEndian.PutUint32(buffer[0:], p.packetSequenceNumber.Val()) // sequence number
 
 		p.typeSpecific = 0
 
@@ -236,7 +239,7 @@ type cifHandshake struct {
 	version                     uint32
 	encryptionField             uint16
 	extensionField              uint16
-	initialPacketSequenceNumber uint32
+	initialPacketSequenceNumber circular
 	maxTransmissionUnitSize     uint32
 	maxFlowWindowSize           uint32
 	handshakeType               uint32
@@ -278,7 +281,7 @@ func (c cifHandshake) String() string {
 	fmt.Fprintf(&b, "   version: %#08x\n", c.version)
 	fmt.Fprintf(&b, "   encryptionField: %#04x\n", c.encryptionField)
 	fmt.Fprintf(&b, "   extensionField: %#04x\n", c.extensionField)
-	fmt.Fprintf(&b, "   initialPacketSequenceNumber: %#08x\n", c.initialPacketSequenceNumber)
+	fmt.Fprintf(&b, "   initialPacketSequenceNumber: %#08x\n", c.initialPacketSequenceNumber.Val())
 	fmt.Fprintf(&b, "   maxTransmissionUnitSize: %#08x\n", c.maxTransmissionUnitSize)
 	fmt.Fprintf(&b, "   maxFlowWindowSize: %#08x\n", c.maxFlowWindowSize)
 	fmt.Fprintf(&b, "   handshakeType: %#08x\n", c.handshakeType)
@@ -341,7 +344,7 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 	c.version = binary.BigEndian.Uint32(data[0:])
 	c.encryptionField = binary.BigEndian.Uint16(data[4:])
 	c.extensionField = binary.BigEndian.Uint16(data[6:])
-	c.initialPacketSequenceNumber = binary.BigEndian.Uint32(data[8:])
+	c.initialPacketSequenceNumber = newCircular(binary.BigEndian.Uint32(data[8:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 	c.maxTransmissionUnitSize = binary.BigEndian.Uint32(data[12:])
 	c.maxFlowWindowSize = binary.BigEndian.Uint32(data[16:])
 	c.handshakeType = binary.BigEndian.Uint32(data[20:])
@@ -494,19 +497,19 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		c.extensionField = c.extensionField | 4
 	}
 
-	binary.BigEndian.PutUint32(buffer[0:], c.version)                     // version
-	binary.BigEndian.PutUint16(buffer[4:], c.encryptionField)             // encryption field
-	binary.BigEndian.PutUint16(buffer[6:], c.extensionField)              // extension field
-	binary.BigEndian.PutUint32(buffer[8:], c.initialPacketSequenceNumber) // initialPacketSequenceNumber
-	binary.BigEndian.PutUint32(buffer[12:], c.maxTransmissionUnitSize)    // maxTransmissionUnitSize
-	binary.BigEndian.PutUint32(buffer[16:], c.maxFlowWindowSize)          // maxFlowWindowSize
-	binary.BigEndian.PutUint32(buffer[20:], c.handshakeType)              // handshakeType
-	binary.BigEndian.PutUint32(buffer[24:], c.srtSocketId)                // Socket ID of the Listener, should be some own generated ID
-	binary.BigEndian.PutUint32(buffer[28:], c.synCookie)                  // SYN cookie
-	binary.BigEndian.PutUint32(buffer[32:], c.peerIP0)                    // peerIP0
-	binary.BigEndian.PutUint32(buffer[36:], c.peerIP1)                    // peerIP1
-	binary.BigEndian.PutUint32(buffer[40:], c.peerIP2)                    // peerIP2
-	binary.BigEndian.PutUint32(buffer[44:], c.peerIP3)                    // peerIP3
+	binary.BigEndian.PutUint32(buffer[0:], c.version)                           // version
+	binary.BigEndian.PutUint16(buffer[4:], c.encryptionField)                   // encryption field
+	binary.BigEndian.PutUint16(buffer[6:], c.extensionField)                    // extension field
+	binary.BigEndian.PutUint32(buffer[8:], c.initialPacketSequenceNumber.Val()) // initialPacketSequenceNumber
+	binary.BigEndian.PutUint32(buffer[12:], c.maxTransmissionUnitSize)          // maxTransmissionUnitSize
+	binary.BigEndian.PutUint32(buffer[16:], c.maxFlowWindowSize)                // maxFlowWindowSize
+	binary.BigEndian.PutUint32(buffer[20:], c.handshakeType)                    // handshakeType
+	binary.BigEndian.PutUint32(buffer[24:], c.srtSocketId)                      // Socket ID of the Listener, should be some own generated ID
+	binary.BigEndian.PutUint32(buffer[28:], c.synCookie)                        // SYN cookie
+	binary.BigEndian.PutUint32(buffer[32:], c.peerIP0)                          // peerIP0
+	binary.BigEndian.PutUint32(buffer[36:], c.peerIP1)                          // peerIP1
+	binary.BigEndian.PutUint32(buffer[40:], c.peerIP2)                          // peerIP2
+	binary.BigEndian.PutUint32(buffer[44:], c.peerIP3)                          // peerIP3
 
 	w.Write(buffer[:48])
 
@@ -785,7 +788,7 @@ func (c *cifKM) Marshal(w io.Writer) {
 type cifACK struct {
 	isLite                      bool
 	isSmall                     bool
-	lastACKPacketSequenceNumber uint32
+	lastACKPacketSequenceNumber circular
 	rtt                         uint32
 	rttVar                      uint32
 	availableBufferSize         uint32
@@ -806,7 +809,7 @@ func (c cifACK) String() string {
 
 	fmt.Fprintf(&b, "ACK (type: %s)\n", ackType)
 
-	fmt.Fprintf(&b, "   lastACKPacketSequenceNumber: %#08x (%d)\n", c.lastACKPacketSequenceNumber, c.lastACKPacketSequenceNumber)
+	fmt.Fprintf(&b, "   lastACKPacketSequenceNumber: %#08x (%d)\n", c.lastACKPacketSequenceNumber.Val(), c.lastACKPacketSequenceNumber.Val())
 
 	if c.isLite == false {
 		fmt.Fprintf(&b, "   rtt: %#08x\n", c.rtt)
@@ -827,13 +830,13 @@ func (c *cifACK) Unmarshal(data []byte) error {
 	if len(data) == 4 {
 		c.isLite = true
 
-		c.lastACKPacketSequenceNumber = binary.BigEndian.Uint32(data[0:])
+		c.lastACKPacketSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 
 		return nil
 	} else if len(data) == 16 {
 		c.isSmall = true
 
-		c.lastACKPacketSequenceNumber = binary.BigEndian.Uint32(data[0:])
+		c.lastACKPacketSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 		c.rtt = binary.BigEndian.Uint32(data[4:])
 		c.rttVar = binary.BigEndian.Uint32(data[8:])
 		c.availableBufferSize = binary.BigEndian.Uint32(data[12:])
@@ -845,7 +848,7 @@ func (c *cifACK) Unmarshal(data []byte) error {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
-	c.lastACKPacketSequenceNumber = binary.BigEndian.Uint32(data[0:])
+	c.lastACKPacketSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 	c.rtt = binary.BigEndian.Uint32(data[4:])
 	c.rttVar = binary.BigEndian.Uint32(data[8:])
 	c.availableBufferSize = binary.BigEndian.Uint32(data[12:])
@@ -859,7 +862,7 @@ func (c *cifACK) Unmarshal(data []byte) error {
 func (c *cifACK) Marshal(w io.Writer) {
 	var buffer [28]byte
 
-	binary.BigEndian.PutUint32(buffer[0:], c.lastACKPacketSequenceNumber)
+	binary.BigEndian.PutUint32(buffer[0:], c.lastACKPacketSequenceNumber.Val())
 	binary.BigEndian.PutUint32(buffer[4:], c.rtt)
 	binary.BigEndian.PutUint32(buffer[8:], c.rttVar)
 	binary.BigEndian.PutUint32(buffer[12:], c.availableBufferSize)
@@ -871,7 +874,7 @@ func (c *cifACK) Marshal(w io.Writer) {
 }
 
 type cifNAK struct {
-	lostPacketSequenceNumber []uint32
+	lostPacketSequenceNumber []circular
 }
 
 func (c cifNAK) String() string {
@@ -885,10 +888,10 @@ func (c cifNAK) String() string {
 	}
 
 	for i := 0; i < len(c.lostPacketSequenceNumber); i += 2 {
-		if c.lostPacketSequenceNumber[i] == c.lostPacketSequenceNumber[i+1] {
-			fmt.Fprintf(&b, "   single: %#08x\n", c.lostPacketSequenceNumber[i])
+		if c.lostPacketSequenceNumber[i].Equals(c.lostPacketSequenceNumber[i+1]) {
+			fmt.Fprintf(&b, "   single: %#08x\n", c.lostPacketSequenceNumber[i].Val())
 		} else {
-			fmt.Fprintf(&b, "      row: %#08x to %#08x\n", c.lostPacketSequenceNumber[i], c.lostPacketSequenceNumber[i+1])
+			fmt.Fprintf(&b, "      row: %#08x to %#08x\n", c.lostPacketSequenceNumber[i].Val(), c.lostPacketSequenceNumber[i+1].Val())
 		}
 	}
 
@@ -900,15 +903,17 @@ func (c *cifNAK) Unmarshal(data []byte) error {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
-	c.lostPacketSequenceNumber = []uint32{}
+	// Appendix A
 
-	var sequenceNumber uint32
+	c.lostPacketSequenceNumber = []circular{}
+
+	var sequenceNumber circular
 	isRange := false
 
 	for i := 0; i < len(data); i += 4 {
-		sequenceNumber = binary.BigEndian.Uint32(data[i:])
+		sequenceNumber = newCircular(binary.BigEndian.Uint32(data[i:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 
-		if sequenceNumber&0b10000000_00000000_00000000_00000000 == 0 {
+		if data[i]&0b10000000 == 0 {
 			c.lostPacketSequenceNumber = append(c.lostPacketSequenceNumber, sequenceNumber)
 
 			if isRange == false {
@@ -926,7 +931,7 @@ func (c *cifNAK) Unmarshal(data []byte) error {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
-	sort.Slice(c.lostPacketSequenceNumber, func(i, j int) bool { return c.lostPacketSequenceNumber[i] < c.lostPacketSequenceNumber[j] })
+	sort.Slice(c.lostPacketSequenceNumber, func(i, j int) bool { return c.lostPacketSequenceNumber[i].Lt(c.lostPacketSequenceNumber[j]) })
 
 	return nil
 }
@@ -936,15 +941,17 @@ func (c *cifNAK) Marshal(w io.Writer) {
 		return
 	}
 
+	// Appendix A
+
 	var buffer [8]byte
 
 	for i := 0; i < len(c.lostPacketSequenceNumber); i += 2 {
 		if c.lostPacketSequenceNumber[i] == c.lostPacketSequenceNumber[i+1] {
-			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i])
+			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i].Val())
 			w.Write(buffer[0:4])
 		} else {
-			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i]|0b10000000_00000000_00000000_00000000)
-			binary.BigEndian.PutUint32(buffer[4:], c.lostPacketSequenceNumber[i+1])
+			binary.BigEndian.PutUint32(buffer[0:], c.lostPacketSequenceNumber[i].Val()|0b10000000_00000000_00000000_00000000)
+			binary.BigEndian.PutUint32(buffer[4:], c.lostPacketSequenceNumber[i+1].Val())
 			w.Write(buffer[0:])
 		}
 	}

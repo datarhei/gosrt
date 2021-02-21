@@ -68,7 +68,7 @@ type srtConn struct {
 	ackNumber uint32
 	ackLast   time.Time
 
-	initialPacketSequenceNumber uint32
+	initialPacketSequenceNumber circular
 
 	tsbpdTimeBase uint32
 	tsbpdDelay    uint32
@@ -267,7 +267,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 
 		p := &packet{
 			isControlPacket:         false,
-			packetSequenceNumber:    0,
+			packetSequenceNumber:    newCircular(0, 0b01111111_11111111_11111111_11111111),
 			packetPositionFlag:      singlePacket,
 			orderFlag:               false,
 			keyBaseEncryptionFlag:   unencryptedPacket,
@@ -319,7 +319,7 @@ func (c *srtConn) pop(p *packet) {
 
 	if p.isControlPacket == false && c.crypto != nil {
 		p.keyBaseEncryptionFlag = c.keyBaseEncryption
-		c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
+		c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber.Val())
 	}
 
 	// Send the packet on the wire
@@ -400,7 +400,7 @@ func (c *srtConn) handlePacket(p *packet) {
 		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
 
 		if p.keyBaseEncryptionFlag != 0 && c.crypto != nil {
-			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber)
+			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber.Val())
 		}
 
 		// Put the packet into receive congestion control

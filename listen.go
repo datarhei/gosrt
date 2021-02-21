@@ -7,6 +7,7 @@ package srt
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	gosync "sync"
@@ -57,19 +58,19 @@ type listener struct {
 
 func Listen(protocol, address string, config Config) (Listener, error) {
 	if err := config.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listen: invalid config: %w", err)
 	}
 
 	ln := &listener{}
 
 	raddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listen: unable to resolve address: %w", err)
 	}
 
 	pc, err := net.ListenUDP("udp", raddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listen: failed listening: %w", err)
 	}
 
 	file, err := pc.File()
@@ -78,15 +79,19 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	}
 
 	// Set TOS
-	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
-	if err != nil {
-		return nil, err
+	if config.IPTOS > 0 {
+		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+		if err != nil {
+			return nil, fmt.Errorf("listen: failed setting socket option TOS: %w", err)
+		}
 	}
 
 	// Set TTL
-	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
-	if err != nil {
-		return nil, err
+	if config.IPTTL > 0 {
+		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
+		if err != nil {
+			return nil, fmt.Errorf("listen: failed setting socket option TTL: %w", err)
+		}
 	}
 
 	ln.pc = pc
@@ -453,7 +458,7 @@ func (ln *listener) handleHandshake(p *packet) {
 		cif.version = 5
 		cif.encryptionField = 0
 		cif.extensionField = 0x4A17
-		cif.initialPacketSequenceNumber = 0
+		cif.initialPacketSequenceNumber = newCircular(0, MAX_SEQUENCENUMBER)
 		cif.maxTransmissionUnitSize = 0
 		cif.maxFlowWindowSize = 0
 		cif.srtSocketId = 0

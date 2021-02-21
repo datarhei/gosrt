@@ -165,7 +165,7 @@ var DefaultConfig Config = Config{
 	GroupStabilityTimeout: 0,
 	InputBW:               0,
 	IPTOS:                 0,
-	IPTTL:                 64,
+	IPTTL:                 0,
 	IPv6Only:              false,
 	KMPreAnnounce:         4000,
 	KMRefreshRate:         1 << 24,
@@ -207,11 +207,11 @@ func (c Config) Validate() error {
 		return fmt.Errorf("GroupConnect is not supported.")
 	}
 
-	if c.IPTOS < 0 || c.IPTOS > 255 {
+	if c.IPTOS > 0 && c.IPTOS > 255 {
 		return fmt.Errorf("IPTOS must be lower than 255.")
 	}
 
-	if c.IPTTL < 1 || c.IPTTL > 255 {
+	if c.IPTTL > 0 && c.IPTTL > 255 {
 		return fmt.Errorf("IPTTL must be between 1 and 255.")
 	}
 

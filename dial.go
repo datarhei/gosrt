@@ -30,7 +30,7 @@ type dialer struct {
 	config Config
 
 	socketId                    uint32
-	initialPacketSequenceNumber uint32
+	initialPacketSequenceNumber circular
 
 	crypto *crypto
 
@@ -57,7 +57,7 @@ type connResponse struct {
 
 func Dial(protocol, address string, config Config) (Conn, error) {
 	if err := config.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial: invalid config: %w", err)
 	}
 
 	dl := &dialer{
@@ -67,7 +67,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	if len(config.Passphrase) != 0 {
 		cr, err := newCrypto(config.PBKeylen)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("dial: failed creating crypto context: %w", err)
 		}
 
 		dl.crypto = cr
@@ -75,12 +75,12 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 
 	raddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial: unable to resolve address: %w", err)
 	}
 
 	pc, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial: failed dialing: %w", err)
 	}
 
 	file, err := pc.File()
@@ -89,15 +89,19 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	}
 
 	// Set TOS
-	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
-	if err != nil {
-		return nil, err
+	if config.IPTOS > 0 {
+		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+		if err != nil {
+			return nil, fmt.Errorf("dial: failed setting socket option TOS: %w", err)
+		}
 	}
 
 	// Set TTL
-	err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
-	if err != nil {
-		return nil, err
+	if config.IPTTL > 0 {
+		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
+		if err != nil {
+			return nil, fmt.Errorf("dial: failed setting socket option TTL: %w", err)
+		}
 	}
 
 	dl.pc = pc
@@ -121,7 +125,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	// create a new socket ID
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	dl.socketId = r.Uint32()
-	dl.initialPacketSequenceNumber = r.Uint32()
+	dl.initialPacketSequenceNumber = newCircular(r.Uint32()&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 
 	go func() {
 		buffer := make([]byte, config.MSS) // MTU size
@@ -488,7 +492,7 @@ func (dl *dialer) sendInduction() {
 		version:                     4,
 		encryptionField:             0,
 		extensionField:              2,
-		initialPacketSequenceNumber: 0,
+		initialPacketSequenceNumber: newCircular(0, MAX_SEQUENCENUMBER),
 		maxTransmissionUnitSize:     1500, // MTU size
 		maxFlowWindowSize:           8192,
 		handshakeType:               HSTYPE_INDUCTION,
