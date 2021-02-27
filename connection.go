@@ -70,9 +70,11 @@ type srtConn struct {
 
 	initialPacketSequenceNumber circular
 
-	tsbpdTimeBase uint32
-	tsbpdDelay    uint32
-	drift         uint32
+	tsbpdTimeBase       uint64
+	tsbpdWrapPeriod     bool
+	tsbpdTimeBaseOffset uint64
+	tsbpdDelay          uint64
+	drift               uint64
 
 	// Queue for packets that are coming from the network
 	networkQueue     chan *packet
@@ -186,7 +188,7 @@ func (c *srtConn) ticker() {
 		case <-c.stopTicker.Check():
 			return
 		case t := <-ticker.C:
-			tickTime := uint32(t.Sub(c.start).Microseconds())
+			tickTime := uint64(t.Sub(c.start).Microseconds())
 
 			c.recv.tick(c.tsbpdTimeBase + tickTime)
 			c.snd.tick(tickTime)
@@ -239,7 +241,7 @@ func (c *srtConn) WritePacket(p *packet) error {
 	}
 
 	// Give the packet a deliver timestamp
-	p.pktTsbpdTime = uint32(time.Now().Sub(c.start).Microseconds())
+	p.pktTsbpdTime = c.getTimestamp()
 
 	select {
 	case c.writeQueue <- p:
@@ -311,10 +313,20 @@ func (c *srtConn) push(p *packet) {
 	}
 }
 
+func (c *srtConn) getTimestamp() uint64 {
+	return uint64(time.Now().Sub(c.start).Microseconds())
+}
+
+func (c *srtConn) getTimestampForPacket() uint32 {
+	return uint32(c.getTimestamp() & uint64(MAX_TIMESTAMP))
+}
+
 // This is where packets go out to the network
 func (c *srtConn) pop(p *packet) {
 	p.addr = c.remoteAddr
-	p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
+	// TODO: this is wrong. it will not use the pktTsbpdTime that has been set in WritePacket.
+	// This function is also called when the send congestion is actually delivering the packet.
+	//p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
 	p.destinationSocketId = c.peerSocketId
 
 	if p.isControlPacket == false && c.crypto != nil {
@@ -397,7 +409,28 @@ func (c *srtConn) handlePacket(p *packet) {
 			c.handleKM(p)
 		}
 	} else {
-		p.pktTsbpdTime = c.tsbpdTimeBase + p.timestamp + c.tsbpdDelay + c.drift
+		// 4.5.1.1.  TSBPD Time Base Calculation
+		if c.tsbpdWrapPeriod == false {
+			if p.timestamp > MAX_TIMESTAMP-(30*1000000) {
+				c.tsbpdWrapPeriod = true
+				log("TSBPD wrapping period started")
+			}
+		} else {
+			if p.timestamp >= (30*1000000) && p.timestamp <= (60*1000000) {
+				c.tsbpdWrapPeriod = false
+				c.tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
+				log("TSBPD wrapping period finished\n")
+			}
+		}
+
+		tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
+		if c.tsbpdWrapPeriod == true {
+			if p.timestamp < (30 * 1000000) {
+				tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
+			}
+		}
+
+		p.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(p.timestamp) + c.tsbpdDelay + c.drift
 
 		if p.keyBaseEncryptionFlag != 0 && c.crypto != nil {
 			c.crypto.EncryptOrDecryptPayload(p.data, p.keyBaseEncryptionFlag, p.packetSequenceNumber.Val())
@@ -466,6 +499,12 @@ func (c *srtConn) handleKM(p *packet) {
 		return
 	}
 
+	if p.subType == EXTTYPE_KMRSP {
+		// TODO: somehow note down that we received a response and know
+		// that the peer got the new key.
+		return
+	}
+
 	cif := &cifKM{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
@@ -475,6 +514,8 @@ func (c *srtConn) handleKM(p *packet) {
 	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
 		return
 	}
+
+	p.subType = EXTTYPE_KMRSP
 
 	c.pop(p)
 
@@ -504,8 +545,8 @@ func (c *srtConn) sendShutdown() {
 		addr:            c.remoteAddr,
 		isControlPacket: true,
 
-		controlType:  CTRLTYPE_SHUTDOWN,
-		typeSpecific: 0,
+		controlType: CTRLTYPE_SHUTDOWN,
+		timestamp:   c.getTimestampForPacket(),
 
 		data: make([]byte, 4),
 	}
@@ -521,6 +562,7 @@ func (c *srtConn) sendNAK(from, to uint32) {
 		isControlPacket: true,
 
 		controlType: CTRLTYPE_NAK,
+		timestamp:   c.getTimestampForPacket(),
 	}
 
 	// Appendix A
@@ -546,6 +588,7 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		isControlPacket: true,
 
 		controlType: CTRLTYPE_ACK,
+		timestamp:   c.getTimestampForPacket(),
 	}
 
 	if lite == true {
@@ -580,9 +623,7 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 		isControlPacket: true,
 
 		controlType: CTRLTYPE_ACKACK,
-
-		timestamp:           uint32(time.Now().Sub(c.start).Microseconds()),
-		destinationSocketId: c.peerSocketId,
+		timestamp:   c.getTimestampForPacket(),
 
 		typeSpecific: ackSequence,
 	}

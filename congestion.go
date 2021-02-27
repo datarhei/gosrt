@@ -18,12 +18,12 @@ type liveSend struct {
 	lossList   *list.List
 	lock       sync.RWMutex
 
-	dropInterval uint32
+	dropInterval uint64
 
 	deliver func(p *packet)
 }
 
-func newLiveSend(initalSequenceNumber circular, dropInterval uint32) *liveSend {
+func newLiveSend(initalSequenceNumber circular, dropInterval uint64) *liveSend {
 	s := &liveSend{
 		nextSequenceNumber: initalSequenceNumber,
 		packetList:         list.New(),
@@ -43,12 +43,14 @@ func (s *liveSend) push(p *packet) {
 
 	//log("got %d @ %d\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
+	p.timestamp = uint32(p.pktTsbpdTime & uint64(MAX_TIMESTAMP))
+
 	s.lock.Lock()
 	s.packetList.PushBack(p)
 	s.lock.Unlock()
 }
 
-func (s *liveSend) tick(now uint32) {
+func (s *liveSend) tick(now uint64) {
 	//log("tick @ %d\n", now)
 
 	// deliver packets whose PktTsbpdTime is ripe
@@ -155,18 +157,18 @@ type liveRecv struct {
 
 	nPackets uint
 
-	periodicACKInterval uint32 // config
-	periodicNAKInterval uint32 // config
+	periodicACKInterval uint64 // config
+	periodicNAKInterval uint64 // config
 
-	lastPeriodicACK uint32
-	lastPeriodicNAK uint32
+	lastPeriodicACK uint64
+	lastPeriodicNAK uint64
 
 	sendACK func(seq uint32, light bool)
 	sendNAK func(from, to uint32)
 	deliver func(p *packet)
 }
 
-func newLiveRecv(initialSequenceNumber circular, periodicACKInterval, periodicNAKInterval uint32) *liveRecv {
+func newLiveRecv(initialSequenceNumber circular, periodicACKInterval, periodicNAKInterval uint64) *liveRecv {
 	r := &liveRecv{
 		maxSeenSequenceNumber: initialSequenceNumber.Dec(),
 		lastACKSequenceNumber: newCircular(0, MAX_SEQUENCENUMBER),
@@ -232,7 +234,7 @@ func (r *liveRecv) push(pkt *packet) {
 	r.packetList.PushBack(pkt)
 }
 
-func (r *liveRecv) tick(now uint32) {
+func (r *liveRecv) tick(now uint64) {
 	// deliver packets whose PktTsbpdTime is ripe
 	r.lock.Lock()
 	removeList := []*list.Element{}
@@ -323,7 +325,7 @@ func (r *liveRecv) tick(now uint32) {
 	//logIn("@%d: %s", t, r.String(t))
 }
 
-func (r *liveRecv) String(t uint32) string {
+func (r *liveRecv) String(t uint64) string {
 	var b strings.Builder
 
 	b.WriteString(fmt.Sprintf("maxSeen=%d lastACK=%d\n", r.maxSeenSequenceNumber.Val(), r.lastACKSequenceNumber.Val()))

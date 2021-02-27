@@ -85,7 +85,7 @@ const (
 type packet struct {
 	addr            net.Addr
 	isControlPacket bool
-	pktTsbpdTime    uint32
+	pktTsbpdTime    uint64
 
 	// control packet fields
 	controlType  uint16

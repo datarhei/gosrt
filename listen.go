@@ -117,7 +117,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	go ln.writer()
 
 	go func() {
-		buffer := make([]byte, 1500) // MTU size
+		buffer := make([]byte, config.MSS) // MTU size
 		index := 0
 
 		for {
@@ -237,8 +237,8 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 			socketId:                    socketId,
 			peerSocketId:                request.handshake.srtSocketId,
 			streamId:                    request.handshake.streamId,
-			tsbpdTimeBase:               request.timestamp,
-			tsbpdDelay:                  uint32(request.handshake.recvTSBPDDelay) * 1000,
+			tsbpdTimeBase:               uint64(request.timestamp),
+			tsbpdDelay:                  uint64(request.handshake.recvTSBPDDelay) * 1000,
 			drift:                       0,
 			initialPacketSequenceNumber: request.handshake.initialPacketSequenceNumber,
 			crypto:                      request.crypto,
