@@ -450,7 +450,7 @@ func (c *srtConn) handleKeepAlive(p *packet) {
 func (c *srtConn) handleShutdown(p *packet) {
 	log("handle shutdown\n")
 
-	c.close()
+	go c.close()
 }
 
 func (c *srtConn) handleACK(p *packet) {

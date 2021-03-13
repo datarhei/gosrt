@@ -17,11 +17,13 @@ type Stopper interface {
 
 type stopper struct {
 	c chan int
+	d chan int
 }
 
 func NewStopper() Stopper {
 	s := &stopper{
 		c: make(chan int),
+		d: make(chan int),
 	}
 
 	return s
@@ -36,7 +38,7 @@ func (s *stopper) Stop() {
 
 	for {
 		select {
-		case n := <-s.c:
+		case n := <-s.d:
 			if n == stopperDone {
 				return
 			}
@@ -45,5 +47,5 @@ func (s *stopper) Stop() {
 }
 
 func (s *stopper) Done() {
-	s.c <- stopperDone
+	s.d <- stopperDone
 }
