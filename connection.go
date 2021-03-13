@@ -190,8 +190,8 @@ func (c *srtConn) ticker() {
 		case t := <-ticker.C:
 			tickTime := uint64(t.Sub(c.start).Microseconds())
 
-			c.recv.tick(c.tsbpdTimeBase + tickTime)
-			c.snd.tick(tickTime)
+			c.recv.Tick(c.tsbpdTimeBase + tickTime)
+			c.snd.Tick(tickTime)
 		}
 	}
 }
@@ -367,7 +367,7 @@ func (c *srtConn) writeQueueReader() {
 			return
 		case p := <-c.writeQueue:
 			// Put the packet into the send congestion control
-			c.snd.push(p)
+			c.snd.Push(p)
 		}
 	}
 }
@@ -437,7 +437,7 @@ func (c *srtConn) handlePacket(p *packet) {
 		}
 
 		// Put the packet into receive congestion control
-		c.recv.push(p)
+		c.recv.Push(p)
 	}
 }
 
@@ -462,7 +462,7 @@ func (c *srtConn) handleACK(p *packet) {
 
 	//logIn("%s\n", cif.String())
 
-	c.snd.ack(cif.lastACKPacketSequenceNumber)
+	c.snd.ACK(cif.lastACKPacketSequenceNumber)
 
 	if cif.isLite == false && cif.isSmall == false {
 		c.sendACKACK(p.typeSpecific)
@@ -479,7 +479,7 @@ func (c *srtConn) handleNAK(p *packet) {
 	//logIn("%s\n", cif.String())
 
 	// Inform congestion control about lost packets
-	c.snd.nak(cif.lostPacketSequenceNumber)
+	c.snd.NAK(cif.lostPacketSequenceNumber)
 }
 
 func (c *srtConn) handleACKACK(p *packet) {
@@ -532,10 +532,12 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 	// 4.8.2.  Packet Retransmission (NAKs)
 	nakInterval := (c.rtt + 4*c.rttVar) / 2
 	if nakInterval < 20000 {
-		c.nakInterval = 20000
+		c.nakInterval = 20000 // 20ms
 	} else {
 		c.nakInterval = nakInterval
 	}
+
+	c.recv.SetNAKInterval(uint64(c.nakInterval))
 
 	//logIn("# RTT=%.0f RTTVar=%.0f NAKInterval=%.0f\n", c.rtt, c.rttVar, c.nakInterval)
 }
