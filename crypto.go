@@ -57,6 +57,18 @@ func newCrypto(keyLength int) (*crypto, error) {
 	return c, nil
 }
 
+func (c *crypto) ChangeSEK(key packetEncryption) {
+	if key.IsValid() == false {
+		return
+	}
+
+	if key == evenKeyEncrypted {
+		c.prng(c.evenSEK)
+	} else if key == oddKeyEncrypted {
+		c.prng(c.oddSEK)
+	}
+}
+
 func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
 	if len(km.salt) != 0 {
 		copy(c.salt, km.salt)
