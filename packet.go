@@ -24,8 +24,11 @@ const (
 	CTRLTYPE_KEEPALIVE uint16 = 0x0001
 	CTRLTYPE_ACK       uint16 = 0x0002
 	CTRLTYPE_NAK       uint16 = 0x0003
+	CTRLTYPE_WARN      uint16 = 0x0004 // unimplemented, receiver->sender
 	CTRLTYPE_SHUTDOWN  uint16 = 0x0005
 	CTRLTYPE_ACKACK    uint16 = 0x0006
+	CRTLTYPE_DROPREQ   uint16 = 0x0007 // unimplemented, sender->receiver
+	CRTLTYPE_PEERERROR uint16 = 0x0008 // unimplemented, receiver->sender
 	CTRLTYPE_USER      uint16 = 0x7FFF
 )
 
@@ -233,6 +236,7 @@ type cifInterface interface {
 	Marshal(w io.Writer)
 }
 
+// 3.2.1.  Handshake
 type cifHandshake struct {
 	isRequest bool
 
@@ -254,8 +258,9 @@ type cifHandshake struct {
 	hasKM  bool
 	hasSID bool
 
+	// 3.2.1.1.  Handshake Extension Message
 	srtVersion uint32
-	srtFlags   struct {
+	srtFlags   struct { // 3.2.1.1.1.  Handshake Extension Message Flags
 		TSBPDSND      bool
 		TSBPDRCV      bool
 		CRYPT         bool
@@ -265,11 +270,13 @@ type cifHandshake struct {
 		STREAM        bool
 		PACKET_FILTER bool
 	}
-	recvTSBPDDelay uint16
-	sendTSBPDDelay uint16
+	recvTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
+	sendTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
 
+	// 3.2.1.2.  Key Material Extension Message
 	srtKM *cifKM
 
+	// 3.2.1.3.  Stream ID Extension Message
 	streamId string
 }
 
@@ -304,8 +311,8 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.srtFlags.REXMITFLG)
 		fmt.Fprintf(&b, "         STREAM       : %v\n", c.srtFlags.STREAM)
 		fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.srtFlags.PACKET_FILTER)
-		fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x\n", c.recvTSBPDDelay)
-		fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x\n", c.sendTSBPDDelay)
+		fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.recvTSBPDDelay, c.recvTSBPDDelay)
+		fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.sendTSBPDDelay, c.sendTSBPDDelay)
 	}
 
 	if c.hasKM == true {
@@ -611,6 +618,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 	return
 }
 
+// 3.2.2.  Key Material
 type cifKM struct {
 	s                     uint8
 	version               uint8
@@ -785,6 +793,7 @@ func (c *cifKM) Marshal(w io.Writer) {
 	w.Write(buffer[:offset])
 }
 
+// 3.2.4.  ACK (Acknowledgment)
 type cifACK struct {
 	isLite                      bool
 	isSmall                     bool
@@ -873,6 +882,7 @@ func (c *cifACK) Marshal(w io.Writer) {
 	w.Write(buffer[0:])
 }
 
+// 3.2.5.  NAK (Loss Report)
 type cifNAK struct {
 	lostPacketSequenceNumber []circular
 }

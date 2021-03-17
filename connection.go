@@ -7,6 +7,7 @@ package srt
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"io"
 	"math"
 	"net"
@@ -33,6 +34,23 @@ type Conn interface {
 	SocketId() uint32
 	PeerSocketId() uint32
 	StreamId() string
+
+	Stats() ConnStats
+}
+
+type srtConnStatsCounter struct {
+	keepalive uint64
+	shutdown  uint64
+	ack       uint64
+	ackack    uint64
+	nak       uint64
+	km        uint64
+	invalid   uint64
+}
+
+type srtConnStats struct {
+	send    srtConnStatsCounter
+	receive srtConnStatsCounter
 }
 
 // Check if we implemenet the net.Conn interface
@@ -45,6 +63,7 @@ type srtConn struct {
 	start time.Time
 
 	isShutdown bool
+	closeOnce  gosync.Once
 
 	socketId     uint32
 	peerSocketId uint32
@@ -65,8 +84,8 @@ type srtConn struct {
 	nakInterval float64
 
 	ackLock   gosync.RWMutex
-	ackNumber uint32
-	ackLast   time.Time
+	ackNumbers map[uint32]time.Time
+	nextACKNumber circular
 
 	initialPacketSequenceNumber circular
 
@@ -99,6 +118,12 @@ type srtConn struct {
 	// Congestion control
 	recv *liveRecv
 	snd  *liveSend
+
+	statistics srtConnStats
+
+	debug struct {
+		expectedReadPacketSequenceNumber circular
+	}
 }
 
 func (c *srtConn) LocalAddr() net.Addr {
@@ -132,7 +157,8 @@ func (c *srtConn) listenAndServe() {
 		c.onShutdown = func(socketId uint32) {}
 	}
 
-	c.ackNumber = 1
+	c.nextACKNumber = newCircular(1, MAX_TIMESTAMP)
+	c.ackNumbers = make(map[uint32]time.Time)
 
 	// 4.10.  Round-Trip Time Estimation
 	c.rtt = float64((100 * time.Millisecond).Microseconds())
@@ -152,7 +178,7 @@ func (c *srtConn) listenAndServe() {
 
 	c.timeout = time.AfterFunc(2*time.Second, func() {
 		log("conn %d: no more data received. shutting down\n", c.socketId)
-		c.shutdown(func() {})
+		go c.close()
 	})
 
 	c.tick = 10 * time.Millisecond
@@ -173,6 +199,8 @@ func (c *srtConn) listenAndServe() {
 	go c.networkQueueReader()
 	go c.writeQueueReader()
 	go c.ticker()
+
+	c.debug.expectedReadPacketSequenceNumber = c.initialPacketSequenceNumber
 }
 
 func (c *srtConn) ticker() {
@@ -206,6 +234,15 @@ func (c *srtConn) ReadPacket() (*packet, error) {
 		if p == nil {
 			break
 		}
+
+		if p.packetSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) == true {
+			log("lost packets. got: %d, expected: %d (%d)\n", p.packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.packetSequenceNumber))
+		} else if p.packetSequenceNumber.Lt(c.debug.expectedReadPacketSequenceNumber) == true {
+			log("packet out of order. got: %d, expected: %d (%d)\n", p.packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.packetSequenceNumber))
+			return nil, io.EOF
+		}
+
+		c.debug.expectedReadPacketSequenceNumber = p.packetSequenceNumber.Inc()
 
 		return p, nil
 	}
@@ -314,7 +351,7 @@ func (c *srtConn) push(p *packet) {
 }
 
 func (c *srtConn) getTimestamp() uint64 {
-	return uint64(time.Now().Sub(c.start).Microseconds())
+	return uint64(time.Since(c.start).Microseconds())
 }
 
 func (c *srtConn) getTimestampForPacket() uint32 {
@@ -324,9 +361,6 @@ func (c *srtConn) getTimestampForPacket() uint32 {
 // This is where packets go out to the network
 func (c *srtConn) pop(p *packet) {
 	p.addr = c.remoteAddr
-	// TODO: this is wrong. it will not use the pktTsbpdTime that has been set in WritePacket.
-	// This function is also called when the send congestion is actually delivering the packet.
-	//p.timestamp = uint32(time.Now().Sub(c.start).Microseconds())
 	p.destinationSocketId = c.peerSocketId
 
 	if p.isControlPacket == false && c.crypto != nil {
@@ -444,19 +478,30 @@ func (c *srtConn) handlePacket(p *packet) {
 func (c *srtConn) handleKeepAlive(p *packet) {
 	log("handle keepalive\n")
 
+	c.statistics.receive.keepalive++
+	c.statistics.send.keepalive++
+
+	c.timeout.Reset(2 * time.Second)
+
 	c.pop(p)
 }
 
 func (c *srtConn) handleShutdown(p *packet) {
 	log("handle shutdown\n")
 
+	c.statistics.receive.shutdown++
+
 	go c.close()
 }
 
 func (c *srtConn) handleACK(p *packet) {
+	c.statistics.receive.ack++
+
 	cif := &cifACK{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
+		c.statistics.receive.invalid++
+		log("invalid ACK\n%s", hex.Dump(p.data))
 		return
 	}
 
@@ -470,9 +515,13 @@ func (c *srtConn) handleACK(p *packet) {
 }
 
 func (c *srtConn) handleNAK(p *packet) {
+	c.statistics.receive.nak++
+
 	cif := &cifNAK{}
 
 	if err := cif.Unmarshal(p.data); err != nil {
+		c.statistics.receive.invalid++
+		log("invalid NAK\n%s", hex.Dump(p.data))
 		return
 	}
 
@@ -484,42 +533,23 @@ func (c *srtConn) handleNAK(p *packet) {
 
 func (c *srtConn) handleACKACK(p *packet) {
 	c.ackLock.RLock()
-	defer c.ackLock.RUnlock()
+
+	c.statistics.receive.ackack++
 
 	// p.typeSpecific is the ACKNumber
-	if p.typeSpecific != c.ackNumber-1 {
-		return
+	if ts, ok := c.ackNumbers[p.typeSpecific]; ok == true {
+		c.recalculateRTT(time.Since(ts))
+		delete(c.ackNumbers, p.typeSpecific)
+	} else {
+		log("got unknown ACKACK (%d)\n", p.typeSpecific)
+		c.statistics.receive.invalid++
 	}
 
-	c.recalculateRTT(time.Now().Sub(c.ackLast))
-}
+	nakInterval := uint64(c.nakInterval)
 
-func (c *srtConn) handleKM(p *packet) {
-	if c.crypto == nil {
-		return
-	}
+	c.ackLock.RUnlock()
 
-	if p.subType == EXTTYPE_KMRSP {
-		// TODO: somehow note down that we received a response and know
-		// that the peer got the new key.
-		return
-	}
-
-	cif := &cifKM{}
-
-	if err := cif.Unmarshal(p.data); err != nil {
-		return
-	}
-
-	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
-		return
-	}
-
-	p.subType = EXTTYPE_KMRSP
-
-	c.pop(p)
-
-	return
+	c.recv.SetNAKInterval(nakInterval)
 }
 
 func (c *srtConn) recalculateRTT(rtt time.Duration) {
@@ -537,9 +567,41 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 		c.nakInterval = nakInterval
 	}
 
-	c.recv.SetNAKInterval(uint64(c.nakInterval))
+	//log("# RTT=%.0fms RTTVar=%.0fms NAKInterval=%.0fms\n", c.rtt / 1000, c.rttVar / 1000, c.nakInterval / 1000)
+}
 
-	//logIn("# RTT=%.0f RTTVar=%.0f NAKInterval=%.0f\n", c.rtt, c.rttVar, c.nakInterval)
+func (c *srtConn) handleKM(p *packet) {
+	c.statistics.receive.km++
+
+	if c.crypto == nil {
+		return
+	}
+
+	if p.subType == EXTTYPE_KMRSP {
+		// TODO: somehow note down that we received a response and know
+		// that the peer got the new key.
+		return
+	}
+
+	cif := &cifKM{}
+
+	if err := cif.Unmarshal(p.data); err != nil {
+		c.statistics.receive.invalid++
+		log("invalid KM\n%s", hex.Dump(p.data))
+		return
+	}
+
+	if err := c.crypto.UnmarshalKM(cif, c.passphrase); err != nil {
+		return
+	}
+
+	p.subType = EXTTYPE_KMRSP
+
+	c.statistics.send.km++
+
+	c.pop(p)
+
+	return
 }
 
 func (c *srtConn) sendShutdown() {
@@ -554,6 +616,8 @@ func (c *srtConn) sendShutdown() {
 	}
 
 	binary.BigEndian.PutUint32(p.data[0:], 0)
+
+	c.statistics.send.shutdown++
 
 	c.pop(p)
 }
@@ -581,6 +645,8 @@ func (c *srtConn) sendNAK(from, to uint32) {
 		binary.BigEndian.PutUint32(p.data[4:], to)
 	}
 
+	c.statistics.send.nak++
+
 	c.pop(p)
 }
 
@@ -593,6 +659,9 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		timestamp:   c.getTimestampForPacket(),
 	}
 
+	c.ackLock.Lock()
+	defer c.ackLock.Unlock()
+
 	if lite == true {
 		p.typeSpecific = 0
 
@@ -600,7 +669,7 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 
 		binary.BigEndian.PutUint32(p.data[0:], seq)
 	} else {
-		p.typeSpecific = c.ackNumber
+		p.typeSpecific = c.nextACKNumber.Val()
 
 		p.data = make([]byte, 28)
 
@@ -611,10 +680,15 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		binary.BigEndian.PutUint32(p.data[16:], 100) // packets receiving rate (packets/s)
 		binary.BigEndian.PutUint32(p.data[20:], 100) // estimated link capacity (packets/s)
 		binary.BigEndian.PutUint32(p.data[24:], 100) // receiving rate (bytes/s)
+
+		c.ackNumbers[p.typeSpecific] = time.Now()
+		c.nextACKNumber = c.nextACKNumber.Inc()
+		if c.nextACKNumber.Val() == 0 {
+			c.nextACKNumber = c.nextACKNumber.Inc()
+		}
 	}
 
-	c.ackNumber++
-	c.ackLast = time.Now()
+	c.statistics.send.ack++
 
 	c.pop(p)
 }
@@ -630,6 +704,8 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 		typeSpecific: ackSequence,
 	}
 
+	c.statistics.send.ackack++
+
 	c.pop(p)
 }
 
@@ -640,58 +716,123 @@ func (c *srtConn) Close() error {
 }
 
 func (c *srtConn) close() {
-	if c.isShutdown == true {
-		return
-	}
-
 	c.isShutdown = true
 
-	log("conn %d: stopping timeout\n", c.socketId)
+	c.closeOnce.Do(func() {
+		log("conn %d: stopping timeout\n", c.socketId)
 
-	c.timeout.Stop()
+		c.timeout.Stop()
 
-	log("conn %d: sending shutdown message to peer\n", c.socketId)
+		log("conn %d: sending shutdown message to peer\n", c.socketId)
 
-	c.sendShutdown()
+		c.sendShutdown()
 
-	log("conn %d: stopping reader\n", c.socketId)
+		log("conn %d: stopping reader\n", c.socketId)
 
-	// send nil to the readQueue in order to abort any pending ReadPacket call
-	c.readQueue <- nil
+		// send nil to the readQueue in order to abort any pending ReadPacket call
+		c.readQueue <- nil
 
-	log("conn %d: stopping network reader\n", c.socketId)
+		log("conn %d: stopping network reader\n", c.socketId)
 
-	c.stopNetworkQueue.Stop()
+		c.stopNetworkQueue.Stop()
 
-	log("conn %d: stopping writer\n", c.socketId)
+		log("conn %d: stopping writer\n", c.socketId)
 
-	c.stopWriteQueue.Stop()
+		c.stopWriteQueue.Stop()
 
-	log("conn %d: stopping ticker\n", c.socketId)
+		log("conn %d: stopping ticker\n", c.socketId)
 
-	c.stopTicker.Stop()
+		c.stopTicker.Stop()
 
-	log("conn %d: closing queues\n", c.socketId)
+		log("conn %d: closing queues\n", c.socketId)
 
-	close(c.networkQueue)
-	close(c.readQueue)
-	close(c.writeQueue)
+		close(c.networkQueue)
+		close(c.readQueue)
+		close(c.writeQueue)
 
-	log("conn %d: shutdown\n", c.socketId)
+		log("conn %d: flushing congestion\n", c.socketId)
 
-	go func() {
-		c.onShutdown(c.socketId)
-	}()
-}
+		c.snd.Flush()
+		c.recv.Flush()
 
-func (c *srtConn) shutdown(callback func()) {
-	c.close()
+		log("conn %d: shutdown\n", c.socketId)
 
-	go func() {
-		callback()
-	}()
+		go func() {
+			c.onShutdown(c.socketId)
+		}()
+	})
 }
 
 func (c *srtConn) SetDeadline(t time.Time) error      { return nil }
 func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }
+
+type CongestionStatsCounter struct {
+	Total                   uint64
+	Buffer                  uint64
+	Retransmitted           uint64
+	RetransmittedAndDropped uint64
+	Dropped                 uint64
+	DroppedTooLate          uint64
+}
+
+func (c *CongestionStatsCounter) From(l liveStatsCounter) {
+	c.Total = l.total
+	c.Buffer = l.buffer
+	c.Retransmitted = l.retransmitted
+	c.RetransmittedAndDropped = l.retransmittedAndDropped
+	c.Dropped = l.dropped
+	c.DroppedTooLate = l.droppedTooLate
+}
+
+type CongestionStats struct {
+	Packets CongestionStatsCounter
+	Bytes   CongestionStatsCounter
+}
+
+func (c *CongestionStats) From(l liveStats) {
+	c.Packets.From(l.packets)
+	c.Bytes.From(l.bytes)
+}
+
+type ConnStatsCounter struct {
+	Keepalive uint64
+	Shutdown  uint64
+	NAK       uint64
+	ACK       uint64
+	ACKACK    uint64
+	KM        uint64
+	Invalid   uint64
+
+	Congestion CongestionStats
+}
+
+func (c *ConnStatsCounter) From(l srtConnStatsCounter) {
+	c.Keepalive = l.keepalive
+	c.Shutdown = l.shutdown
+	c.NAK = l.nak
+	c.ACK = l.ack
+	c.ACKACK = l.ackack
+	c.KM = l.km
+	c.Invalid = l.invalid
+}
+
+type ConnStats struct {
+	Send    ConnStatsCounter
+	Receive ConnStatsCounter
+}
+
+func (c *ConnStats) From(l srtConnStats) {
+	c.Send.From(l.send)
+	c.Receive.From(l.receive)
+}
+
+func (c *srtConn) Stats() ConnStats {
+	s := ConnStats{}
+
+	s.From(c.statistics)
+	s.Send.Congestion.From(c.snd.Stats())
+	s.Receive.Congestion.From(c.recv.Stats())
+
+	return s
+}

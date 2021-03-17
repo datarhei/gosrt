@@ -20,14 +20,20 @@ type nonblockingWriter struct {
 	dst  io.Writer
 	buf  *bytes.Buffer
 	lock sync.RWMutex
+	size int
 	done bool
 }
 
-func NewNonblockingWriter(wr io.Writer) NonblockingWriter {
+func NewNonblockingWriter(wr io.Writer, size int) NonblockingWriter {
 	u := &nonblockingWriter{
 		dst:  wr,
 		buf:  new(bytes.Buffer),
+		size: size,
 		done: false,
+	}
+
+	if u.size <= 0 {
+		u.size = 2048
 	}
 
 	go u.writer()
@@ -53,7 +59,7 @@ func (u *nonblockingWriter) Close() error {
 }
 
 func (u *nonblockingWriter) writer() {
-	p := make([]byte, 2048)
+	p := make([]byte, u.size)
 
 	for {
 		u.lock.RLock()

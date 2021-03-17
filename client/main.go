@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"time"
 
 	"github.com/datarhei/gosrt"
 )
@@ -40,7 +42,7 @@ func main() {
 	doneChan := make(chan error)
 
 	go func() {
-		wr := srt.NewNonblockingWriter(w)
+		wr := srt.NewNonblockingWriter(w, 2048)
 		defer wr.Close()
 
 		buffer := make([]byte, 2048)
@@ -74,7 +76,27 @@ func main() {
 	}
 
 	r.Close()
+
+	if srtconn, ok := r.(srt.Conn); ok == true {
+		stats := srtconn.Stats()
+
+		fmt.Fprintf(os.Stderr, "%+v\n", stats)
+	}
+
 	w.Close()
+}
+
+func configFromURL(u *url.URL) srt.Config {
+	config := srt.DefaultConfig
+
+	config.StreamId = u.Query().Get("streamid")
+	config.Passphrase = u.Query().Get("passphrase")
+
+	if d, err := strconv.Atoi(u.Query().Get("rcvlatency")); err != nil {
+		config.ReceiverLatency = time.Duration(d) * time.Millisecond
+	}
+
+	return config
 }
 
 func openReader(addr string) (io.ReadWriteCloser, error) {
@@ -92,13 +114,10 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
+		config := configFromURL(u)
 		streamId := u.Query().Get("streamid")
 		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
-
-		config := srt.DefaultConfig
-		config.StreamId = streamId
-		config.Passphrase = passphrase
 
 		if mode == "listener" {
 			ln, err := srt.Listen("udp", u.Host, config)
@@ -166,13 +185,10 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
+		config := configFromURL(u)
 		streamId := u.Query().Get("streamid")
 		passphrase := u.Query().Get("passphrase")
 		mode := u.Query().Get("mode")
-
-		config := srt.DefaultConfig
-		config.StreamId = streamId
-		config.Passphrase = passphrase
 
 		if mode == "listener" {
 			ln, err := srt.Listen("udp", u.Host, config)

@@ -334,7 +334,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 		cif.srtFlags.REXMITFLG = true
 		cif.srtFlags.STREAM = false
 		cif.srtFlags.PACKET_FILTER = true
-		cif.recvTSBPDDelay = 0x0078
+		cif.recvTSBPDDelay = uint16(dl.config.ReceiverLatency.Milliseconds())
 		cif.sendTSBPDDelay = 0x0000
 
 		cif.hasSID = true
@@ -401,11 +401,12 @@ func (dl *dialer) handleHandshake(p *packet) {
 		conn := &srtConn{
 			localAddr:                   dl.localAddr,
 			remoteAddr:                  dl.remoteAddr,
+			config:                      dl.config,
 			start:                       dl.start,
 			socketId:                    dl.socketId,
 			peerSocketId:                cif.srtSocketId,
 			streamId:                    dl.config.StreamId,
-			tsbpdTimeBase:               uint64(time.Now().Sub(dl.start).Microseconds()),
+			tsbpdTimeBase:               uint64(time.Since(dl.start).Microseconds()),
 			tsbpdDelay:                  uint64(cif.recvTSBPDDelay) * 1000,
 			drift:                       0,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
@@ -609,3 +610,4 @@ func (dl *dialer) WritePacket(p *packet) error {
 func (dl *dialer) SetDeadline(t time.Time) error      { return dl.conn.SetDeadline(t) }
 func (dl *dialer) SetReadDeadline(t time.Time) error  { return dl.conn.SetReadDeadline(t) }
 func (dl *dialer) SetWriteDeadline(t time.Time) error { return dl.conn.SetWriteDeadline(t) }
+func (dl *dialer) Stats() ConnStats                   { return dl.conn.Stats() }

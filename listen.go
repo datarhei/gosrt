@@ -37,6 +37,8 @@ type listener struct {
 	pc   *net.UDPConn
 	addr net.Addr
 
+	config Config
+
 	backlog chan connRequest
 	conns   map[uint32]*srtConn
 	lock    gosync.RWMutex
@@ -61,7 +63,9 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 		return nil, fmt.Errorf("listen: invalid config: %w", err)
 	}
 
-	ln := &listener{}
+	ln := &listener{
+		config: config,
+	}
 
 	raddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
@@ -233,6 +237,7 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 		conn := &srtConn{
 			localAddr:                   ln.addr,
 			remoteAddr:                  request.addr,
+			config:                      ln.config,
 			start:                       request.start,
 			socketId:                    socketId,
 			peerSocketId:                request.handshake.srtSocketId,
