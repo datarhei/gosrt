@@ -113,6 +113,29 @@ cd client
 You will first see some error messages from ffplay because the stream will most likely not start at a key frame. But then the window
 with the video stream should pop up.
 
+With the latest ffmpeg version (4.3.2) and with SRT linked to it, you can skip the `srt-live-transmit` and the client app:
+
+Start the server first:
+
+```
+cd server
+./server -addr :6001
+```
+
+Start sending a stream with ffmpeg:
+
+```
+ffmpeg -f lavfi -re -i testsrc2=rate=25:size=640x360 -codec:v libx264 -b:v 1024k -maxrate:v 1024k -bufsize:v 1024k -preset ultrafast -r 25 -g 50 -pix_fmt yuv420p -vsync 1 -flags2 local_header -f mpegts -transtype live "srt://127.0.0.1:6001?streamid=publish:/live/stream"
+```
+
+If the server is not on localhost, you might adjust the `peerlatency` in order to avoid packet loss: `-peerlatency 1000000`.
+
+Now you can play the stream:
+
+```
+ffplay -f mpegts -transtype live -rcvlatency 1000000 -i "srt://192.168.1.154:6001?streamid=/live/stream"
+```
+
 ## Encryption
 
 The stream can be encrypted with a passphrase. First start the server with a passphrase (the passphrase has to be at least 10 characters long

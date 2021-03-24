@@ -169,7 +169,7 @@ var DefaultConfig Config = Config{
 	IPv6Only:              false,
 	KMPreAnnounce:         4000,
 	KMRefreshRate:         1 << 24,
-	Latency:               200 * time.Millisecond,
+	Latency:               120 * time.Millisecond,
 	Linger:                2 * time.Second,
 	LossMaxTTL:            0,
 	MaxBW:                 0,
@@ -183,7 +183,7 @@ var DefaultConfig Config = Config{
 	PayloadSize:           1316,
 	PBKeylen:              16,
 	PeerIdleTimeout:       2 * time.Second,
-	PeerLatency:           200 * time.Millisecond,
+	PeerLatency:           120 * time.Millisecond,
 	ReceiverBufferSize:    0,
 	ReceiverLatency:       120 * time.Millisecond,
 	SendBuffer:            0,
@@ -195,6 +195,15 @@ var DefaultConfig Config = Config{
 }
 
 func (c Config) Validate() error {
+	if c.TransmissionType != "live" {
+		return fmt.Errorf("TransmissionType must be 'live'.")
+	}
+
+	c.Congestion = "live"
+	c.NAKReport = true
+	c.TooLatePacketDrop = true
+	c.TSBPDMode = true
+
 	if c.Congestion != "live" {
 		return fmt.Errorf("Congestion mode must be 'live'.")
 	}
@@ -225,6 +234,11 @@ func (c Config) Validate() error {
 
 	if c.Latency < 0 {
 		return fmt.Errorf("Latency must be greater than 0.")
+	}
+
+	if c.Latency != 0 {
+		c.PeerLatency = c.Latency
+		c.ReceiverLatency = c.Latency
 	}
 
 	if c.MSS < 76 {

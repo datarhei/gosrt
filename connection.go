@@ -18,6 +18,10 @@ import (
 	"github.com/datarhei/gosrt/sync"
 )
 
+// TODO: KM refresh
+// 10:30:48.189843/T0x700004ec6000!W:SRT.cn: SECURITY FAILURE: Agent has no PW, but Peer sender has declared one, can't decrypt
+// 10:30:48.190098/T0x700004ec6000*E:SRT.cn: SECURITY STATUS: NOSECRET - can't decrypt w_packet.
+
 type Conn interface {
 	Read(p []byte) (int, error)
 	Write(p []byte) (int, error)
@@ -188,7 +192,7 @@ func (c *srtConn) listenAndServe() {
 	c.recv = newLiveRecv(c.initialPacketSequenceNumber, 10000, 20000)
 
 	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
-	c.snd = newLiveSend(c.initialPacketSequenceNumber, 1000000)
+	c.snd = newLiveSend(c.initialPacketSequenceNumber, uint64(c.config.SendDropDelay.Microseconds()))
 
 	c.recv.sendACK = c.sendACK
 	c.recv.sendNAK = c.sendNAK
@@ -346,7 +350,7 @@ func (c *srtConn) push(p *packet) {
 	select {
 	case c.networkQueue <- p:
 	default:
-		log("network queue is full")
+		log("network queue is full\n")
 	}
 }
 
@@ -447,7 +451,7 @@ func (c *srtConn) handlePacket(p *packet) {
 		if c.tsbpdWrapPeriod == false {
 			if p.timestamp > MAX_TIMESTAMP-(30*1000000) {
 				c.tsbpdWrapPeriod = true
-				log("TSBPD wrapping period started")
+				log("TSBPD wrapping period started\n")
 			}
 		} else {
 			if p.timestamp >= (30*1000000) && p.timestamp <= (60*1000000) {
@@ -676,10 +680,10 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		binary.BigEndian.PutUint32(p.data[0:], seq)
 		binary.BigEndian.PutUint32(p.data[4:], uint32(c.rtt))
 		binary.BigEndian.PutUint32(p.data[8:], uint32(c.rttVar))
-		binary.BigEndian.PutUint32(p.data[12:], 100) // available buffer size (packets)
-		binary.BigEndian.PutUint32(p.data[16:], 100) // packets receiving rate (packets/s)
-		binary.BigEndian.PutUint32(p.data[20:], 100) // estimated link capacity (packets/s)
-		binary.BigEndian.PutUint32(p.data[24:], 100) // receiving rate (bytes/s)
+		binary.BigEndian.PutUint32(p.data[12:], 100) // TODO: available buffer size (packets)
+		binary.BigEndian.PutUint32(p.data[16:], 100) // TODO: packets receiving rate (packets/s)
+		binary.BigEndian.PutUint32(p.data[20:], 100) // TODO: estimated link capacity (packets/s)
+		binary.BigEndian.PutUint32(p.data[24:], 100) // TODO: receiving rate (bytes/s)
 
 		c.ackNumbers[p.typeSpecific] = time.Now()
 		c.nextACKNumber = c.nextACKNumber.Inc()

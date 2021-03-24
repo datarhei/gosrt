@@ -334,7 +334,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 		cif.srtFlags.REXMITFLG = true
 		cif.srtFlags.STREAM = false
 		cif.srtFlags.PACKET_FILTER = true
-		cif.recvTSBPDDelay = uint16(dl.config.ReceiverLatency.Milliseconds())
+		cif.recvTSBPDDelay = uint16(dl.config.PeerLatency.Milliseconds())
 		cif.sendTSBPDDelay = 0x0000
 
 		cif.hasSID = true
@@ -398,6 +398,11 @@ func (dl *dialer) handleHandshake(p *packet) {
 
 		// fill up a struct with all relevant data and put it into the backlog
 
+		tsbpdDelay := uint64(cif.recvTSBPDDelay) * 1000
+		if uint64(dl.config.ReceiverLatency.Microseconds()) > tsbpdDelay {
+			tsbpdDelay = uint64(dl.config.ReceiverLatency.Microseconds())
+		}
+
 		conn := &srtConn{
 			localAddr:                   dl.localAddr,
 			remoteAddr:                  dl.remoteAddr,
@@ -407,7 +412,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 			peerSocketId:                cif.srtSocketId,
 			streamId:                    dl.config.StreamId,
 			tsbpdTimeBase:               uint64(time.Since(dl.start).Microseconds()),
-			tsbpdDelay:                  uint64(cif.recvTSBPDDelay) * 1000,
+			tsbpdDelay:                  tsbpdDelay,
 			drift:                       0,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
 			crypto:                      dl.crypto,
@@ -494,13 +499,13 @@ func (dl *dialer) sendInduction() {
 		encryptionField:             0,
 		extensionField:              2,
 		initialPacketSequenceNumber: newCircular(0, MAX_SEQUENCENUMBER),
-		maxTransmissionUnitSize:     1500, // MTU size
+		maxTransmissionUnitSize:     uint32(dl.config.MSS), // MTU size
 		maxFlowWindowSize:           8192,
 		handshakeType:               HSTYPE_INDUCTION,
 		srtSocketId:                 dl.socketId,
 		synCookie:                   0,
 
-		peerIP0: 0x0100007f, // here we need to set our real IP
+		peerIP0: 0x0100007f, // TODO: here we need to set our real IP
 	}
 
 	log("outgoing: %s\n", cif.String())

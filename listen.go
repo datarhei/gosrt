@@ -233,6 +233,11 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 		// create a new socket ID
 		socketId := uint32(time.Now().Sub(ln.start).Microseconds())
 
+		tsbpdDelay := uint64(request.handshake.recvTSBPDDelay) * 1000
+		if uint64(ln.config.ReceiverLatency.Microseconds()) > tsbpdDelay {
+			tsbpdDelay = uint64(ln.config.ReceiverLatency.Microseconds())
+		}
+
 		// new connection
 		conn := &srtConn{
 			localAddr:                   ln.addr,
@@ -243,7 +248,7 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 			peerSocketId:                request.handshake.srtSocketId,
 			streamId:                    request.handshake.streamId,
 			tsbpdTimeBase:               uint64(request.timestamp),
-			tsbpdDelay:                  uint64(request.handshake.recvTSBPDDelay) * 1000,
+			tsbpdDelay:                  tsbpdDelay,
 			drift:                       0,
 			initialPacketSequenceNumber: request.handshake.initialPacketSequenceNumber,
 			crypto:                      request.crypto,
