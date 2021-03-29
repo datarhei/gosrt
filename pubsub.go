@@ -16,16 +16,16 @@ type PubSub interface {
 }
 
 type pubSub struct {
-	incoming  chan *packet
+	incoming  chan packet
 	abort     chan struct{}
 	lock      sync.Mutex
-	listeners map[uint32]chan *packet
+	listeners map[uint32]chan packet
 }
 
 func NewPubSub() PubSub {
 	pb := &pubSub{
-		incoming:  make(chan *packet, 1024),
-		listeners: make(map[uint32]chan *packet),
+		incoming:  make(chan packet, 1024),
+		listeners: make(map[uint32]chan packet),
 		abort:     make(chan struct{}),
 	}
 
@@ -54,13 +54,14 @@ func (pb *pubSub) broadcast() {
 					log("broadcast target queue is full\n")
 				}
 			}
+			p.Decommission()
 			pb.lock.Unlock()
 		}
 	}
 }
 
 func (pb *pubSub) Publish(c Conn) error {
-	var p *packet
+	var p packet
 	var err error
 	conn, ok := c.(*srtConn)
 	if !ok {
@@ -86,7 +87,7 @@ func (pb *pubSub) Publish(c Conn) error {
 }
 
 func (pb *pubSub) Subscribe(c Conn) error {
-	l := make(chan *packet, 1024)
+	l := make(chan packet, 1024)
 	socketId := c.SocketId()
 	conn, ok := c.(*srtConn)
 	if !ok {

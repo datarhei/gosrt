@@ -132,7 +132,7 @@ type Config struct {
 
 	// Sender buffer size. Bytes.
 	// SRTO_SNDBUF
-	SendBuffer uint32
+	SendBufferSize uint32
 
 	// Sender's delay before dropping packets.
 	// SRTO_SNDDROPDELAY
@@ -186,7 +186,7 @@ var DefaultConfig Config = Config{
 	PeerLatency:           120 * time.Millisecond,
 	ReceiverBufferSize:    0,
 	ReceiverLatency:       120 * time.Millisecond,
-	SendBuffer:            0,
+	SendBufferSize:        0,
 	SendDropDelay:         1 * time.Second,
 	StreamId:              "",
 	TooLatePacketDrop:     true,

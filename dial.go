@@ -39,8 +39,8 @@ type dialer struct {
 
 	start time.Time
 
-	rcvQueue chan *packet
-	sndQueue chan *packet
+	rcvQueue chan packet
+	sndQueue chan packet
 
 	isShutdown bool
 
@@ -112,8 +112,8 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	dl.conn = nil
 	dl.connChan = make(chan connResponse)
 
-	dl.rcvQueue = make(chan *packet, 1024)
-	dl.sndQueue = make(chan *packet, 1024)
+	dl.rcvQueue = make(chan packet, 2048)
+	dl.sndQueue = make(chan packet, 2048)
 
 	dl.stopReader = sync.NewStopper()
 	dl.stopWriter = sync.NewStopper()
@@ -226,11 +226,11 @@ func (dl *dialer) reader() {
 			//log("%s", p.String())
 			//}
 
-			if p.destinationSocketId != dl.socketId {
+			if p.Header().destinationSocketId != dl.socketId {
 				break
 			}
 
-			if p.isControlPacket == true && p.controlType == CTRLTYPE_HANDSHAKE {
+			if p.Header().isControlPacket == true && p.Header().controlType == CTRLTYPE_HANDSHAKE {
 				dl.handleHandshake(p)
 				break
 			}
@@ -240,12 +240,12 @@ func (dl *dialer) reader() {
 	}
 }
 
-func (dl *dialer) send(p *packet) {
+func (dl *dialer) send(p packet) {
 	// non-blocking
 	select {
 	case dl.sndQueue <- p:
 	default:
-		log("client: send queue is full")
+		log("client: send queue is full\n")
 	}
 }
 
@@ -266,20 +266,22 @@ func (dl *dialer) writer() {
 
 			p.Marshal(&data)
 
+			p.Decommission()
+
 			buffer := data.Bytes()
 
 			//log("packet-send: bytes=%d to=%s\n", len(buffer), p.addr.String())
 
-			// Write the packet's contents back to the server.
+			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
 		}
 	}
 }
 
-func (dl *dialer) handleHandshake(p *packet) {
+func (dl *dialer) handleHandshake(p packet) {
 	cif := &cifHandshake{}
 
-	if err := cif.Unmarshal(p.data); err != nil {
+	if err := p.UnmarshalCIF(cif); err != nil {
 		log("cif error: %s\n", err)
 		return
 	}
@@ -288,11 +290,11 @@ func (dl *dialer) handleHandshake(p *packet) {
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 
-	p.controlType = CTRLTYPE_HANDSHAKE
-	p.subType = 0
-	p.typeSpecific = 0
-	p.timestamp = uint32(time.Now().Sub(dl.start).Microseconds())
-	p.destinationSocketId = cif.srtSocketId
+	p.Header().controlType = CTRLTYPE_HANDSHAKE
+	p.Header().subType = 0
+	p.Header().typeSpecific = 0
+	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().destinationSocketId = cif.srtSocketId
 
 	if cif.handshakeType == HSTYPE_INDUCTION {
 		// Verify version
@@ -315,14 +317,13 @@ func (dl *dialer) handleHandshake(p *packet) {
 			return
 		}
 
-		// leave the IP as is
-
 		cif.isRequest = true
 		cif.handshakeType = HSTYPE_CONCLUSION
 		cif.initialPacketSequenceNumber = dl.initialPacketSequenceNumber
 		cif.maxTransmissionUnitSize = 1500 // MTU size
 		cif.maxFlowWindowSize = 8192
 		cif.srtSocketId = dl.socketId
+		cif.peerIP.FromNetAddr(dl.localAddr)
 
 		cif.hasHS = true
 		cif.srtVersion = 0x00010402
@@ -354,7 +355,7 @@ func (dl *dialer) handleHandshake(p *packet) {
 			}
 		}
 
-		p.SetCIF(cif)
+		p.MarshalCIF(cif)
 
 		log("outgoing: %s\n", cif.String())
 
@@ -481,17 +482,16 @@ func (dl *dialer) handleHandshake(p *packet) {
 }
 
 func (dl *dialer) sendInduction() {
-	p := &packet{
-		addr:            dl.remoteAddr,
-		isControlPacket: true,
+	p := newPacket(dl.remoteAddr, nil)
 
-		controlType:  CTRLTYPE_HANDSHAKE,
-		subType:      0,
-		typeSpecific: 0,
+	p.Header().isControlPacket = true
 
-		timestamp:           uint32(time.Now().Sub(dl.start).Microseconds()),
-		destinationSocketId: 0,
-	}
+	p.Header().controlType = CTRLTYPE_HANDSHAKE
+	p.Header().subType = 0
+	p.Header().typeSpecific = 0
+
+	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().destinationSocketId = 0
 
 	cif := &cifHandshake{
 		isRequest:                   true,
@@ -504,32 +504,32 @@ func (dl *dialer) sendInduction() {
 		handshakeType:               HSTYPE_INDUCTION,
 		srtSocketId:                 dl.socketId,
 		synCookie:                   0,
-
-		peerIP0: 0x0100007f, // TODO: here we need to set our real IP
 	}
+
+	cif.peerIP.FromNetAddr(dl.localAddr)
 
 	log("outgoing: %s\n", cif.String())
 
-	p.SetCIF(cif)
+	p.MarshalCIF(cif)
 
 	dl.send(p)
 }
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
-	p := &packet{
-		addr:            dl.remoteAddr,
-		isControlPacket: true,
+	p := newPacket(dl.remoteAddr, nil)
 
-		controlType:  CTRLTYPE_SHUTDOWN,
-		typeSpecific: 0,
+	data := [4]byte{}
+	binary.BigEndian.PutUint32(data[0:], 0)
 
-		timestamp:           uint32(time.Now().Sub(dl.start).Microseconds()),
-		destinationSocketId: peerSocketId,
+	p.SetData(data[0:4])
 
-		data: make([]byte, 4),
-	}
+	p.Header().isControlPacket = true
 
-	binary.BigEndian.PutUint32(p.data[0:], 0)
+	p.Header().controlType = CTRLTYPE_SHUTDOWN
+	p.Header().typeSpecific = 0
+
+	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().destinationSocketId = peerSocketId
 
 	dl.send(p)
 }
@@ -588,7 +588,7 @@ func (dl *dialer) Read(p []byte) (n int, err error) {
 	return dl.conn.Read(p)
 }
 
-func (dl *dialer) ReadPacket() (*packet, error) {
+func (dl *dialer) ReadPacket() (packet, error) {
 	if err := dl.checkConnection(); err != nil {
 		return nil, err
 	}
@@ -604,7 +604,7 @@ func (dl *dialer) Write(p []byte) (n int, err error) {
 	return dl.conn.Write(p)
 }
 
-func (dl *dialer) WritePacket(p *packet) error {
+func (dl *dialer) WritePacket(p packet) error {
 	if err := dl.checkConnection(); err != nil {
 		return err
 	}

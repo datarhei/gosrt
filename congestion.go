@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 type liveStatsCounter struct {
@@ -36,7 +37,7 @@ type liveSend struct {
 
 	statistics liveStats
 
-	deliver func(p *packet)
+	deliver func(p packet)
 }
 
 func newLiveSend(initalSequenceNumber circular, dropInterval uint64) *liveSend {
@@ -47,7 +48,7 @@ func newLiveSend(initalSequenceNumber circular, dropInterval uint64) *liveSend {
 
 		dropInterval: dropInterval, // microseconds
 
-		deliver: func(p *packet) {},
+		deliver: func(p packet) {},
 	}
 
 	return s
@@ -65,18 +66,18 @@ func (s *liveSend) Flush() {
 	s.lossList = s.lossList.Init()
 }
 
-func (s *liveSend) Push(p *packet) {
-	p.packetSequenceNumber = s.nextSequenceNumber
+func (s *liveSend) Push(p packet) {
+	p.Header().packetSequenceNumber = s.nextSequenceNumber
 	s.nextSequenceNumber = s.nextSequenceNumber.Inc()
 
 	// packets put into send buffer
 	s.statistics.packets.buffer++
 	// bytes put into send buffer
-	s.statistics.bytes.buffer += uint64(len(p.data))
+	s.statistics.bytes.buffer += p.Len()
 
 	//log("got %d @ %d\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
-	p.timestamp = uint32(p.pktTsbpdTime & uint64(MAX_TIMESTAMP))
+	p.Header().timestamp = uint32(p.Header().pktTsbpdTime & uint64(MAX_TIMESTAMP))
 
 	s.lock.Lock()
 	s.packetList.PushBack(p)
@@ -90,14 +91,14 @@ func (s *liveSend) Tick(now uint64) {
 	s.lock.Lock()
 	removeList := []*list.Element{}
 	for e := s.packetList.Front(); e != nil; e = e.Next() {
-		p := e.Value.(*packet)
-		if p.pktTsbpdTime <= now {
-			//log("delivering %d @ %d (%d bytes)\n", p.packetSequenceNumber, p.PktTsbpdTime, len(p.data))
+		p := e.Value.(packet)
+		if p.Header().pktTsbpdTime <= now {
+			//log("delivering %d @ %d (%d bytes)\n", p.packetSequenceNumber, p.PktTsbpdTime, p.Len())
 
 			// packets delivered
 			s.statistics.packets.total++
 			// bytes delivered
-			s.statistics.bytes.total += uint64(len(p.data))
+			s.statistics.bytes.total += p.Len()
 
 			s.deliver(p)
 			//log("   adding %d @ %d to losslist (%d)\n", p.packetSequenceNumber, p.PktTsbpdTime, now)
@@ -116,12 +117,12 @@ func (s *liveSend) Tick(now uint64) {
 	s.lock.Lock()
 	removeList = nil
 	for e := s.lossList.Front(); e != nil; e = e.Next() {
-		p := e.Value.(*packet)
+		p := e.Value.(packet)
 
-		if p.pktTsbpdTime+s.dropInterval <= now {
+		if p.Header().pktTsbpdTime+s.dropInterval <= now {
 			// dropped packet because too old
 			s.statistics.packets.dropped++
-			s.statistics.packets.dropped += uint64(len(p.data))
+			s.statistics.packets.dropped += p.Len()
 
 			//log("   dropping %d @ %d from losslist (%d, %d)\n", p.packetSequenceNumber, p.PktTsbpdTime, p.PktTsbpdTime + s.dropInterval, now)
 			removeList = append(removeList, e)
@@ -145,7 +146,7 @@ func (s *liveSend) Tick(now uint64) {
 		// packets in buffer --
 		s.statistics.packets.buffer--
 		// bytes in buffer --
-		s.statistics.bytes.buffer -= uint64(len(e.Value.(*packet).data))
+		s.statistics.bytes.buffer -= e.Value.(packet).Len()
 
 		s.lossList.Remove(e)
 	}
@@ -157,8 +158,8 @@ func (s *liveSend) ACK(sequenceNumber circular) {
 	s.lock.Lock()
 	removeList := []*list.Element{}
 	for e := s.lossList.Front(); e != nil; e = e.Next() {
-		p := e.Value.(*packet)
-		if p.packetSequenceNumber.Lt(sequenceNumber) {
+		p := e.Value.(packet)
+		if p.Header().packetSequenceNumber.Lt(sequenceNumber) {
 			// remove packet from buffer because it has been successfully transmitted
 			//log("   deleting %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
 			removeList = append(removeList, e)
@@ -171,7 +172,7 @@ func (s *liveSend) ACK(sequenceNumber circular) {
 		// packets in buffer --
 		s.statistics.packets.buffer--
 		// bytes in buffer --
-		s.statistics.bytes.buffer -= uint64(len(e.Value.(*packet).data))
+		s.statistics.bytes.buffer -= e.Value.(packet).Len()
 
 		s.lossList.Remove(e)
 	}
@@ -187,18 +188,18 @@ func (s *liveSend) NAK(sequenceNumbers []circular) {
 
 	s.lock.RLock()
 	for e := s.lossList.Back(); e != nil; e = e.Prev() {
-		p := e.Value.(*packet)
+		p := e.Value.(packet)
 
 		for i := 0; i < len(sequenceNumbers); i += 2 {
-			if p.packetSequenceNumber.Gte(sequenceNumbers[i]) && p.packetSequenceNumber.Lte(sequenceNumbers[i+1]) {
+			if p.Header().packetSequenceNumber.Gte(sequenceNumbers[i]) && p.Header().packetSequenceNumber.Lte(sequenceNumbers[i+1]) {
 				// packets retransmitted++
 				s.statistics.packets.retransmitted++
 				// bytes retransmitted++
-				s.statistics.bytes.retransmitted += uint64(len(p.data))
+				s.statistics.bytes.retransmitted += p.Len()
 
 				//log("   retransmitting %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
-				p.retransmittedPacketFlag = true
+				p.Header().retransmittedPacketFlag = true
 				s.deliver(p)
 			}
 		}
@@ -225,10 +226,14 @@ type liveRecv struct {
 	lastPeriodicNAK uint64
 
 	statistics liveStats
+	prevStatistics liveStats
+
+	last time.Time
+	period time.Duration
 
 	sendACK func(seq uint32, light bool)
 	sendNAK func(from, to uint32)
-	deliver func(p *packet)
+	deliver func(p packet)
 }
 
 func newLiveRecv(initialSequenceNumber circular, periodicACKInterval, periodicNAKInterval uint64) *liveRecv {
@@ -243,13 +248,37 @@ func newLiveRecv(initialSequenceNumber circular, periodicACKInterval, periodicNA
 
 	r.sendACK = func(seq uint32, light bool) {}
 	r.sendNAK = func(from, to uint32) {}
-	r.deliver = func(p *packet) {}
+	r.deliver = func(p packet) {}
+
+	r.last = time.Now()
+	r.period = time.Second
 
 	return r
 }
 
 func (r *liveRecv) Stats() liveStats {
 	return r.statistics
+}
+
+func (r *liveRecv) PacketRate() (pps, bps uint32) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	tdiff := time.Since(r.last)
+
+	pdiff := r.statistics.packets.total - r.prevStatistics.packets.total
+	bdiff := r.statistics.bytes.total - r.prevStatistics.bytes.total
+
+	pps = uint32(float64(pdiff) / tdiff.Seconds())
+	bps = uint32(float64(bdiff) / tdiff.Seconds())
+
+
+	if tdiff >= r.period {
+		r.prevStatistics = r.statistics
+		r.last = time.Now()
+	}
+
+	return
 }
 
 func (r *liveRecv) Flush() {
@@ -259,7 +288,7 @@ func (r *liveRecv) Flush() {
 	r.packetList = r.packetList.Init()
 }
 
-func (r *liveRecv) Push(pkt *packet) {
+func (r *liveRecv) Push(pkt packet) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -268,35 +297,35 @@ func (r *liveRecv) Push(pkt *packet) {
 	// total received packets
 	r.statistics.packets.total++
 	// total received bytes
-	r.statistics.bytes.total += uint64(len(pkt.data))
+	r.statistics.bytes.total += pkt.Len()
 
 	//pkt.PktTsbpdTime = pkt.Timestamp + r.delay
 
 	//logIn("new packet %d @ %d, expecting %d\n", pkt.packetSequenceNumber.Val(), pkt.PktTsbpdTime, r.maxSeenSequenceNumber.Inc())
 
-	if pkt.pktTsbpdTime < r.lastPktTsbpdTime {
+	if pkt.Header().pktTsbpdTime < r.lastPktTsbpdTime {
 		// too old
 		//log("too old packet. got: %d, expecting >= %d (%d)\n", pkt.pktTsbpdTime, r.lastPktTsbpdTime, pkt.packetSequenceNumber.Val())
 
 		r.statistics.packets.droppedTooLate++
-		r.statistics.bytes.droppedTooLate += uint64(len(pkt.data))
+		r.statistics.bytes.droppedTooLate += pkt.Len()
 
 		return
 	}
 
-	if pkt.packetSequenceNumber.Equals(r.maxSeenSequenceNumber.Inc()) {
+	if pkt.Header().packetSequenceNumber.Equals(r.maxSeenSequenceNumber.Inc()) {
 		// in order
-		r.maxSeenSequenceNumber = pkt.packetSequenceNumber
+		r.maxSeenSequenceNumber = pkt.Header().packetSequenceNumber
 
 		//logIn("   the packet we expected\n")
-	} else if pkt.packetSequenceNumber.Lte(r.maxSeenSequenceNumber) {
+	} else if pkt.Header().packetSequenceNumber.Lte(r.maxSeenSequenceNumber) {
 		// out of order
 		//log("a missing piece? got: %d, expecting: %d\n", pkt.packetSequenceNumber.Val(), r.maxSeenSequenceNumber.Inc().Val())
 
-		if pkt.packetSequenceNumber.Lt(r.lastACKSequenceNumber) {
+		if pkt.Header().packetSequenceNumber.Lt(r.lastACKSequenceNumber) {
 			// already acknowledged
 			r.statistics.packets.dropped++
-			r.statistics.bytes.dropped += uint64(len(pkt.data))
+			r.statistics.bytes.dropped += pkt.Len()
 
 			//log("   => we already ACK'd this packet. ignoring\n")
 			return
@@ -304,26 +333,26 @@ func (r *liveRecv) Push(pkt *packet) {
 
 		// put it in the correct position
 		for e := r.packetList.Front(); e != nil; e = e.Next() {
-			p := e.Value.(*packet)
-			if p.packetSequenceNumber == pkt.packetSequenceNumber {
+			p := e.Value.(packet)
+			if p.Header().packetSequenceNumber == pkt.Header().packetSequenceNumber {
 				// already received (has been sent more than once)
 				r.statistics.packets.retransmittedAndDropped++
-				r.statistics.bytes.retransmittedAndDropped += uint64(len(pkt.data))
+				r.statistics.bytes.retransmittedAndDropped += pkt.Len()
 
 				// we already have this packet, ignore
 				//log("   => we already have it, but not yet ACK'd, ignoring\n")
 				break
-			} else if p.packetSequenceNumber.Gt(pkt.packetSequenceNumber) {
+			} else if p.Header().packetSequenceNumber.Gt(pkt.Header().packetSequenceNumber) {
 				// late arrival. this fills a gap
 
 				// packets in buffer ++
 				r.statistics.packets.buffer++
 				// bytes in buffer ++
-				r.statistics.bytes.buffer += uint64(len(pkt.data))
+				r.statistics.bytes.buffer += pkt.Len()
 
-				if pkt.retransmittedPacketFlag == true {
+				if pkt.Header().retransmittedPacketFlag == true {
 					r.statistics.packets.retransmitted++
-					r.statistics.bytes.retransmitted += uint64(len(pkt.data))
+					r.statistics.bytes.retransmitted += pkt.Len()
 				}
 
 				r.packetList.InsertBefore(pkt, e)
@@ -340,17 +369,17 @@ func (r *liveRecv) Push(pkt *packet) {
 		// send a NAK for all sequences that are bigger than the one we know until
 		// the one we have at hand, both ends exluding.
 		//log("sending NAK for (%d, %d)\n", r.maxSeenSequenceNumber.Inc().Val(), pkt.packetSequenceNumber.Dec().Val())
-		r.sendNAK(r.maxSeenSequenceNumber.Inc().Val(), pkt.packetSequenceNumber.Dec().Val())
+		r.sendNAK(r.maxSeenSequenceNumber.Inc().Val(), pkt.Header().packetSequenceNumber.Dec().Val())
 
 		//log("there are some missing sequence numbers. got: %d, expecting %d\n", pkt.packetSequenceNumber.Val(), r.maxSeenSequenceNumber.Inc().Val())
 
-		r.maxSeenSequenceNumber = pkt.packetSequenceNumber
+		r.maxSeenSequenceNumber = pkt.Header().packetSequenceNumber
 	}
 
 	// packets in buffer ++
 	r.statistics.packets.buffer++
 	// bytes in buffer ++
-	r.statistics.bytes.buffer += uint64(len(pkt.data))
+	r.statistics.bytes.buffer += pkt.Len()
 
 	r.packetList.PushBack(pkt)
 }
@@ -369,20 +398,20 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber uint32, lite
 		// where the first gap is (or at the end of the list) is where we can ACK to.
 		e := r.packetList.Front()
 		if e != nil {
-			p := e.Value.(*packet)
+			p := e.Value.(packet)
 
-			ackSequenceNumber := p.packetSequenceNumber
+			ackSequenceNumber := p.Header().packetSequenceNumber
 
-			if p.pktTsbpdTime > r.lastPktTsbpdTime {
+			if p.Header().pktTsbpdTime > r.lastPktTsbpdTime {
 				ackSequenceNumber = r.lastACKSequenceNumber
 			} else {
 				for e = e.Next(); e != nil; e = e.Next() {
-					p = e.Value.(*packet)
-					if p.packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
+					p = e.Value.(packet)
+					if p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
 						break
 					}
 
-					ackSequenceNumber = p.packetSequenceNumber
+					ackSequenceNumber = p.Header().packetSequenceNumber
 				}
 			}
 
@@ -416,22 +445,22 @@ func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to uint32) {
 		// alternatively send a NAK for max. X gaps because the size of the NAK packet is limited
 		e := r.packetList.Front()
 		if e != nil {
-			p := e.Value.(*packet)
+			p := e.Value.(packet)
 
-			ackSequenceNumber := p.packetSequenceNumber
+			ackSequenceNumber := p.Header().packetSequenceNumber
 
 			for e = e.Next(); e != nil; e = e.Next() {
-				p = e.Value.(*packet)
-				if p.packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
+				p = e.Value.(packet)
+				if p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
 					nackSequenceNumber := ackSequenceNumber.Inc()
 
 					ok = true
 					from = nackSequenceNumber.Val()
-					to = p.packetSequenceNumber.Dec().Val()
+					to = p.Header().packetSequenceNumber.Dec().Val()
 					break
 				}
 
-				ackSequenceNumber = p.packetSequenceNumber
+				ackSequenceNumber = p.Header().packetSequenceNumber
 			}
 		}
 
@@ -458,12 +487,12 @@ func (r *liveRecv) Tick(now uint64) {
 
 	removeList := []*list.Element{}
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
-		p := e.Value.(*packet)
-		if p.packetSequenceNumber.Lte(r.lastACKSequenceNumber) && p.pktTsbpdTime <= now {
+		p := e.Value.(packet)
+		if p.Header().packetSequenceNumber.Lte(r.lastACKSequenceNumber) && p.Header().pktTsbpdTime <= now {
 			// packets in buffer --
 			r.statistics.packets.buffer--
 			// bytes in buffer --
-			r.statistics.bytes.buffer -= uint64(len(p.data))
+			r.statistics.bytes.buffer -= p.Len()
 
 			r.deliver(p)
 			removeList = append(removeList, e)
@@ -498,9 +527,9 @@ func (r *liveRecv) String(t uint64) string {
 
 	r.lock.RLock()
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
-		p := e.Value.(*packet)
+		p := e.Value.(packet)
 
-		b.WriteString(fmt.Sprintf("   %d @ %d (in %d)\n", p.packetSequenceNumber.Val(), p.pktTsbpdTime, int64(p.pktTsbpdTime)-int64(t)))
+		b.WriteString(fmt.Sprintf("   %d @ %d (in %d)\n", p.Header().packetSequenceNumber.Val(), p.Header().pktTsbpdTime, int64(p.Header().pktTsbpdTime)-int64(t)))
 	}
 	r.lock.RUnlock()
 

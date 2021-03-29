@@ -13,6 +13,7 @@ import (
 	gosync "sync"
 	"syscall"
 	"time"
+	//"runtime"
 
 	"github.com/datarhei/gosrt/sync"
 )
@@ -43,10 +44,11 @@ type listener struct {
 	conns   map[uint32]*srtConn
 	lock    gosync.RWMutex
 
-	start time.Time
+	start      time.Time
+	nbReceiver int
 
-	rcvQueue chan *packet
-	sndQueue chan *packet
+	rcvQueue chan packet
+	sndQueue chan packet
 
 	syncookie synCookie
 
@@ -105,8 +107,8 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 
 	ln.backlog = make(chan connRequest, 128)
 
-	ln.rcvQueue = make(chan *packet, 1024)
-	ln.sndQueue = make(chan *packet, 1024)
+	ln.rcvQueue = make(chan packet, 1024)
+	ln.sndQueue = make(chan packet, 1024)
 
 	ln.syncookie = newSYNCookie(ln.addr.String())
 
@@ -116,13 +118,15 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	ln.doneChan = make(chan error)
 
 	ln.start = time.Now()
+	ln.nbReceiver = 1 // runtime.NumCPU()
 
 	go ln.reader()
 	go ln.writer()
 
+	// net.inet.udp.recvspace: 786896 -> 1573792
+
 	go func() {
-		buffer := make([]byte, config.MSS) // MTU size
-		index := 0
+		buffer := make([]byte, 16384 /*config.MSS*/) // MTU size
 
 		for {
 			if ln.isShutdown == true {
@@ -130,8 +134,8 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 				return
 			}
 
-			pc.SetReadDeadline(time.Now().Add(3 * time.Second))
-			n, addr, err := pc.ReadFrom(buffer)
+			ln.pc.SetReadDeadline(time.Now().Add(3 * time.Second))
+			n, addr, err := ln.pc.ReadFrom(buffer)
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) == true {
 					continue
@@ -152,12 +156,59 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 			}
 
 			ln.rcvQueue <- p
-
-			index++
 		}
 	}()
 
 	return ln, nil
+}
+
+func (ln *listener) receiver() {
+	defer func() {
+		log("shutdown one receiver\n")
+	}()
+
+	log("starting one receiver\n")
+
+	buffer := make([]byte, 16384 /*config.MSS*/) // MTU size
+
+	for {
+		if ln.isShutdown == true {
+			log("stuck here\n")
+			select {
+			case ln.doneChan <- ErrServerClosed:
+			default:
+			}
+			return
+		}
+
+		//ln.pc.SetReadDeadline(time.Now().Add(3 * time.Second))
+		n, addr, err := ln.pc.ReadFrom(buffer)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) == true {
+				continue
+			}
+
+			if ln.isShutdown == true {
+				log("stuck here\n")
+				select {
+				case ln.doneChan <- ErrServerClosed:
+				default:
+				}
+				return
+			}
+
+			log("stuck here\n")
+			ln.doneChan <- err
+			return
+		}
+
+		p := newPacket(addr, buffer[:n])
+		if p == nil {
+			continue
+		}
+
+		ln.rcvQueue <- p
+	}
 }
 
 type ConnRequest interface {
@@ -299,39 +350,36 @@ func (ln *listener) handleShutdown(socketId uint32) {
 }
 
 func (ln *listener) reject(request connRequest, reason uint32) {
-	p := &packet{
-		addr:            request.addr,
-		isControlPacket: true,
+	p := newPacket(request.addr, nil)
+	p.Header().isControlPacket = true
 
-		controlType:  CTRLTYPE_HANDSHAKE,
-		subType:      0,
-		typeSpecific: 0,
+	p.Header().controlType = CTRLTYPE_HANDSHAKE
+	p.Header().subType = 0
+	p.Header().typeSpecific = 0
 
-		timestamp:           uint32(time.Now().Sub(ln.start).Microseconds()),
-		destinationSocketId: request.socketId,
-	}
+	p.Header().timestamp = uint32(time.Now().Sub(ln.start).Microseconds())
+	p.Header().destinationSocketId = request.socketId
 
 	request.handshake.handshakeType = reason
 
-	p.SetCIF(request.handshake)
+	p.MarshalCIF(request.handshake)
 
 	ln.send(p)
 }
 
 func (ln *listener) accept(request connRequest) {
-	p := &packet{
-		addr:            request.addr,
-		isControlPacket: true,
+	p := newPacket(request.addr, nil)
 
-		controlType:  CTRLTYPE_HANDSHAKE,
-		subType:      0,
-		typeSpecific: 0,
+	p.Header().isControlPacket = true
 
-		timestamp:           uint32(time.Now().Sub(request.start).Microseconds()),
-		destinationSocketId: request.socketId,
-	}
+	p.Header().controlType = CTRLTYPE_HANDSHAKE
+	p.Header().subType = 0
+	p.Header().typeSpecific = 0
 
-	p.SetCIF(request.handshake)
+	p.Header().timestamp = uint32(time.Now().Sub(request.start).Microseconds())
+	p.Header().destinationSocketId = request.socketId
+
+	p.MarshalCIF(request.handshake)
 
 	ln.send(p)
 }
@@ -378,12 +426,12 @@ func (ln *listener) reader() {
 			//logIn("packet-received: bytes=%d from=%s\n", len(buffer), addr.String())
 			//logIn("%s", hex.Dump(buffer[:16]))
 
-			if p.isControlPacket == true {
+			if p.Header().isControlPacket == true {
 				//logIn("%s", p.String())
 			}
 
-			if p.destinationSocketId == 0 {
-				if p.isControlPacket == true && p.controlType == CTRLTYPE_HANDSHAKE {
+			if p.Header().destinationSocketId == 0 {
+				if p.Header().isControlPacket == true && p.Header().controlType == CTRLTYPE_HANDSHAKE {
 					ln.handleHandshake(p)
 				}
 
@@ -391,7 +439,7 @@ func (ln *listener) reader() {
 			}
 
 			ln.lock.RLock()
-			conn, ok := ln.conns[p.destinationSocketId]
+			conn, ok := ln.conns[p.Header().destinationSocketId]
 			ln.lock.RUnlock()
 
 			if !ok {
@@ -404,7 +452,7 @@ func (ln *listener) reader() {
 	}
 }
 
-func (ln *listener) send(p *packet) {
+func (ln *listener) send(p packet) {
 	// non-blocking
 	select {
 	case ln.sndQueue <- p:
@@ -430,23 +478,23 @@ func (ln *listener) writer() {
 
 			p.Marshal(&data)
 
+			p.Decommission()
+
 			buffer := data.Bytes()
 
 			//logOut("packet-send: bytes=%d to=%s\n", len(buffer), b.addr.String())
 			//logOut("%s", hex.Dump(buffer))
 
-			//addr, _ := net.ResolveUDPAddr("udp", b.addr)
-
-			// Write the packet's contents back to the client.
-			ln.pc.WriteTo(buffer, p.addr)
+			// Write the packet's contents to the wire
+			ln.pc.WriteTo(buffer, p.Header().addr)
 		}
 	}
 }
 
-func (ln *listener) handleHandshake(p *packet) {
+func (ln *listener) handleHandshake(p packet) {
 	cif := &cifHandshake{}
 
-	err := cif.Unmarshal(p.data)
+	err := p.UnmarshalCIF(cif)
 
 	log("incoming: %s\n", cif.String())
 
@@ -457,35 +505,35 @@ func (ln *listener) handleHandshake(p *packet) {
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 
-	p.controlType = CTRLTYPE_HANDSHAKE
-	p.subType = 0
-	p.typeSpecific = 0
-	p.timestamp = uint32(time.Now().Sub(ln.start).Microseconds())
-	p.destinationSocketId = cif.srtSocketId
+	p.Header().controlType = CTRLTYPE_HANDSHAKE
+	p.Header().subType = 0
+	p.Header().typeSpecific = 0
+	p.Header().timestamp = uint32(time.Since(ln.start).Microseconds())
+	p.Header().destinationSocketId = cif.srtSocketId
+
+	cif.peerIP.FromNetAddr(ln.addr)
 
 	if cif.handshakeType == HSTYPE_INDUCTION {
 		// cif
 		cif.version = 5
 		cif.encryptionField = 0
 		cif.extensionField = 0x4A17
-		cif.initialPacketSequenceNumber = newCircular(0, MAX_SEQUENCENUMBER)
-		cif.maxTransmissionUnitSize = 0
-		cif.maxFlowWindowSize = 0
+		//cif.initialPacketSequenceNumber = newCircular(0, MAX_SEQUENCENUMBER)
+		//cif.maxTransmissionUnitSize = 0
+		//cif.maxFlowWindowSize = 0
 		cif.srtSocketId = 0
-		cif.synCookie = ln.syncookie.Get(p.addr.String())
+		cif.synCookie = ln.syncookie.Get(p.Header().addr.String())
 
-		// leave the IP as is
-
-		p.SetCIF(cif)
+		p.MarshalCIF(cif)
 
 		log("outgoing: %s\n", cif.String())
 
 		ln.send(p)
 	} else if cif.handshakeType == HSTYPE_CONCLUSION {
 		// Verify the SYN cookie
-		if ln.syncookie.Verify(cif.synCookie, p.addr.String()) == false {
+		if ln.syncookie.Verify(cif.synCookie, p.Header().addr.String()) == false {
 			cif.handshakeType = REJ_ROGUE
-			p.SetCIF(cif)
+			p.MarshalCIF(cif)
 			ln.send(p)
 
 			return
@@ -494,7 +542,7 @@ func (ln *listener) handleHandshake(p *packet) {
 		// We only support HSv5
 		if cif.version != 5 {
 			cif.handshakeType = REJ_ROGUE
-			p.SetCIF(cif)
+			p.MarshalCIF(cif)
 			ln.send(p)
 
 			return
@@ -503,7 +551,7 @@ func (ln *listener) handleHandshake(p *packet) {
 		// Check the required SRT flags
 		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
 			cif.handshakeType = REJ_ROGUE
-			p.SetCIF(cif)
+			p.MarshalCIF(cif)
 			ln.send(p)
 
 			return
@@ -512,7 +560,7 @@ func (ln *listener) handleHandshake(p *packet) {
 		// We only support live streaming
 		if cif.srtFlags.STREAM == true {
 			cif.handshakeType = REJ_MESSAGEAPI
-			p.SetCIF(cif)
+			p.MarshalCIF(cif)
 			ln.send(p)
 
 			return
@@ -521,10 +569,10 @@ func (ln *listener) handleHandshake(p *packet) {
 		// fill up a struct with all relevant data and put it into the backlog
 
 		c := connRequest{
-			addr:      p.addr,
+			addr:      p.Header().addr,
 			start:     time.Now(),
 			socketId:  cif.srtSocketId,
-			timestamp: p.timestamp,
+			timestamp: p.Header().timestamp,
 
 			handshake: cif,
 		}
@@ -533,7 +581,7 @@ func (ln *listener) handleHandshake(p *packet) {
 			cr, err := newCrypto(int(cif.srtKM.kLen))
 			if err != nil {
 				cif.handshakeType = REJ_ROGUE
-				p.SetCIF(cif)
+				p.MarshalCIF(cif)
 				ln.send(p)
 
 				return
@@ -547,7 +595,7 @@ func (ln *listener) handleHandshake(p *packet) {
 		case ln.backlog <- c:
 		default:
 			cif.handshakeType = REJ_BACKLOG
-			p.SetCIF(cif)
+			p.MarshalCIF(cif)
 			ln.send(p)
 		}
 	} else {

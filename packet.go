@@ -13,6 +13,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const MAX_SEQUENCENUMBER uint32 = 0b01111111_11111111_11111111_11111111
@@ -85,7 +86,22 @@ const (
 	EXTTYPE_GROUP      uint16 = 8
 )
 
-type packet struct {
+type packet interface {
+	String() string
+	Clone() packet
+	Header() *pktHeader
+	Data() []byte
+	SetData([]byte)
+	Len() uint64
+	Unmarshal(data []byte) error
+	Marshal(w io.Writer)
+	Dump() string
+	MarshalCIF(c cifInterface)
+	UnmarshalCIF(c cifInterface) error
+	Decommission()
+}
+
+type pktHeader struct {
 	addr            net.Addr
 	isControlPacket bool
 	pktTsbpdTime    uint64
@@ -106,48 +122,87 @@ type packet struct {
 	// common fields
 	timestamp           uint32
 	destinationSocketId uint32
+}
+
+type pkt struct {
+	header pktHeader
 
 	data []byte
 }
 
-func newPacket(addr net.Addr, data []byte) *packet {
-	p := &packet{
-		addr: addr,
+type pool struct {
+	pool sync.Pool
+}
+
+func newPool() *pool {
+	return &pool{
+		pool: sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
+	}
+}
+
+func (p *pool) Get() *bytes.Buffer {
+	b := p.pool.Get().(*bytes.Buffer)
+	b.Reset()
+
+	return b
+}
+
+func (p *pool) Put(b *bytes.Buffer) {
+	p.pool.Put(b)
+}
+
+var payloadPool *pool = newPool()
+
+func newPacket(addr net.Addr, rawdata []byte) packet {
+	p := &pkt{
+		header: pktHeader{
+			addr: addr,
+		},
 	}
 
-	if err := p.Unmarshal(data); err != nil {
-		return nil
+	if len(rawdata) != 0 {
+		if err := p.Unmarshal(rawdata); err != nil {
+			return nil
+		}
 	}
 
 	return p
 }
 
-func (p packet) String() string {
+func (p *pkt) Decommission() {
+	return
+}
+
+func (p pkt) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "timestamp=%#08x, destId=%#08x\n", p.timestamp, p.destinationSocketId)
+	fmt.Fprintf(&b, "timestamp=%#08x, destId=%#08x\n", p.header.timestamp, p.header.destinationSocketId)
 
-	if p.isControlPacket == true {
+	if p.header.isControlPacket == true {
 		fmt.Fprintf(&b, "control packet:\n")
-		fmt.Fprintf(&b, "   controlType=%#04x\n", p.controlType)
-		fmt.Fprintf(&b, "   subType=%#04x\n", p.subType)
-		fmt.Fprintf(&b, "   typeSpecific=%#08x\n", p.typeSpecific)
+		fmt.Fprintf(&b, "   controlType=%#04x\n", p.header.controlType)
+		fmt.Fprintf(&b, "   subType=%#04x\n", p.header.subType)
+		fmt.Fprintf(&b, "   typeSpecific=%#08x\n", p.header.typeSpecific)
 	} else {
 		fmt.Fprintf(&b, "data packet:\n")
-		fmt.Fprintf(&b, "   packetSequenceNumber=%#08x (%d)\n", p.packetSequenceNumber.Val(), p.packetSequenceNumber.Val())
-		fmt.Fprintf(&b, "   packetPositionFlag=%s\n", p.packetPositionFlag)
-		fmt.Fprintf(&b, "   orderFlag=%v\n", p.orderFlag)
-		fmt.Fprintf(&b, "   keyBaseEncryptionFlag=%s\n", p.keyBaseEncryptionFlag)
-		fmt.Fprintf(&b, "   retransmittedPacketFlag=%v\n", p.retransmittedPacketFlag)
-		fmt.Fprintf(&b, "   messageNumber=%#08x (%d)\n", p.messageNumber, p.messageNumber)
+		fmt.Fprintf(&b, "   packetSequenceNumber=%#08x (%d)\n", p.header.packetSequenceNumber.Val(), p.header.packetSequenceNumber.Val())
+		fmt.Fprintf(&b, "   packetPositionFlag=%s\n", p.header.packetPositionFlag)
+		fmt.Fprintf(&b, "   orderFlag=%v\n", p.header.orderFlag)
+		fmt.Fprintf(&b, "   keyBaseEncryptionFlag=%s\n", p.header.keyBaseEncryptionFlag)
+		fmt.Fprintf(&b, "   retransmittedPacketFlag=%v\n", p.header.retransmittedPacketFlag)
+		fmt.Fprintf(&b, "   messageNumber=%#08x (%d)\n", p.header.messageNumber, p.header.messageNumber)
 	}
 
-	fmt.Fprintf(&b, "data (%d bytes)\n%s", len(p.data), hex.Dump(p.data))
+	fmt.Fprintf(&b, "data (%d bytes)\n%s", p.Len(), p.Dump())
 
 	return b.String()
 }
 
-func (p *packet) Clone() *packet {
+func (p *pkt) Clone() packet {
 	clone := *p
 
 	clone.data = make([]byte, len(p.data))
@@ -156,28 +211,45 @@ func (p *packet) Clone() *packet {
 	return &clone
 }
 
-func (p *packet) Unmarshal(data []byte) error {
+func (p *pkt) Header() *pktHeader {
+	return &p.header
+}
+
+func (p *pkt) SetData(data []byte) {
+	p.data = make([]byte, len(data))
+	copy(p.data, data)
+}
+
+func (p *pkt) Data() []byte {
+	return p.data
+}
+
+func (p *pkt) Len() uint64 {
+	return uint64(len(p.data))
+}
+
+func (p *pkt) Unmarshal(data []byte) error {
 	if len(data) < 16 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
-	p.isControlPacket = (data[0] & 0x80) != 0
+	p.header.isControlPacket = (data[0] & 0x80) != 0
 
-	if p.isControlPacket == true {
-		p.controlType = binary.BigEndian.Uint16(data[0:]) & ^uint16(1<<15) // clear the first bit
-		p.subType = binary.BigEndian.Uint16(data[2:])
-		p.typeSpecific = binary.BigEndian.Uint32(data[4:])
+	if p.header.isControlPacket == true {
+		p.header.controlType = binary.BigEndian.Uint16(data[0:]) & ^uint16(1<<15) // clear the first bit
+		p.header.subType = binary.BigEndian.Uint16(data[2:])
+		p.header.typeSpecific = binary.BigEndian.Uint32(data[4:])
 	} else {
-		p.packetSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:]), MAX_SEQUENCENUMBER)
-		p.packetPositionFlag = packetPosition((data[4] & 0b11000000) >> 6)
-		p.orderFlag = (data[4] & 0b00100000) != 0
-		p.keyBaseEncryptionFlag = packetEncryption((data[4] & 0b00011000) >> 3)
-		p.retransmittedPacketFlag = (data[4] & 0b00000100) != 0
-		p.messageNumber = binary.BigEndian.Uint32(data[4:]) & ^uint32(0b11111000<<24)
+		p.header.packetSequenceNumber = newCircular(binary.BigEndian.Uint32(data[0:]), MAX_SEQUENCENUMBER)
+		p.header.packetPositionFlag = packetPosition((data[4] & 0b11000000) >> 6)
+		p.header.orderFlag = (data[4] & 0b00100000) != 0
+		p.header.keyBaseEncryptionFlag = packetEncryption((data[4] & 0b00011000) >> 3)
+		p.header.retransmittedPacketFlag = (data[4] & 0b00000100) != 0
+		p.header.messageNumber = binary.BigEndian.Uint32(data[4:]) & ^uint32(0b11111000<<24)
 	}
 
-	p.timestamp = binary.BigEndian.Uint32(data[8:])
-	p.destinationSocketId = binary.BigEndian.Uint32(data[12:])
+	p.header.timestamp = binary.BigEndian.Uint32(data[8:])
+	p.header.destinationSocketId = binary.BigEndian.Uint32(data[12:])
 
 	p.data = make([]byte, len(data)-16)
 	copy(p.data, data[16:])
@@ -185,43 +257,47 @@ func (p *packet) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (p *packet) Marshal(w io.Writer) {
+func (p *pkt) Marshal(w io.Writer) {
 	var buffer [16]byte
 
-	if p.isControlPacket == true {
-		binary.BigEndian.PutUint16(buffer[0:], p.controlType)  // control type
-		binary.BigEndian.PutUint16(buffer[2:], p.subType)      // sub type
-		binary.BigEndian.PutUint32(buffer[4:], p.typeSpecific) // type specific
+	if p.header.isControlPacket == true {
+		binary.BigEndian.PutUint16(buffer[0:], p.header.controlType)  // control type
+		binary.BigEndian.PutUint16(buffer[2:], p.header.subType)      // sub type
+		binary.BigEndian.PutUint32(buffer[4:], p.header.typeSpecific) // type specific
 
 		buffer[0] |= 0x80
 	} else {
-		binary.BigEndian.PutUint32(buffer[0:], p.packetSequenceNumber.Val()) // sequence number
+		binary.BigEndian.PutUint32(buffer[0:], p.header.packetSequenceNumber.Val()) // sequence number
 
-		p.typeSpecific = 0
+		p.header.typeSpecific = 0
 
-		p.typeSpecific |= (uint32(p.packetPositionFlag) << 6)
-		if p.orderFlag == true {
-			p.typeSpecific |= (1 << 5)
+		p.header.typeSpecific |= (uint32(p.header.packetPositionFlag) << 6)
+		if p.header.orderFlag == true {
+			p.header.typeSpecific |= (1 << 5)
 		}
-		p.typeSpecific |= (uint32(p.keyBaseEncryptionFlag) << 3)
-		if p.retransmittedPacketFlag == true {
-			p.typeSpecific |= (1 << 2)
+		p.header.typeSpecific |= (uint32(p.header.keyBaseEncryptionFlag) << 3)
+		if p.header.retransmittedPacketFlag == true {
+			p.header.typeSpecific |= (1 << 2)
 		}
-		p.typeSpecific = p.typeSpecific << 24
-		p.typeSpecific += p.messageNumber
+		p.header.typeSpecific = p.header.typeSpecific << 24
+		p.header.typeSpecific += p.header.messageNumber
 
-		binary.BigEndian.PutUint32(buffer[4:], p.typeSpecific) // sequence number
+		binary.BigEndian.PutUint32(buffer[4:], p.header.typeSpecific) // sequence number
 	}
 
-	binary.BigEndian.PutUint32(buffer[8:], p.timestamp)            // timestamp
-	binary.BigEndian.PutUint32(buffer[12:], p.destinationSocketId) // destination socket ID
+	binary.BigEndian.PutUint32(buffer[8:], p.header.timestamp)            // timestamp
+	binary.BigEndian.PutUint32(buffer[12:], p.header.destinationSocketId) // destination socket ID
 
 	w.Write(buffer[0:])
 	w.Write(p.data)
 }
 
-func (p *packet) SetCIF(c cifInterface) {
-	if p.isControlPacket == false {
+func (p *pkt) Dump() string {
+	return hex.Dump(p.data)
+}
+
+func (p *pkt) MarshalCIF(c cifInterface) {
+	if p.header.isControlPacket == false {
 		return
 	}
 
@@ -232,8 +308,17 @@ func (p *packet) SetCIF(c cifInterface) {
 	p.data = b.Bytes()
 }
 
+func (p *pkt) UnmarshalCIF(c cifInterface) error {
+	if p.header.isControlPacket == false {
+		return nil
+	}
+
+	return c.Unmarshal(p.data)
+}
+
 type cifInterface interface {
 	Marshal(w io.Writer)
+	Unmarshal(data []byte) error
 }
 
 // 3.2.1.  Handshake
@@ -249,10 +334,7 @@ type cifHandshake struct {
 	handshakeType               uint32
 	srtSocketId                 uint32
 	synCookie                   uint32
-	peerIP0                     uint32
-	peerIP1                     uint32
-	peerIP2                     uint32
-	peerIP3                     uint32
+	peerIP                      IP
 
 	hasHS  bool
 	hasKM  bool
@@ -294,10 +376,7 @@ func (c cifHandshake) String() string {
 	fmt.Fprintf(&b, "   handshakeType: %#08x\n", c.handshakeType)
 	fmt.Fprintf(&b, "   srtSocketId: %#08x\n", c.srtSocketId)
 	fmt.Fprintf(&b, "   synCookie: %#08x\n", c.synCookie)
-	fmt.Fprintf(&b, "   peerIP0: %#08x\n", c.peerIP0)
-	fmt.Fprintf(&b, "   peerIP1: %#08x\n", c.peerIP1)
-	fmt.Fprintf(&b, "   peerIP2: %#08x\n", c.peerIP2)
-	fmt.Fprintf(&b, "   peerIP3: %#08x\n", c.peerIP3)
+	fmt.Fprintf(&b, "   peerIP: %s\n", c.peerIP)
 
 	if c.hasHS == true {
 		fmt.Fprintf(&b, "   SRT_CMD_HS(REQ/RSP)\n")
@@ -343,6 +422,129 @@ func (c cifHandshake) String() string {
 	return b.String()
 }
 
+type IP struct {
+	ip net.IP
+}
+
+func (i *IP) setDefault() {
+	i.ip = net.ParseIP("127.0.0.1")
+}
+
+func (i IP) String() string {
+	return i.ip.String()
+}
+
+func (i *IP) Parse(ip string) {
+	i.ip = net.ParseIP(ip)
+
+	if i.ip == nil || i.ip.IsUnspecified() == true {
+		i.setDefault()
+	}
+}
+
+func (i *IP) FromNetIP(ip net.IP) {
+	i.ip = net.ParseIP(ip.String())
+
+	if i.ip == nil || i.ip.IsUnspecified() == true {
+		i.setDefault()
+	}
+}
+
+func (i *IP) FromNetAddr(addr net.Addr) {
+	if a, err := net.ResolveUDPAddr("udp", addr.String()); err == nil {
+		i.ip = a.IP
+	} else {
+		i.setDefault()
+	}
+
+	if i.ip.IsUnspecified() == true {
+		i.setDefault()
+	}
+}
+
+// Unmarshal converts 16 bytes in network byte order to IP
+func (i *IP) Unmarshal(data []byte) error {
+	if len(data) != 4 && len(data) != 16 {
+		return fmt.Errorf("invalid number of bytes")
+	}
+
+	if len(data) == 4 {
+		ip0 := binary.LittleEndian.Uint32(data[0:])
+
+		i.ip = net.IPv4(byte((ip0&0xff000000)>>24), byte((ip0&0x00ff0000)>>16), byte((ip0&0x0000ff00)>>8), byte(ip0&0x0000ff))
+	} else {
+		ip3 := binary.LittleEndian.Uint32(data[0:])
+		ip2 := binary.LittleEndian.Uint32(data[4:])
+		ip1 := binary.LittleEndian.Uint32(data[8:])
+		ip0 := binary.LittleEndian.Uint32(data[12:])
+
+		if ip0 == 0 && ip1 == 0 && ip2 == 0 {
+			i.ip = net.IPv4(byte((ip3&0xff000000)>>24), byte((ip3&0x00ff0000)>>16), byte((ip3&0x0000ff00)>>8), byte(ip3&0x0000ff))
+		} else {
+			var b strings.Builder
+
+			fmt.Fprintf(&b, "%#04x:", (ip0&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%#04x:", ip0&0x0000ffff)
+			fmt.Fprintf(&b, "%#04x:", (ip1&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%#04x:", ip1&0x0000ffff)
+			fmt.Fprintf(&b, "%#04x:", (ip2&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%#04x:", ip2&0x0000ffff)
+			fmt.Fprintf(&b, "%#04x:", (ip3&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%#04x", ip3&0x0000ffff)
+
+			i.ip = net.ParseIP(b.String())
+		}
+	}
+
+	return nil
+}
+
+// Marshal converts an IP to 16 byte network byte order
+func (i *IP) Marshal(data []byte) {
+	if len(data) < 16 {
+		return
+	}
+
+	data[0] = i.ip[15]
+	data[1] = i.ip[14]
+	data[2] = i.ip[13]
+	data[3] = i.ip[12]
+
+	if i.ip.To4() != nil {
+		data[4] = 0
+		data[5] = 0
+		data[6] = 0
+		data[7] = 0
+
+		data[8] = 0
+		data[9] = 0
+		data[10] = 0
+		data[11] = 0
+
+		data[12] = 0
+		data[13] = 0
+		data[14] = 0
+		data[15] = 0
+	} else {
+		data[4] = i.ip[11]
+		data[5] = i.ip[10]
+		data[6] = i.ip[9]
+		data[7] = i.ip[8]
+
+		data[8] = i.ip[7]
+		data[9] = i.ip[6]
+		data[10] = i.ip[5]
+		data[11] = i.ip[4]
+
+		data[12] = i.ip[3]
+		data[13] = i.ip[2]
+		data[14] = i.ip[1]
+		data[16] = i.ip[0]
+	}
+
+	return
+}
+
 func (c *cifHandshake) Unmarshal(data []byte) error {
 	if len(data) < 48 {
 		return fmt.Errorf("data too short to unmarshal")
@@ -357,10 +559,7 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 	c.handshakeType = binary.BigEndian.Uint32(data[20:])
 	c.srtSocketId = binary.BigEndian.Uint32(data[24:])
 	c.synCookie = binary.BigEndian.Uint32(data[28:])
-	c.peerIP0 = binary.BigEndian.Uint32(data[32:])
-	c.peerIP1 = binary.BigEndian.Uint32(data[36:])
-	c.peerIP2 = binary.BigEndian.Uint32(data[40:])
-	c.peerIP3 = binary.BigEndian.Uint32(data[44:])
+	c.peerIP.Unmarshal(data[32:48])
 
 	if c.handshakeType != HSTYPE_INDUCTION && c.handshakeType != HSTYPE_CONCLUSION {
 		return fmt.Errorf("unimplemented handshake type")
@@ -513,10 +712,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[20:], c.handshakeType)                    // handshakeType
 	binary.BigEndian.PutUint32(buffer[24:], c.srtSocketId)                      // Socket ID of the Listener, should be some own generated ID
 	binary.BigEndian.PutUint32(buffer[28:], c.synCookie)                        // SYN cookie
-	binary.BigEndian.PutUint32(buffer[32:], c.peerIP0)                          // peerIP0
-	binary.BigEndian.PutUint32(buffer[36:], c.peerIP1)                          // peerIP1
-	binary.BigEndian.PutUint32(buffer[40:], c.peerIP2)                          // peerIP2
-	binary.BigEndian.PutUint32(buffer[44:], c.peerIP3)                          // peerIP3
+	c.peerIP.Marshal(buffer[32:])                                               // peerIP
 
 	w.Write(buffer[:48])
 
