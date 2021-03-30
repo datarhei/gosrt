@@ -127,7 +127,7 @@ type pktHeader struct {
 type pkt struct {
 	header pktHeader
 
-	data []byte
+	payload *bytes.Buffer
 }
 
 type pool struct {
@@ -162,6 +162,7 @@ func newPacket(addr net.Addr, rawdata []byte) packet {
 		header: pktHeader{
 			addr: addr,
 		},
+		payload: payloadPool.Get(),
 	}
 
 	if len(rawdata) != 0 {
@@ -174,6 +175,9 @@ func newPacket(addr net.Addr, rawdata []byte) packet {
 }
 
 func (p *pkt) Decommission() {
+	payloadPool.Put(p.payload)
+	p.payload = nil
+
 	return
 }
 
@@ -205,8 +209,8 @@ func (p pkt) String() string {
 func (p *pkt) Clone() packet {
 	clone := *p
 
-	clone.data = make([]byte, len(p.data))
-	copy(clone.data, p.data)
+	clone.payload = payloadPool.Get()
+	clone.payload.Write(p.payload.Bytes())
 
 	return &clone
 }
@@ -216,16 +220,16 @@ func (p *pkt) Header() *pktHeader {
 }
 
 func (p *pkt) SetData(data []byte) {
-	p.data = make([]byte, len(data))
-	copy(p.data, data)
+	p.payload.Reset()
+	p.payload.Write(data)
 }
 
 func (p *pkt) Data() []byte {
-	return p.data
+	return p.payload.Bytes()
 }
 
 func (p *pkt) Len() uint64 {
-	return uint64(len(p.data))
+	return uint64(p.payload.Len())
 }
 
 func (p *pkt) Unmarshal(data []byte) error {
@@ -251,8 +255,8 @@ func (p *pkt) Unmarshal(data []byte) error {
 	p.header.timestamp = binary.BigEndian.Uint32(data[8:])
 	p.header.destinationSocketId = binary.BigEndian.Uint32(data[12:])
 
-	p.data = make([]byte, len(data)-16)
-	copy(p.data, data[16:])
+	p.payload.Reset()
+	p.payload.Write(data[16:])
 
 	return nil
 }
@@ -289,11 +293,11 @@ func (p *pkt) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[12:], p.header.destinationSocketId) // destination socket ID
 
 	w.Write(buffer[0:])
-	w.Write(p.data)
+	w.Write(p.payload.Bytes())
 }
 
 func (p *pkt) Dump() string {
-	return hex.Dump(p.data)
+	return hex.Dump(p.payload.Bytes())
 }
 
 func (p *pkt) MarshalCIF(c cifInterface) {
@@ -301,11 +305,8 @@ func (p *pkt) MarshalCIF(c cifInterface) {
 		return
 	}
 
-	var b bytes.Buffer
-
-	c.Marshal(&b)
-
-	p.data = b.Bytes()
+	p.payload.Reset()
+	c.Marshal(p.payload)
 }
 
 func (p *pkt) UnmarshalCIF(c cifInterface) error {
@@ -313,7 +314,7 @@ func (p *pkt) UnmarshalCIF(c cifInterface) error {
 		return nil
 	}
 
-	return c.Unmarshal(p.data)
+	return c.Unmarshal(p.payload.Bytes())
 }
 
 type cifInterface interface {

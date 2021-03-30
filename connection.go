@@ -269,6 +269,9 @@ func (c *srtConn) Read(b []byte) (int, error) {
 
 	c.readBuffer.Write(p.Data())
 
+	// The packet is out of congestion control and written to the read buffer
+	p.Decommission()
+
 	return c.readBuffer.Read(b)
 }
 
@@ -315,7 +318,9 @@ func (c *srtConn) Write(b []byte) (int, error) {
 			return 0, err
 		}
 
-		p := newPacket(nil, data)
+		p := newPacket(nil, nil)
+
+		p.SetData(data)
 
 		p.Header().isControlPacket = false
 		p.Header().packetSequenceNumber = newCircular(0, 0b01111111_11111111_11111111_11111111)
@@ -432,18 +437,20 @@ func (c *srtConn) handlePacket(p packet) {
 
 	c.timeout.Reset(2 * time.Second)
 
-	if p.Header().isControlPacket == true {
-		if p.Header().controlType == CTRLTYPE_KEEPALIVE {
+	header := p.Header()
+
+	if header.isControlPacket == true {
+		if header.controlType == CTRLTYPE_KEEPALIVE {
 			c.handleKeepAlive(p)
-		} else if p.Header().controlType == CTRLTYPE_SHUTDOWN {
+		} else if header.controlType == CTRLTYPE_SHUTDOWN {
 			c.handleShutdown(p)
-		} else if p.Header().controlType == CTRLTYPE_NAK {
+		} else if header.controlType == CTRLTYPE_NAK {
 			c.handleNAK(p)
-		} else if p.Header().controlType == CTRLTYPE_ACK {
+		} else if header.controlType == CTRLTYPE_ACK {
 			c.handleACK(p)
-		} else if p.Header().controlType == CTRLTYPE_ACKACK {
+		} else if header.controlType == CTRLTYPE_ACKACK {
 			c.handleACKACK(p)
-		} else if p.Header().controlType == CTRLTYPE_USER && (p.Header().subType == EXTTYPE_KMREQ || p.Header().subType == EXTTYPE_KMRSP) {
+		} else if header.controlType == CTRLTYPE_USER && (header.subType == EXTTYPE_KMREQ || header.subType == EXTTYPE_KMRSP) {
 			// 3.2.2.  Key Material
 			log("handle KM\n")
 			c.handleKM(p)
@@ -459,12 +466,12 @@ func (c *srtConn) handlePacket(p packet) {
 
 		// 4.5.1.1.  TSBPD Time Base Calculation
 		if c.tsbpdWrapPeriod == false {
-			if p.Header().timestamp > MAX_TIMESTAMP-(30*1000000) {
+			if header.timestamp > MAX_TIMESTAMP-(30*1000000) {
 				c.tsbpdWrapPeriod = true
 				log("TSBPD wrapping period started\n")
 			}
 		} else {
-			if p.Header().timestamp >= (30*1000000) && p.Header().timestamp <= (60*1000000) {
+			if header.timestamp >= (30*1000000) && header.timestamp <= (60*1000000) {
 				c.tsbpdWrapPeriod = false
 				c.tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
 				log("TSBPD wrapping period finished\n")
@@ -473,15 +480,15 @@ func (c *srtConn) handlePacket(p packet) {
 
 		tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
 		if c.tsbpdWrapPeriod == true {
-			if p.Header().timestamp < (30 * 1000000) {
+			if header.timestamp < (30 * 1000000) {
 				tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
 			}
 		}
 
-		p.Header().pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(p.Header().timestamp) + c.tsbpdDelay + c.drift
+		header.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.timestamp) + c.tsbpdDelay + c.drift
 
-		if p.Header().keyBaseEncryptionFlag != 0 && c.crypto != nil {
-			c.crypto.EncryptOrDecryptPayload(p.Data(), p.Header().keyBaseEncryptionFlag, p.Header().packetSequenceNumber.Val())
+		if header.keyBaseEncryptionFlag != 0 && c.crypto != nil {
+			c.crypto.EncryptOrDecryptPayload(p.Data(), header.keyBaseEncryptionFlag, header.packetSequenceNumber.Val())
 		}
 
 		// Put the packet into receive congestion control
@@ -694,10 +701,10 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		binary.BigEndian.PutUint32(data[0:], seq)
 		binary.BigEndian.PutUint32(data[4:], uint32(c.rtt))
 		binary.BigEndian.PutUint32(data[8:], uint32(c.rttVar))
-		binary.BigEndian.PutUint32(data[12:], 1000) // TODO: available buffer size (packets)
-		binary.BigEndian.PutUint32(data[16:], pps) // TODO: packets receiving rate (packets/s)
-		binary.BigEndian.PutUint32(data[20:], pps * 2) // TODO: estimated link capacity (packets/s)
-		binary.BigEndian.PutUint32(data[24:], bps) // TODO: receiving rate (bytes/s)
+		binary.BigEndian.PutUint32(data[12:], 1000)  // TODO: available buffer size (packets)
+		binary.BigEndian.PutUint32(data[16:], pps)   // TODO: packets receiving rate (packets/s)
+		binary.BigEndian.PutUint32(data[20:], pps*2) // TODO: estimated link capacity (packets/s)
+		binary.BigEndian.PutUint32(data[24:], bps)   // TODO: receiving rate (bytes/s)
 
 		p.Header().typeSpecific = c.nextACKNumber.Val()
 

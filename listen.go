@@ -162,55 +162,6 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	return ln, nil
 }
 
-func (ln *listener) receiver() {
-	defer func() {
-		log("shutdown one receiver\n")
-	}()
-
-	log("starting one receiver\n")
-
-	buffer := make([]byte, 16384 /*config.MSS*/) // MTU size
-
-	for {
-		if ln.isShutdown == true {
-			log("stuck here\n")
-			select {
-			case ln.doneChan <- ErrServerClosed:
-			default:
-			}
-			return
-		}
-
-		//ln.pc.SetReadDeadline(time.Now().Add(3 * time.Second))
-		n, addr, err := ln.pc.ReadFrom(buffer)
-		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) == true {
-				continue
-			}
-
-			if ln.isShutdown == true {
-				log("stuck here\n")
-				select {
-				case ln.doneChan <- ErrServerClosed:
-				default:
-				}
-				return
-			}
-
-			log("stuck here\n")
-			ln.doneChan <- err
-			return
-		}
-
-		p := newPacket(addr, buffer[:n])
-		if p == nil {
-			continue
-		}
-
-		ln.rcvQueue <- p
-	}
-}
-
 type ConnRequest interface {
 	RemoteAddr() net.Addr
 	StreamId() string
@@ -282,7 +233,7 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 		}
 
 		// create a new socket ID
-		socketId := uint32(time.Now().Sub(ln.start).Microseconds())
+		socketId := uint32(time.Since(ln.start).Microseconds())
 
 		tsbpdDelay := uint64(request.handshake.recvTSBPDDelay) * 1000
 		if uint64(ln.config.ReceiverLatency.Microseconds()) > tsbpdDelay {
@@ -357,7 +308,7 @@ func (ln *listener) reject(request connRequest, reason uint32) {
 	p.Header().subType = 0
 	p.Header().typeSpecific = 0
 
-	p.Header().timestamp = uint32(time.Now().Sub(ln.start).Microseconds())
+	p.Header().timestamp = uint32(time.Since(ln.start).Microseconds())
 	p.Header().destinationSocketId = request.socketId
 
 	request.handshake.handshakeType = reason
@@ -376,7 +327,7 @@ func (ln *listener) accept(request connRequest) {
 	p.Header().subType = 0
 	p.Header().typeSpecific = 0
 
-	p.Header().timestamp = uint32(time.Now().Sub(request.start).Microseconds())
+	p.Header().timestamp = uint32(time.Since(request.start).Microseconds())
 	p.Header().destinationSocketId = request.socketId
 
 	p.MarshalCIF(request.handshake)
@@ -478,8 +429,6 @@ func (ln *listener) writer() {
 
 			p.Marshal(&data)
 
-			p.Decommission()
-
 			buffer := data.Bytes()
 
 			//logOut("packet-send: bytes=%d to=%s\n", len(buffer), b.addr.String())
@@ -487,6 +436,11 @@ func (ln *listener) writer() {
 
 			// Write the packet's contents to the wire
 			ln.pc.WriteTo(buffer, p.Header().addr)
+
+			if p.Header().isControlPacket == true {
+				// Control packets can be decommissioned because they will be sent again
+				p.Decommission()
+			}
 		}
 	}
 }

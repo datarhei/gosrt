@@ -158,6 +158,8 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 				continue
 			}
 
+			//log("incoming: %s\n", p.String())
+
 			dl.rcvQueue <- p
 
 			index++
@@ -249,6 +251,7 @@ func (dl *dialer) send(p packet) {
 	}
 }
 
+// send packets to the wire
 func (dl *dialer) writer() {
 	defer func() {
 		log("client: left writer loop\n")
@@ -266,14 +269,17 @@ func (dl *dialer) writer() {
 
 			p.Marshal(&data)
 
-			p.Decommission()
-
 			buffer := data.Bytes()
 
 			//log("packet-send: bytes=%d to=%s\n", len(buffer), p.addr.String())
 
 			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
+
+			if p.Header().isControlPacket == true {
+				// Control packets can be decommissioned because they will be sent again
+				p.Decommission()
+			}
 		}
 	}
 }

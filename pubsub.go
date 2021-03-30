@@ -54,8 +54,10 @@ func (pb *pubSub) broadcast() {
 					log("broadcast target queue is full\n")
 				}
 			}
-			p.Decommission()
 			pb.lock.Unlock()
+
+			// We don't need this packet anymore
+			p.Decommission()
 		}
 	}
 }
@@ -65,7 +67,7 @@ func (pb *pubSub) Publish(c Conn) error {
 	var err error
 	conn, ok := c.(*srtConn)
 	if !ok {
-		return fmt.Errorf("The provided connection is not a SRT connection")
+		return fmt.Errorf("the provided connection is not a SRT connection")
 	}
 
 	for {
@@ -91,7 +93,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 	socketId := c.SocketId()
 	conn, ok := c.(*srtConn)
 	if !ok {
-		return fmt.Errorf("The provided connection is not a SRT connection")
+		return fmt.Errorf("the provided connection is not a SRT connection")
 	}
 
 	pb.lock.Lock()
