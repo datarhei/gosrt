@@ -40,7 +40,7 @@ type Config struct {
 
 	// Input bandwidth. Bytes.
 	// SRTO_INPUTBW
-	InputBW uint32
+	InputBW int64
 
 	// IP socket type of service
 	// SRTO_IPTOS
@@ -56,19 +56,15 @@ type Config struct {
 
 	// Duration of Stream Encryption key switchover. Packets.
 	// SRTO_KMPREANNOUNCE
-	KMPreAnnounce uint32
+	KMPreAnnounce uint64
 
 	// Stream encryption key refresh rate. Packets.
 	// SRTO_KMREFRESHRATE
-	KMRefreshRate uint32
+	KMRefreshRate uint64
 
 	// Defines the maximum accepted transmission latency.
 	// SRTO_LATENCY
 	Latency time.Duration
-
-	// Link linger value
-	// SRTO_LINGER
-	Linger time.Duration
 
 	// Packet reorder tolerance.
 	// SRTO_LOSSMAXTTL
@@ -76,11 +72,16 @@ type Config struct {
 
 	// Bandwidth limit in bytes.
 	// SRTO_MAXBW
-	MaxBW uint32
+	MaxBW int64
 
 	// Enable SRT message mode.
 	// SRTO_MESSAGEAPI
 	MessageAPI bool
+
+	// Minimum input bandwidth
+	// This option is effective only if both SRTO_MAXBW and SRTO_INPUTBW are set to 0. It controls the minimum allowed value of the input bitrate estimate.
+	// SRTO_MININPUTBW
+	MinInputBW int64
 
 	// Minimum SRT library version of a peer.
 	// SRTO_MINVERSION
@@ -96,7 +97,7 @@ type Config struct {
 
 	// Limit bandwidth overhead, percents
 	// SRTO_OHEADBW
-	OverheadBW uint
+	OverheadBW int64
 
 	// Set up the packet filter.
 	// SRTO_PACKETFILTER
@@ -167,17 +168,16 @@ var DefaultConfig Config = Config{
 	IPTOS:                 0,
 	IPTTL:                 0,
 	IPv6Only:              false,
-	KMPreAnnounce:         4000,
+	KMPreAnnounce:         1 << 12,
 	KMRefreshRate:         1 << 24,
 	Latency:               120 * time.Millisecond,
-	Linger:                2 * time.Second,
 	LossMaxTTL:            0,
-	MaxBW:                 0,
+	MaxBW:                 -1,
 	MessageAPI:            false,
 	MinVersion:            "1.4.2",
 	MSS:                   1500,
 	NAKReport:             true,
-	OverheadBW:            10,
+	OverheadBW:            25,
 	PacketFilter:          "",
 	Passphrase:            "",
 	PayloadSize:           1316,
@@ -228,8 +228,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("IPv6Only is not supported.")
 	}
 
-	if c.KMRefreshRate != 0 && c.KMRefreshRate <= c.KMPreAnnounce {
-		return fmt.Errorf("KMRefreshRate must be greater than KMPreAnnounce.")
+	if c.KMRefreshRate != 0 {
+		if c.KMPreAnnounce < 1 || c.KMPreAnnounce > c.KMRefreshRate/2 {
+			return fmt.Errorf("KMPreAnnounce must be greater than 1 and smaller than KMRefreshRate/2.")
+		}
 	}
 
 	if c.Latency < 0 {
@@ -250,11 +252,15 @@ func (c Config) Validate() error {
 	}
 
 	if c.OverheadBW < 10 || c.OverheadBW > 100 {
-		return fmt.Errorf("OverheadBW must be between 5 and 100.")
+		return fmt.Errorf("OverheadBW must be between 10 and 100.")
 	}
 
 	if len(c.PacketFilter) != 0 {
 		return fmt.Errorf("PacketFilter are not supported.")
+	}
+
+	if c.PayloadSize > 1456 {
+		return fmt.Errorf("PayloadSize can't be larger than 1456.")
 	}
 
 	if c.PBKeylen != 16 && c.PBKeylen != 24 && c.PBKeylen != 32 {

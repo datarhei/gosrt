@@ -41,32 +41,38 @@ func newCrypto(keyLength int) (*crypto, error) {
 	// 3.2.2.  Key Material: "The only valid length of salt defined is 128 bits."
 	c.salt = make([]byte, 16)
 	if err := c.prng(c.salt); err != nil {
-		return nil, fmt.Errorf("Can't generate salt: %w", err)
+		return nil, fmt.Errorf("can't generate salt: %w", err)
 	}
 
 	c.evenSEK = make([]byte, c.keyLength)
-	if err := c.prng(c.evenSEK); err != nil {
-		return nil, fmt.Errorf("Can't generate even key: %w", err)
+	if err := c.GenerateSEK(evenKeyEncrypted); err != nil {
+		return nil, err
 	}
 
 	c.oddSEK = make([]byte, c.keyLength)
-	if err := c.prng(c.oddSEK); err != nil {
-		return nil, fmt.Errorf("Can't generate odd key: %w", err)
+	if err := c.GenerateSEK(oddKeyEncrypted); err != nil {
+		return nil, err
 	}
 
 	return c, nil
 }
 
-func (c *crypto) ChangeSEK(key packetEncryption) {
+func (c *crypto) GenerateSEK(key packetEncryption) error {
 	if key.IsValid() == false {
-		return
+		return fmt.Errorf("unknown key type")
 	}
 
 	if key == evenKeyEncrypted {
-		c.prng(c.evenSEK)
+		if err := c.prng(c.evenSEK); err != nil {
+			return fmt.Errorf("can't generate even key: %w", err)
+		}
 	} else if key == oddKeyEncrypted {
-		c.prng(c.oddSEK)
+		if err := c.prng(c.oddSEK); err != nil {
+			return fmt.Errorf("can't generate odd key: %w", err)
+		}
 	}
+
+	return nil
 }
 
 func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {

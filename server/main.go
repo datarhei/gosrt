@@ -62,12 +62,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	config := srt.DefaultConfig
+
+	config.KMPreAnnounce = 200
+	config.KMRefreshRate = 10000
+
 	s.server = &srt.Server{
 		Addr:            s.addr,
 		HandleConnect:   s.handleConnect,
 		HandlePublish:   s.handlePublish,
 		HandleSubscribe: s.handleSubscribe,
 		Debug:           false,
+		Config: &config,
 	}
 
 	fmt.Fprintf(os.Stderr, "Listening on %s\n", s.addr)
@@ -110,7 +116,12 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		return srt.REJECT
 	}
 
-	req.SetPassphrase(s.passphrase)
+	if req.IsEncrypted() == true {
+		if err := req.SetPassphrase(s.passphrase); err != nil {
+			s.log("CONNECT", "FORBIDDEN", u.Path, err.Error(), client)
+			return srt.REJECT
+		}
+	}
 
 	// Check the token
 	token := u.Query().Get("token")

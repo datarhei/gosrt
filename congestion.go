@@ -13,7 +13,8 @@ import (
 )
 
 type liveStatsCounter struct {
-	total                   uint64
+	pushed uint64
+	delivered                   uint64
 	buffer                  uint64
 	retransmitted           uint64
 	retransmittedAndDropped uint64
@@ -26,6 +27,15 @@ type liveStats struct {
 	bytes   liveStatsCounter
 }
 
+type liveSendConfig struct {
+	initialSequenceNumber circular
+	dropInterval uint64
+	maxBW int64
+	inputBW int64
+	minInputBW int64
+	overheadBW int64
+}
+
 type liveSend struct {
 	nextSequenceNumber circular
 
@@ -33,23 +43,46 @@ type liveSend struct {
 	lossList   *list.List
 	lock       sync.RWMutex
 
-	dropInterval uint64
+	dropInterval uint64 // microseconds
+
+	avgPayloadSize float64 // bytes
+	pktSndPeriod float64 // microseconds
+	maxBW float64 // bytes/s
+	inputBW float64 // bytes/s
+	overheadBW float64 // percent
+
+	estimatedInputBW float64
+	period time.Duration
+	last time.Time
 
 	statistics liveStats
+	prevStatistics liveStats
 
 	deliver func(p packet)
 }
 
-func newLiveSend(initalSequenceNumber circular, dropInterval uint64) *liveSend {
+func newLiveSend(config liveSendConfig) *liveSend {
 	s := &liveSend{
-		nextSequenceNumber: initalSequenceNumber,
+		nextSequenceNumber: config.initialSequenceNumber,
 		packetList:         list.New(),
 		lossList:           list.New(),
 
-		dropInterval: dropInterval, // microseconds
+		dropInterval: config.dropInterval, // microseconds
+
+		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
+		maxBW: float64(config.maxBW),
+		inputBW: float64(config.inputBW),
+		overheadBW: float64(config.overheadBW),
+
+		estimatedInputBW: 0,
+		period: time.Second,
+		last: time.Now(),
 
 		deliver: func(p packet) {},
 	}
+
+	s.maxBW = 128 * 1024 * 1024 // 1 Gbit/s
+	s.pktSndPeriod = (s.avgPayloadSize + 16) * 1000000 / s.maxBW
 
 	return s
 }
@@ -72,8 +105,20 @@ func (s *liveSend) Push(p packet) {
 
 	// packets put into send buffer
 	s.statistics.packets.buffer++
+	s.statistics.packets.pushed++
 	// bytes put into send buffer
 	s.statistics.bytes.buffer += p.Len()
+	s.statistics.bytes.pushed += p.Len()
+
+	now := time.Now()
+	tdiff := now.Sub(s.last)
+
+	if tdiff > s.period {
+		s.estimatedInputBW = float64(s.statistics.bytes.pushed - s.prevStatistics.bytes.pushed) / tdiff.Seconds()
+
+		s.prevStatistics = s.statistics
+		s.last = now
+	}
 
 	//log("got %d @ %d\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
@@ -96,9 +141,12 @@ func (s *liveSend) Tick(now uint64) {
 			//log("delivering %d @ %d (%d bytes)\n", p.packetSequenceNumber, p.PktTsbpdTime, p.Len())
 
 			// packets delivered
-			s.statistics.packets.total++
+			s.statistics.packets.delivered++
 			// bytes delivered
-			s.statistics.bytes.total += p.Len()
+			s.statistics.bytes.delivered += p.Len()
+
+			//  5.1.2. SRT's Default LiveCC Algorithm
+			s.avgPayloadSize = 0.875 * s.avgPayloadSize + 0.125 * float64(p.Len())
 
 			s.deliver(p)
 			//log("   adding %d @ %d to losslist (%d)\n", p.packetSequenceNumber, p.PktTsbpdTime, now)
@@ -188,6 +236,9 @@ func (s *liveSend) ACK(sequenceNumber circular) {
 		// This packet has been ACK'd and we don't need it anymore
 		p.Decommission()
 	}
+
+	s.pktSndPeriod = (s.avgPayloadSize + 16) * 1000000 / s.maxBW
+
 	s.lock.Unlock()
 }
 
@@ -209,6 +260,9 @@ func (s *liveSend) NAK(sequenceNumbers []circular) {
 				// bytes retransmitted++
 				s.statistics.bytes.retransmitted += p.Len()
 
+				//  5.1.2. SRT's Default LiveCC Algorithm
+				s.avgPayloadSize = 0.875 * s.avgPayloadSize + 0.125 * float64(p.Len())
+
 				//log("   retransmitting %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
 				p.Header().retransmittedPacketFlag = true
@@ -217,6 +271,12 @@ func (s *liveSend) NAK(sequenceNumbers []circular) {
 		}
 	}
 	s.lock.RUnlock()
+}
+
+type liveRecvConfig struct {
+	initialSequenceNumber circular
+	periodicACKInterval uint64
+	periodicNAKInterval uint64
 }
 
 type liveRecv struct {
@@ -251,14 +311,14 @@ type liveRecv struct {
 	deliver func(p packet)
 }
 
-func newLiveRecv(initialSequenceNumber circular, periodicACKInterval, periodicNAKInterval uint64) *liveRecv {
+func newLiveRecv(config liveRecvConfig) *liveRecv {
 	r := &liveRecv{
-		maxSeenSequenceNumber: initialSequenceNumber.Dec(),
-		lastACKSequenceNumber: initialSequenceNumber.Dec(),
+		maxSeenSequenceNumber: config.initialSequenceNumber.Dec(),
+		lastACKSequenceNumber: config.initialSequenceNumber.Dec(),
 		packetList:            list.New(),
 
-		periodicACKInterval: periodicACKInterval, // microseconds
-		periodicNAKInterval: periodicNAKInterval, // microseconds
+		periodicACKInterval: config.periodicACKInterval, // microseconds
+		periodicNAKInterval: config.periodicNAKInterval, // microseconds
 	}
 
 	r.sendACK = func(seq uint32, light bool) {}
@@ -288,8 +348,8 @@ func (r *liveRecv) PacketRate() (pps, bps uint32) {
 		return
 	}
 
-	pdiff := r.statistics.packets.total - r.prevStatistics.packets.total
-	bdiff := r.statistics.bytes.total - r.prevStatistics.bytes.total
+	pdiff := r.statistics.packets.pushed - r.prevStatistics.packets.pushed
+	bdiff := r.statistics.bytes.pushed - r.prevStatistics.bytes.pushed
 
 	r.pps = uint32(float64(pdiff) / tdiff.Seconds())
 	r.bps = uint32(float64(bdiff) / tdiff.Seconds())
@@ -317,9 +377,9 @@ func (r *liveRecv) Push(pkt packet) {
 	r.nPackets++
 
 	// total received packets
-	r.statistics.packets.total++
+	r.statistics.packets.pushed++
 	// total received bytes
-	r.statistics.bytes.total += pkt.Len()
+	r.statistics.bytes.pushed += pkt.Len()
 
 	//pkt.PktTsbpdTime = pkt.Timestamp + r.delay
 
@@ -414,7 +474,6 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber uint32, lite
 	if now-r.lastPeriodicACK <= r.periodicACKInterval && r.nPackets >= 64 {
 		return
 	}
-
 
 	// send a periodic or light ACK
 	if r.nPackets >= 64 {
@@ -520,8 +579,10 @@ func (r *liveRecv) Tick(now uint64) {
 		if p.Header().packetSequenceNumber.Lte(r.lastACKSequenceNumber) && p.Header().pktTsbpdTime <= now {
 			// packets in buffer --
 			r.statistics.packets.buffer--
+			r.statistics.packets.delivered--
 			// bytes in buffer --
 			r.statistics.bytes.buffer -= p.Len()
+			r.statistics.bytes.delivered -= p.Len()
 
 			r.deliver(p)
 			removeList = append(removeList, e)

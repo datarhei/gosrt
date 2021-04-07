@@ -13,10 +13,67 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/datarhei/gosrt"
 )
+
+type stats struct {
+	bprev uint64
+	btotal uint64
+	prev uint64
+	total uint64
+
+	lock sync.Mutex
+
+	period time.Duration
+	last time.Time
+}
+
+func (s *stats) init(period time.Duration) {
+	s.bprev = 0
+	s.btotal = 0
+	s.prev = 0
+	s.total = 0
+
+	s.period = period
+	s.last = time.Now()
+
+	go s.tick()
+}
+
+func (s *stats) tick() {
+	ticker := time.NewTicker(s.period)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case c := <-ticker.C:
+			s.lock.Lock()
+			diff := c.Sub(s.last)
+
+			bavg := float64(s.btotal - s.bprev) * 8 / (1000 * 1000 * diff.Seconds())
+			avg := float64(s.total - s.prev) / diff.Seconds()
+
+			s.bprev = s.btotal
+			s.prev = s.total
+			s.last = c
+
+			s.lock.Unlock()
+
+			fmt.Fprintf(os.Stderr, "%s: %f packets/s, %f Mbps\n", c, avg, bavg)
+		}
+	}
+}
+
+func (s *stats) update(n uint64) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.btotal += n
+	s.total++
+}
 
 func main() {
 	var from string
@@ -47,17 +104,22 @@ func main() {
 
 		buffer := make([]byte, 2048)
 
+		s := stats{}
+		s.init(200 * time.Millisecond)
+
 		for {
 			n, err := r.Read(buffer)
 			if err != nil {
-				doneChan <- err
+				doneChan <- fmt.Errorf("read: %w", err)
 				return
 			}
 
-			//fmt.Fprintf(os.Stderr, "read: got %d bytes\n", n)
+			s.update(uint64(n))
+
+			//fmt.Fprintf(os.Stderr, "writing %d bytes\n", n)
 
 			if _, err := wr.Write(buffer[:n]); err != nil {
-				doneChan <- err
+				doneChan <- fmt.Errorf("write: %w", err)
 				return
 			}
 		}
@@ -154,12 +216,12 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "udp" {
-		raddr, err := net.ResolveUDPAddr("udp", u.Host)
+		laddr, err := net.ResolveUDPAddr("udp", u.Host)
 		if err != nil {
 			return nil, err
 		}
 
-		conn, err := net.DialUDP("udp", nil, raddr)
+		conn, err := net.ListenUDP("udp", laddr)
 		if err != nil {
 			return nil, err
 		}

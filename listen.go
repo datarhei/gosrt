@@ -195,7 +195,7 @@ func (req *connRequest) IsEncrypted() bool {
 
 func (req *connRequest) SetPassphrase(passphrase string) error {
 	if req.crypto == nil {
-		return nil
+		return fmt.Errorf("request without encryption")
 	}
 
 	if err := req.crypto.UnmarshalKM(req.handshake.srtKM, passphrase); err != nil {
