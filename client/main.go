@@ -20,15 +20,15 @@ import (
 )
 
 type stats struct {
-	bprev uint64
+	bprev  uint64
 	btotal uint64
-	prev uint64
-	total uint64
+	prev   uint64
+	total  uint64
 
 	lock sync.Mutex
 
 	period time.Duration
-	last time.Time
+	last   time.Time
 }
 
 func (s *stats) init(period time.Duration) {
@@ -53,8 +53,8 @@ func (s *stats) tick() {
 			s.lock.Lock()
 			diff := c.Sub(s.last)
 
-			bavg := float64(s.btotal - s.bprev) * 8 / (1000 * 1000 * diff.Seconds())
-			avg := float64(s.total - s.prev) / diff.Seconds()
+			bavg := float64(s.btotal-s.bprev) * 8 / (1000 * 1000 * diff.Seconds())
+			avg := float64(s.total-s.prev) / diff.Seconds()
 
 			s.bprev = s.btotal
 			s.prev = s.total

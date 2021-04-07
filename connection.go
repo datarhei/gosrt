@@ -6,7 +6,6 @@ package srt
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"math"
 	"net"
@@ -71,13 +70,13 @@ type srtConn struct {
 
 	streamId string
 
-	passphrase        string
-	crypto            *crypto
-	keyBaseEncryption packetEncryption
+	passphrase             string
+	crypto                 *crypto
+	keyBaseEncryption      packetEncryption
 	kmPreAnnounceCountdown uint64
-	kmRefreshCountdown uint64
-	kmRefreshPeriod bool
-	kmConfirmed bool
+	kmRefreshCountdown     uint64
+	kmRefreshPeriod        bool
+	kmConfirmed            bool
 
 	timeout *time.Timer
 
@@ -194,8 +193,8 @@ func (c *srtConn) listenAndServe() {
 	// 4.8.2.  Packet Retransmission (NAKs) -> periodicNAK at least 20 milliseconds
 	c.recv = newLiveRecv(liveRecvConfig{
 		initialSequenceNumber: c.initialPacketSequenceNumber,
-		periodicACKInterval: 10000,
-		periodicNAKInterval: 20000,
+		periodicACKInterval:   10000,
+		periodicNAKInterval:   20000,
 	})
 
 	c.recv.sendACK = c.sendACK
@@ -205,11 +204,11 @@ func (c *srtConn) listenAndServe() {
 	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
 	c.snd = newLiveSend(liveSendConfig{
 		initialSequenceNumber: c.initialPacketSequenceNumber,
-		dropInterval: uint64(c.config.SendDropDelay.Microseconds()),
-		maxBW: c.config.MaxBW,
-		inputBW: c.config.InputBW,
-		minInputBW: c.config.MinInputBW,
-		overheadBW: c.config.OverheadBW,
+		dropInterval:          uint64(c.config.SendDropDelay.Microseconds()),
+		maxBW:                 c.config.MaxBW,
+		inputBW:               c.config.InputBW,
+		minInputBW:            c.config.MinInputBW,
+		overheadBW:            c.config.OverheadBW,
 	})
 
 	c.snd.deliver = c.pop
@@ -394,7 +393,7 @@ func (c *srtConn) pop(p packet) {
 				c.sendKMRequest()
 
 				// Resend the request until we get a response
-				c.kmPreAnnounceCountdown = c.config.KMPreAnnounce / 10 + 1
+				c.kmPreAnnounceCountdown = c.config.KMPreAnnounce/10 + 1
 			}
 
 			if c.kmRefreshCountdown == 0 {
@@ -407,7 +406,7 @@ func (c *srtConn) pop(p packet) {
 				c.kmConfirmed = false
 			}
 
-			if c.kmRefreshCountdown == c.config.KMRefreshRate - c.config.KMPreAnnounce {
+			if c.kmRefreshCountdown == c.config.KMRefreshRate-c.config.KMPreAnnounce {
 				// Decommission the previous key, resp. create a new SEK that will
 				// be used in the next switch.
 				c.crypto.GenerateSEK(c.keyBaseEncryption.Opposite())
@@ -436,6 +435,7 @@ func (c *srtConn) networkQueueReader() {
 	}
 }
 
+// writes to send congestion control
 func (c *srtConn) writeQueueReader() {
 	defer func() {
 		log("conn %d: left write queue reader loop\n", c.socketId)
@@ -453,6 +453,7 @@ func (c *srtConn) writeQueueReader() {
 	}
 }
 
+// writes to the read queue
 func (c *srtConn) deliver(p packet) {
 	if c.isShutdown == true {
 		return
@@ -489,10 +490,8 @@ func (c *srtConn) handlePacket(p packet) {
 		} else if header.controlType == CTRLTYPE_USER {
 			// 3.2.2.  Key Material
 			if header.subType == EXTTYPE_KMREQ {
-				//log("handle KM REQ\n")
 				c.handleKMRequest(p)
 			} else if header.subType == EXTTYPE_KMRSP {
-				//log("handle KM RSP\n")
 				c.handleKMResponse(p)
 			}
 		}
@@ -654,9 +653,9 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 }
 
 func (c *srtConn) handleKMRequest(p packet) {
-	c.statistics.receive.km++
+	log("handle KM request\n")
 
-	//log("got KM request\n")
+	c.statistics.receive.km++
 
 	if c.crypto == nil {
 		return
@@ -669,13 +668,13 @@ func (c *srtConn) handleKMRequest(p packet) {
 		//log("invalid KM\n%s", p.Dump())
 		return
 	}
-/*
-	if cif.keyBasedEncryption == c.keyBaseEncryption {
-		c.statistics.receive.invalid++
-		log("invalid KM. wants to reset the key that is already in use\n")
-		return
-	}
-*/
+	/*
+		if cif.keyBasedEncryption == c.keyBaseEncryption {
+			c.statistics.receive.invalid++
+			log("invalid KM. wants to reset the key that is already in use\n")
+			return
+		}
+	*/
 	if err := c.crypto.UnmarshalKM(cif, c.passphrase); err != nil {
 		c.statistics.receive.invalid++
 		//log("invalid KM. can't decode key with passphrase\n")
@@ -694,9 +693,9 @@ func (c *srtConn) handleKMRequest(p packet) {
 }
 
 func (c *srtConn) handleKMResponse(p packet) {
-	c.statistics.receive.km++
+	log("handle KM response\n")
 
-	//log("got KM response\n")
+	c.statistics.receive.km++
 
 	if c.crypto == nil {
 		//log("not encrypted\n")
@@ -717,75 +716,70 @@ func (c *srtConn) handleKMResponse(p packet) {
 func (c *srtConn) sendShutdown() {
 	p := newPacket(c.remoteAddr, nil)
 
-	data := [4]byte{}
-	binary.BigEndian.PutUint32(data[0:], 0)
-
-	p.SetData(data[0:])
-
 	p.Header().isControlPacket = true
 
 	p.Header().controlType = CTRLTYPE_SHUTDOWN
 	p.Header().timestamp = c.getTimestampForPacket()
+
+	cif := cifShutdown{}
+
+	p.MarshalCIF(&cif)
 
 	c.statistics.send.shutdown++
 
 	c.pop(p)
 }
 
-func (c *srtConn) sendNAK(from, to uint32) {
+func (c *srtConn) sendNAK(from, to circular) {
 	p := newPacket(c.remoteAddr, nil)
-
-	data := [8]byte{}
-
-	// Appendix A
-	if from == to {
-		binary.BigEndian.PutUint32(data[0:], from)
-
-		p.SetData(data[0:4])
-	} else {
-		from |= 0b10000000_00000000_00000000_00000000
-
-		binary.BigEndian.PutUint32(data[0:], from)
-		binary.BigEndian.PutUint32(data[4:], to)
-
-		p.SetData(data[0:8])
-	}
 
 	p.Header().isControlPacket = true
 
 	p.Header().controlType = CTRLTYPE_NAK
 	p.Header().timestamp = c.getTimestampForPacket()
 
+	cif := cifNAK{}
+
+	cif.lostPacketSequenceNumber = append(cif.lostPacketSequenceNumber, from)
+	cif.lostPacketSequenceNumber = append(cif.lostPacketSequenceNumber, to)
+
+	p.MarshalCIF(&cif)
+
 	c.statistics.send.nak++
 
 	c.pop(p)
 }
 
-func (c *srtConn) sendACK(seq uint32, lite bool) {
+func (c *srtConn) sendACK(seq circular, lite bool) {
 	p := newPacket(c.remoteAddr, nil)
 
-	data := [28]byte{}
+	p.Header().isControlPacket = true
+
+	p.Header().controlType = CTRLTYPE_ACK
+	p.Header().timestamp = c.getTimestampForPacket()
+
+	cif := cifACK{
+		lastACKPacketSequenceNumber: seq,
+	}
 
 	c.ackLock.Lock()
 	defer c.ackLock.Unlock()
 
 	if lite == true {
-		binary.BigEndian.PutUint32(data[0:], seq)
+		cif.isLite = true
 
-		p.SetData(data[0:4])
 		p.Header().typeSpecific = 0
 	} else {
 		pps, _ := c.recv.PacketRate()
 
 		//log("pps: %d, bps: %d\n", pps, bps)
 
-		binary.BigEndian.PutUint32(data[0:], seq)
-		binary.BigEndian.PutUint32(data[4:], uint32(c.rtt))
-		binary.BigEndian.PutUint32(data[8:], uint32(c.rttVar))
-		binary.BigEndian.PutUint32(data[12:], 1000)  // TODO: available buffer size (packets)
-		binary.BigEndian.PutUint32(data[16:], pps)   // TODO: packets receiving rate (packets/s)
-		binary.BigEndian.PutUint32(data[20:], 0) // TODO: estimated link capacity (packets/s)
-		binary.BigEndian.PutUint32(data[24:], 0)   // TODO: receiving rate (bytes/s)
+		cif.rtt = uint32(c.rtt)
+		cif.rttVar = uint32(c.rttVar)
+		cif.availableBufferSize = 1000 // TODO: available buffer size (packets)
+		cif.packetsReceivingRate = pps // packets receiving rate (packets/s)
+		cif.estimatedLinkCapacity = 0  // estimated link capacity (packets/s), not relevant for live mode
+		cif.receivingRate = 0          // receiving rate (bytes/s), not relevant for live mode
 
 		p.Header().typeSpecific = c.nextACKNumber.Val()
 
@@ -794,14 +788,9 @@ func (c *srtConn) sendACK(seq uint32, lite bool) {
 		if c.nextACKNumber.Val() == 0 {
 			c.nextACKNumber = c.nextACKNumber.Inc()
 		}
-
-		p.SetData(data[0:28])
 	}
 
-	p.Header().isControlPacket = true
-
-	p.Header().controlType = CTRLTYPE_ACK
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.MarshalCIF(&cif)
 
 	c.statistics.send.ack++
 
@@ -910,8 +899,8 @@ func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }
 
 type CongestionStatsCounter struct {
-	Pushed                   uint64
-	Delivered uint64
+	Pushed                  uint64
+	Delivered               uint64
 	Buffer                  uint64
 	Retransmitted           uint64
 	RetransmittedAndDropped uint64

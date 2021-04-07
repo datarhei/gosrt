@@ -73,7 +73,7 @@ func main() {
 		HandlePublish:   s.handlePublish,
 		HandleSubscribe: s.handleSubscribe,
 		Debug:           false,
-		Config: &config,
+		Config:          &config,
 	}
 
 	fmt.Fprintf(os.Stderr, "Listening on %s\n", s.addr)

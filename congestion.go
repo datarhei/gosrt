@@ -13,8 +13,8 @@ import (
 )
 
 type liveStatsCounter struct {
-	pushed uint64
-	delivered                   uint64
+	pushed                  uint64
+	delivered               uint64
 	buffer                  uint64
 	retransmitted           uint64
 	retransmittedAndDropped uint64
@@ -29,11 +29,11 @@ type liveStats struct {
 
 type liveSendConfig struct {
 	initialSequenceNumber circular
-	dropInterval uint64
-	maxBW int64
-	inputBW int64
-	minInputBW int64
-	overheadBW int64
+	dropInterval          uint64
+	maxBW                 int64
+	inputBW               int64
+	minInputBW            int64
+	overheadBW            int64
 }
 
 type liveSend struct {
@@ -46,16 +46,16 @@ type liveSend struct {
 	dropInterval uint64 // microseconds
 
 	avgPayloadSize float64 // bytes
-	pktSndPeriod float64 // microseconds
-	maxBW float64 // bytes/s
-	inputBW float64 // bytes/s
-	overheadBW float64 // percent
+	pktSndPeriod   float64 // microseconds
+	maxBW          float64 // bytes/s
+	inputBW        float64 // bytes/s
+	overheadBW     float64 // percent
 
 	estimatedInputBW float64
-	period time.Duration
-	last time.Time
+	period           time.Duration
+	last             time.Time
 
-	statistics liveStats
+	statistics     liveStats
 	prevStatistics liveStats
 
 	deliver func(p packet)
@@ -70,13 +70,13 @@ func newLiveSend(config liveSendConfig) *liveSend {
 		dropInterval: config.dropInterval, // microseconds
 
 		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
-		maxBW: float64(config.maxBW),
-		inputBW: float64(config.inputBW),
-		overheadBW: float64(config.overheadBW),
+		maxBW:          float64(config.maxBW),
+		inputBW:        float64(config.inputBW),
+		overheadBW:     float64(config.overheadBW),
 
 		estimatedInputBW: 0,
-		period: time.Second,
-		last: time.Now(),
+		period:           time.Second,
+		last:             time.Now(),
 
 		deliver: func(p packet) {},
 	}
@@ -114,7 +114,7 @@ func (s *liveSend) Push(p packet) {
 	tdiff := now.Sub(s.last)
 
 	if tdiff > s.period {
-		s.estimatedInputBW = float64(s.statistics.bytes.pushed - s.prevStatistics.bytes.pushed) / tdiff.Seconds()
+		s.estimatedInputBW = float64(s.statistics.bytes.pushed-s.prevStatistics.bytes.pushed) / tdiff.Seconds()
 
 		s.prevStatistics = s.statistics
 		s.last = now
@@ -146,7 +146,7 @@ func (s *liveSend) Tick(now uint64) {
 			s.statistics.bytes.delivered += p.Len()
 
 			//  5.1.2. SRT's Default LiveCC Algorithm
-			s.avgPayloadSize = 0.875 * s.avgPayloadSize + 0.125 * float64(p.Len())
+			s.avgPayloadSize = 0.875*s.avgPayloadSize + 0.125*float64(p.Len())
 
 			s.deliver(p)
 			//log("   adding %d @ %d to losslist (%d)\n", p.packetSequenceNumber, p.PktTsbpdTime, now)
@@ -261,7 +261,7 @@ func (s *liveSend) NAK(sequenceNumbers []circular) {
 				s.statistics.bytes.retransmitted += p.Len()
 
 				//  5.1.2. SRT's Default LiveCC Algorithm
-				s.avgPayloadSize = 0.875 * s.avgPayloadSize + 0.125 * float64(p.Len())
+				s.avgPayloadSize = 0.875*s.avgPayloadSize + 0.125*float64(p.Len())
 
 				//log("   retransmitting %d @ %d from losslist\n", p.packetSequenceNumber, p.PktTsbpdTime)
 
@@ -275,8 +275,8 @@ func (s *liveSend) NAK(sequenceNumbers []circular) {
 
 type liveRecvConfig struct {
 	initialSequenceNumber circular
-	periodicACKInterval uint64
-	periodicNAKInterval uint64
+	periodicACKInterval   uint64
+	periodicNAKInterval   uint64
 }
 
 type liveRecv struct {
@@ -297,17 +297,17 @@ type liveRecv struct {
 	lastPeriodicACK uint64
 	lastPeriodicNAK uint64
 
-	statistics liveStats
+	statistics     liveStats
 	prevStatistics liveStats
 
-	last time.Time
+	last   time.Time
 	period time.Duration
 
 	pps uint32
 	bps uint32
 
-	sendACK func(seq uint32, light bool)
-	sendNAK func(from, to uint32)
+	sendACK func(seq circular, light bool)
+	sendNAK func(from, to circular)
 	deliver func(p packet)
 }
 
@@ -321,8 +321,8 @@ func newLiveRecv(config liveRecvConfig) *liveRecv {
 		periodicNAKInterval: config.periodicNAKInterval, // microseconds
 	}
 
-	r.sendACK = func(seq uint32, light bool) {}
-	r.sendNAK = func(from, to uint32) {}
+	r.sendACK = func(seq circular, light bool) {}
+	r.sendNAK = func(from, to circular) {}
 	r.deliver = func(p packet) {}
 
 	r.last = time.Now()
@@ -452,7 +452,7 @@ func (r *liveRecv) Push(pkt packet) {
 		// send a NAK for all sequences that are bigger than the one we know until
 		// the one we have at hand, both ends exluding.
 		//log("sending NAK for (%d, %d)\n", r.maxSeenSequenceNumber.Inc().Val(), pkt.packetSequenceNumber.Dec().Val())
-		r.sendNAK(r.maxSeenSequenceNumber.Inc().Val(), pkt.Header().packetSequenceNumber.Dec().Val())
+		r.sendNAK(r.maxSeenSequenceNumber.Inc(), pkt.Header().packetSequenceNumber.Dec())
 
 		//log("there are some missing sequence numbers. got: %d, expecting %d\n", pkt.packetSequenceNumber.Val(), r.maxSeenSequenceNumber.Inc().Val())
 
@@ -467,7 +467,7 @@ func (r *liveRecv) Push(pkt packet) {
 	r.packetList.PushBack(pkt)
 }
 
-func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber uint32, lite bool) {
+func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, lite bool) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
@@ -502,7 +502,7 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber uint32, lite
 		}
 
 		ok = true
-		sequenceNumber = ackSequenceNumber.Inc().Val()
+		sequenceNumber = ackSequenceNumber.Inc()
 
 		// keep track of the last ACK's sequence. with this we can faster ignore
 		// packets that come in that have a lower sequence number.
@@ -515,7 +515,7 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber uint32, lite
 	return
 }
 
-func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to uint32) {
+func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to circular) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
@@ -543,8 +543,8 @@ func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to uint32) {
 				nackSequenceNumber := ackSequenceNumber.Inc()
 
 				ok = true
-				from = nackSequenceNumber.Val()
-				to = p.Header().packetSequenceNumber.Dec().Val()
+				from = nackSequenceNumber
+				to = p.Header().packetSequenceNumber.Dec()
 				break
 			}
 

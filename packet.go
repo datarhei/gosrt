@@ -160,11 +160,11 @@ var payloadPool *pool = newPool()
 func newPacket(addr net.Addr, rawdata []byte) packet {
 	p := &pkt{
 		header: pktHeader{
-			addr: addr,
-			packetSequenceNumber: newCircular(0, 0b01111111_11111111_11111111_11111111),
-			packetPositionFlag: singlePacket,
+			addr:                  addr,
+			packetSequenceNumber:  newCircular(0, 0b01111111_11111111_11111111_11111111),
+			packetPositionFlag:    singlePacket,
 			keyBaseEncryptionFlag: unencryptedPacket,
-			messageNumber: 1,
+			messageNumber:         1,
 		},
 		payload: payloadPool.Get(),
 	}
@@ -957,7 +957,13 @@ func (c *cifACK) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[20:], c.estimatedLinkCapacity)
 	binary.BigEndian.PutUint32(buffer[24:], c.receivingRate)
 
-	w.Write(buffer[0:])
+	if c.isLite == true {
+		w.Write(buffer[0:4])
+	} else if c.isSmall == true {
+		w.Write(buffer[0:16])
+	} else {
+		w.Write(buffer[0:])
+	}
 }
 
 // 3.2.5.  NAK (Loss Report)
@@ -1043,6 +1049,28 @@ func (c *cifNAK) Marshal(w io.Writer) {
 			w.Write(buffer[0:])
 		}
 	}
+}
+
+type cifShutdown struct{}
+
+func (c cifShutdown) String() string {
+	return "Shutdown\n"
+}
+
+func (c *cifShutdown) Unmarshal(data []byte) error {
+	if len(data) != 0 && len(data) != 4 {
+		return fmt.Errorf("invalid length")
+	}
+
+	return nil
+}
+
+func (c *cifShutdown) Marshal(w io.Writer) {
+	var buffer [4]byte
+
+	binary.BigEndian.PutUint32(buffer[0:], 0)
+
+	w.Write(buffer[0:])
 }
 
 type packetPosition uint
