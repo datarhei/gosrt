@@ -6,6 +6,8 @@ package srt
 
 import (
 	"fmt"
+	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -16,6 +18,9 @@ const (
 	MAX_MSS_SIZE     = 1500
 	MIN_PAYLOAD_SIZE = MIN_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
 	MAX_PAYLOAD_SIZE = MAX_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
+	MIN_PASSPHRASE_SIZE = 10
+	MAX_PASSPHRASE_SIZE = 79
+	MAX_STREAMID_SIZE = 512
 	SRT_VERSION      = 0x010402
 )
 
@@ -30,11 +35,11 @@ type Config struct {
 
 	// Enable drift tracer.
 	// SRTO_DRIFTTRACER
-	DriftTrace bool
+	DriftTracer bool
 
 	// Reject connection if parties set different passphrase.
 	// SRTO_ENFORCEDENCRYPTION
-	EnforceEncryption bool
+	EnforcedEncryption bool
 
 	// Flow control window size. Packets.
 	// SRTO_FC
@@ -62,7 +67,7 @@ type Config struct {
 
 	// Allow only IPv6.
 	// SRTO_IPV6ONLY
-	IPv6Only bool
+	IPv6Only int
 
 	// Duration of Stream Encryption key switchover. Packets.
 	// SRTO_KMPREANNOUNCE
@@ -169,15 +174,15 @@ type Config struct {
 var DefaultConfig Config = Config{
 	Congestion:            "live",
 	ConnectionTimeout:     3 * time.Second,
-	DriftTrace:            true,
-	EnforceEncryption:     true,
+	DriftTracer:            true,
+	EnforcedEncryption:     true,
 	FC:                    25600,
 	GroupConnect:          false,
 	GroupStabilityTimeout: 0,
 	InputBW:               0,
 	IPTOS:                 0,
 	IPTTL:                 0,
-	IPv6Only:              false,
+	IPv6Only:              0,
 	KMPreAnnounce:         1 << 12,
 	KMRefreshRate:         1 << 24,
 	Latency:               -1,
@@ -202,6 +207,241 @@ var DefaultConfig Config = Config{
 	TooLatePacketDrop:     true,
 	TransmissionType:      "live",
 	TSBPDMode:             true,
+}
+
+func (c *Config) UnmarshalURL(addr string) error {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return err
+	}
+
+	if u.Scheme != "srt" {
+		return fmt.Errorf("The URL doesn't seem to be an srt:// url.")
+	}
+
+	return c.UnmarshalQuery(u.RawQuery)
+}
+
+func (c *Config) UnmarshalQuery(query string) error {
+	v, err := url.ParseQuery(query)
+	if err != nil {
+		return err
+	}
+
+	// https://github.com/Haivision/srt/blob/master/docs/apps/srt-live-transmit.md
+
+	if s := v.Get("congestion"); len(s) != 0 {
+		c.Congestion = s
+	}
+
+	if s := v.Get("conntimeo"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.ConnectionTimeout = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("drifttracer"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.DriftTracer = true
+		case "no", "off", "false", "0": c.DriftTracer = false
+		}
+	}
+
+	if s := v.Get("enforcedencryption"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.EnforcedEncryption = true
+		case "no", "off", "false", "0": c.EnforcedEncryption = true
+		}
+	}
+
+	if s := v.Get("fc"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.FC = uint32(d)
+		}
+	}
+
+	if s := v.Get("groupconnect"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.GroupConnect = true
+		case "no", "off", "false", "0": c.GroupConnect = false
+		}
+	}
+
+	if s := v.Get("groupstabtimeo"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.GroupStabilityTimeout = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("inputbw"); len(s) != 0 {
+		if d, err := strconv.ParseInt(s, 10, 64); err == nil {
+			c.InputBW = d
+		}
+	}
+
+	if s := v.Get("iptos"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.IPTOS = d
+		}
+	}
+
+	if s := v.Get("ipttl"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.IPTTL = d
+		}
+	}
+
+	if s := v.Get("ipv6only"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.IPv6Only = d
+		}
+	}
+
+	if s := v.Get("kmpreannounce"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 64); err == nil {
+			c.KMPreAnnounce = d
+		}
+	}
+
+	if s := v.Get("kmrefreshrate"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 64); err == nil {
+			c.KMRefreshRate = d
+		}
+	}
+
+	if s := v.Get("latency"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.Latency = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("lossmaxttl"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.LossMaxTTL = uint32(d)
+		}
+	}
+
+	if s := v.Get("maxbw"); len(s) != 0 {
+		if d, err := strconv.ParseInt(s, 10, 64); err == nil {
+			c.MaxBW = d
+		}
+	}
+
+	if s := v.Get("mininputbw"); len(s) != 0 {
+		if d, err := strconv.ParseInt(s, 10, 64); err == nil {
+			c.MinInputBW = d
+		}
+	}
+
+	if s := v.Get("messageapi"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.MessageAPI = true
+		case "no", "off", "false", "0": c.MessageAPI = false
+		}
+	}
+
+	// minversion is ignored
+
+	if s := v.Get("mss"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.MSS = uint32(d)
+		}
+	}
+
+	if s := v.Get("nakreport"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.NAKReport = true
+		case "no", "off", "false", "0": c.NAKReport = false
+		}
+	}
+
+	if s := v.Get("oheadbw"); len(s) != 0 {
+		if d, err := strconv.ParseInt(s, 10, 64); err == nil {
+			c.OverheadBW = d
+		}
+	}
+
+	if s := v.Get("packetfilter"); len(s) != 0 {
+		c.PacketFilter = s
+	}
+
+	if s := v.Get("passphrase"); len(s) != 0 {
+		c.Passphrase = s
+	}
+
+	if s := v.Get("payloadsize"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.PayloadSize = uint32(d)
+		}
+	}
+
+	if s := v.Get("pbkeylen"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.PBKeylen = d
+		}
+	}
+
+	if s := v.Get("peeridletimeo"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.PeerIdleTimeout = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("peerlatency"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.PeerLatency = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("rcvbuf"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.ReceiverBufferSize = uint32(d)
+		}
+	}
+
+	if s := v.Get("rcvlatency"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.ReceiverLatency = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	// retransmitalgo not implemented (there's only one)
+
+	if s := v.Get("sndbuf"); len(s) != 0 {
+		if d, err := strconv.ParseUint(s, 10, 32); err == nil {
+			c.SendBufferSize = uint32(d)
+		}
+	}
+
+	if s := v.Get("snddropdelay"); len(s) != 0 {
+		if d, err := strconv.Atoi(s); err == nil {
+			c.SendDropDelay = time.Duration(d) * time.Millisecond
+		}
+	}
+
+	if s := v.Get("streamid"); len(s) != 0 {
+		c.StreamId = s
+	}
+
+	if s := v.Get("tlpktdrop"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.TooLatePacketDrop = true
+		case "no", "off", "false", "0": c.TooLatePacketDrop = false
+		}
+	}
+
+	if s := v.Get("transtype"); len(s) != 0 {
+		c.TransmissionType = s
+	}
+
+	if s := v.Get("tsbpdmode"); len(s) != 0 {
+		switch s {
+		case "yes", "on", "true", "1": c.TSBPDMode = true
+		case "no", "off", "false", "0": c.TSBPDMode = false
+		}
+	}
+
+	return nil
 }
 
 func (c Config) Validate() error {
@@ -234,7 +474,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("IPTTL must be between 1 and 255.")
 	}
 
-	if c.IPv6Only == true {
+	if c.IPv6Only > 0 {
 		return fmt.Errorf("IPv6Only is not supported.")
 	}
 
@@ -269,6 +509,12 @@ func (c Config) Validate() error {
 		return fmt.Errorf("PacketFilter are not supported.")
 	}
 
+	if len(c.Passphrase) != 0 {
+		if len(c.Passphrase) < MIN_PASSPHRASE_SIZE || len(c.Passphrase) > MAX_PASSPHRASE_SIZE {
+			return fmt.Errorf("Passphrase must be between %d and %d bytes long.", MIN_PASSPHRASE_SIZE, MAX_PASSPHRASE_SIZE)
+		}
+	}
+
 	if c.PayloadSize < MIN_PAYLOAD_SIZE || c.PayloadSize > MAX_PAYLOAD_SIZE {
 		return fmt.Errorf("PayloadSize must be between %d and %d (both inclusive).", MIN_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE)
 	}
@@ -293,8 +539,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("SendDropDelay must be greater than 0.")
 	}
 
-	if len(c.StreamId) > 512 {
-		return fmt.Errorf("StreamId. must be shorter than or equal to 512 bytes.")
+	if len(c.StreamId) > MAX_STREAMID_SIZE {
+		return fmt.Errorf("StreamId must be shorter than or equal to %d bytes.", MAX_STREAMID_SIZE)
 	}
 
 	if c.TooLatePacketDrop == false {

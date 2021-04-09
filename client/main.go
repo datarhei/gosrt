@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"time"
 
@@ -148,19 +147,6 @@ func main() {
 	w.Close()
 }
 
-func configFromURL(u *url.URL) srt.Config {
-	config := srt.DefaultConfig
-
-	config.StreamId = u.Query().Get("streamid")
-	config.Passphrase = u.Query().Get("passphrase")
-
-	if d, err := strconv.Atoi(u.Query().Get("rcvlatency")); err != nil {
-		config.ReceiverLatency = time.Duration(d) * time.Millisecond
-	}
-
-	return config
-}
-
 func openReader(addr string) (io.ReadWriteCloser, error) {
 	if len(addr) == 0 {
 		return nil, fmt.Errorf("The address must not be empty")
@@ -176,9 +162,11 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
-		config := configFromURL(u)
-		streamId := u.Query().Get("streamid")
-		passphrase := u.Query().Get("passphrase")
+		config := srt.DefaultConfig
+		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
+			return nil, err
+		}
+
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
@@ -188,11 +176,11 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
-				if streamId != req.StreamId() {
+				if config.StreamId != req.StreamId() {
 					return srt.REJECT
 				}
 
-				req.SetPassphrase(passphrase)
+				req.SetPassphrase(config.Passphrase)
 
 				return srt.PUBLISH
 			})
@@ -205,13 +193,15 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			return conn, nil
-		} else {
+		} else if mode == "caller" {
 			conn, err := srt.Dial("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
 
 			return conn, nil
+		} else {
+			return nil, fmt.Errorf("Unsupported mode")
 		}
 	}
 
@@ -247,9 +237,11 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
-		config := configFromURL(u)
-		streamId := u.Query().Get("streamid")
-		passphrase := u.Query().Get("passphrase")
+		config := srt.DefaultConfig
+		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
+			return nil, err
+		}
+
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
@@ -259,11 +251,11 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
-				if streamId != req.StreamId() {
+				if config.StreamId != req.StreamId() {
 					return srt.REJECT
 				}
 
-				req.SetPassphrase(passphrase)
+				req.SetPassphrase(config.Passphrase)
 
 				return srt.SUBSCRIBE
 			})
@@ -276,13 +268,15 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			return conn, nil
-		} else {
+		} else if mode == "caller" {
 			conn, err := srt.Dial("udp", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
 
 			return conn, nil
+		} else {
+			return nil, fmt.Errorf("Unsupported mode")
 		}
 	}
 
