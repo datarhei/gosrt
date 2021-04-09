@@ -64,15 +64,6 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 		config: config,
 	}
 
-	if len(config.Passphrase) != 0 {
-		cr, err := newCrypto(config.PBKeylen)
-		if err != nil {
-			return nil, fmt.Errorf("dial: failed creating crypto context: %w", err)
-		}
-
-		dl.crypto = cr
-	}
-
 	raddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
 		return nil, fmt.Errorf("dial: unable to resolve address: %w", err)
@@ -128,7 +119,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	dl.initialPacketSequenceNumber = newCircular(r.Uint32()&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 
 	go func() {
-		buffer := make([]byte, config.MSS) // MTU size
+		buffer := make([]byte, MAX_MSS_SIZE) // MTU size
 		index := 0
 
 		for {
@@ -174,10 +165,10 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 
 	log("waiting for response\n")
 
-	timer := time.AfterFunc(3*time.Second, func() {
+	timer := time.AfterFunc(dl.config.ConnectionTimeout, func() {
 		dl.connChan <- connResponse{
 			conn: nil,
-			err:  fmt.Errorf("connection timeout. server didn't respond"),
+			err:  fmt.Errorf("dial: connection timeout. server didn't respond"),
 		}
 	})
 
@@ -323,16 +314,44 @@ func (dl *dialer) handleHandshake(p packet) {
 			return
 		}
 
+		// Setup crypto context
+		if len(dl.config.Passphrase) != 0 {
+			keylen := dl.config.PBKeylen
+
+			// If the server advertises a specific block cipher family and key size,
+			// use this one, otherwise, use the configured one
+			if cif.encryptionField != 0 {
+				switch cif.encryptionField {
+				case 2:
+					keylen = 16
+				case 3:
+					keylen = 24
+				case 4:
+					keylen = 32
+				}
+			}
+
+			cr, err := newCrypto(keylen)
+			if err != nil {
+				dl.connChan <- connResponse{
+					conn: nil,
+					err:  fmt.Errorf("Failed creating crypto context: %w", err),
+				}
+			}
+
+			dl.crypto = cr
+		}
+
 		cif.isRequest = true
 		cif.handshakeType = HSTYPE_CONCLUSION
 		cif.initialPacketSequenceNumber = dl.initialPacketSequenceNumber
-		cif.maxTransmissionUnitSize = 1500 // MTU size
-		cif.maxFlowWindowSize = 8192
+		cif.maxTransmissionUnitSize = dl.config.MSS // MTU size
+		cif.maxFlowWindowSize = dl.config.FC
 		cif.srtSocketId = dl.socketId
 		cif.peerIP.FromNetAddr(dl.localAddr)
 
 		cif.hasHS = true
-		cif.srtVersion = 0x00010402
+		cif.srtVersion = SRT_VERSION
 		cif.srtFlags.TSBPDSND = true
 		cif.srtFlags.TSBPDRCV = true
 		cif.srtFlags.CRYPT = true // must always set to true
@@ -340,9 +359,9 @@ func (dl *dialer) handleHandshake(p packet) {
 		cif.srtFlags.PERIODICNAK = true
 		cif.srtFlags.REXMITFLG = true
 		cif.srtFlags.STREAM = false
-		cif.srtFlags.PACKET_FILTER = true
-		cif.recvTSBPDDelay = uint16(dl.config.PeerLatency.Milliseconds())
-		cif.sendTSBPDDelay = 0x0000
+		cif.srtFlags.PACKET_FILTER = false
+		cif.recvTSBPDDelay = uint16(dl.config.ReceiverLatency.Milliseconds())
+		cif.sendTSBPDDelay = uint16(dl.config.PeerLatency.Milliseconds())
 
 		cif.hasSID = true
 		cif.streamId = dl.config.StreamId
@@ -379,6 +398,18 @@ func (dl *dialer) handleHandshake(p packet) {
 			return
 		}
 
+		// Check if the peer version is sufficient
+		if cif.srtVersion < dl.config.MinVersion {
+			dl.sendShutdown(cif.srtSocketId)
+
+			dl.connChan <- connResponse{
+				conn: nil,
+				err:  fmt.Errorf("Peer SRT version is not sufficient"),
+			}
+
+			return
+		}
+
 		// Check the required SRT flags
 		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
 			dl.sendShutdown(cif.srtSocketId)
@@ -403,36 +434,52 @@ func (dl *dialer) handleHandshake(p packet) {
 			return
 		}
 
-		// fill up a struct with all relevant data and put it into the backlog
-
-		tsbpdDelay := uint64(cif.recvTSBPDDelay) * 1000
-		if uint64(dl.config.ReceiverLatency.Microseconds()) > tsbpdDelay {
-			tsbpdDelay = uint64(dl.config.ReceiverLatency.Microseconds())
+		// Use the largest TSBPD delay as advertised by the listener, but
+		// at least 120ms
+		tsbpdDelay := uint16(120)
+		if cif.recvTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = cif.recvTSBPDDelay
 		}
 
-		conn := &srtConn{
+		if cif.sendTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = cif.sendTSBPDDelay
+		}
+
+		// If the peer has a smaller MTU size, adjust to it
+		if cif.maxTransmissionUnitSize < dl.config.MSS {
+			dl.config.MSS = cif.maxTransmissionUnitSize
+			dl.config.PayloadSize = dl.config.MSS - SRT_HEADER_SIZE - UDP_HEADER_SIZE
+
+			if dl.config.PayloadSize < MIN_PAYLOAD_SIZE {
+				dl.sendShutdown(cif.srtSocketId)
+
+				dl.connChan <- connResponse{
+					conn: nil,
+					err:  fmt.Errorf("Effective MSS too small (%d bytes) to fit the minimal payload size (%d bytes)", dl.config.MSS, MIN_PAYLOAD_SIZE),
+				}
+
+				return
+			}
+		}
+
+		// Create a new connection
+		conn := newSRTConn(srtConnConfig{
 			localAddr:                   dl.localAddr,
 			remoteAddr:                  dl.remoteAddr,
 			config:                      dl.config,
 			start:                       dl.start,
 			socketId:                    dl.socketId,
 			peerSocketId:                cif.srtSocketId,
-			streamId:                    dl.config.StreamId,
 			tsbpdTimeBase:               uint64(time.Since(dl.start).Microseconds()),
-			tsbpdDelay:                  tsbpdDelay,
-			drift:                       0,
+			tsbpdDelay:                  uint64(tsbpdDelay) * 1000,
 			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
 			crypto:                      dl.crypto,
-			passphrase:                  dl.config.Passphrase,
 			keyBaseEncryption:           evenKeyEncrypted,
-			send:                        dl.send,
+			onSend:                      dl.send,
 			onShutdown: func(socketId uint32) {
 				dl.Close()
 			},
-		}
-
-		// kick off the connection
-		conn.listenAndServe()
+		})
 
 		log("new connection: %#08x (%s)\n", conn.SocketId(), conn.StreamId())
 
@@ -443,41 +490,10 @@ func (dl *dialer) handleHandshake(p packet) {
 	} else {
 		var err error
 
-		switch cif.handshakeType {
-		case REJ_UNKNOWN:
-			err = fmt.Errorf("Connection rejected: unknown reason (REJ_UNKNOWN)")
-		case REJ_SYSTEM:
-			err = fmt.Errorf("Connection rejected: system function error (REJ_SYSTEM)")
-		case REJ_PEER:
-			err = fmt.Errorf("Connection rejected: rejected by peer (REJ_PEER)")
-		case REJ_RESOURCE:
-			err = fmt.Errorf("Connection rejected: resource allocation problem (REJ_RESOURCE)")
-		case REJ_ROGUE:
-			err = fmt.Errorf("Connection rejected: incorrect data in handshake (REJ_ROGUE)")
-		case REJ_BACKLOG:
-			err = fmt.Errorf("Connection rejected: listener's backlog exceeded (REJ_BACKLOG)")
-		case REJ_IPE:
-			err = fmt.Errorf("Connection rejected: internal program error (REJ_IPE)")
-		case REJ_CLOSE:
-			err = fmt.Errorf("Connection rejected: socket is closing (REJ_CLOSE)")
-		case REJ_VERSION:
-			err = fmt.Errorf("Connection rejected: peer is older version than agent's min (REJ_VERSION)")
-		case REJ_RDVCOOKIE:
-			err = fmt.Errorf("Connection rejected: rendezvous cookie collision (REJ_RDVCOOKIE)")
-		case REJ_BADSECRET:
-			err = fmt.Errorf("Connection rejected: wrong password (REJ_BADSECRET)")
-		case REJ_UNSECURE:
-			err = fmt.Errorf("Connection rejected: password required or unexpected (REJ_UNSECURE)")
-		case REJ_MESSAGEAPI:
-			err = fmt.Errorf("Connection rejected: stream flag collision (REJ_MESSAGEAPI)")
-		case REJ_CONGESTION:
-			err = fmt.Errorf("Connection rejected: incompatible congestion-controller type (REJ_CONGESTION)")
-		case REJ_FILTER:
-			err = fmt.Errorf("Connection rejected: incompatible packet filter (REJ_FILTER)")
-		case REJ_GROUP:
-			err = fmt.Errorf("Connection rejected: incompatible group (REJ_GROUP)")
-		default:
-			err = fmt.Errorf("Connection rejected: Unknown reason")
+		if cif.handshakeType.IsRejection() == true {
+			err = fmt.Errorf("Connection rejected: %s", cif.handshakeType.String())
+		} else {
+			err = fmt.Errorf("Unsupported handshake: %s", cif.handshakeType.String())
 		}
 
 		dl.connChan <- connResponse{
@@ -505,8 +521,8 @@ func (dl *dialer) sendInduction() {
 		encryptionField:             0,
 		extensionField:              2,
 		initialPacketSequenceNumber: newCircular(0, MAX_SEQUENCENUMBER),
-		maxTransmissionUnitSize:     uint32(dl.config.MSS), // MTU size
-		maxFlowWindowSize:           8192,
+		maxTransmissionUnitSize:     dl.config.MSS, // MTU size
+		maxFlowWindowSize:           dl.config.FC,
 		handshakeType:               HSTYPE_INDUCTION,
 		srtSocketId:                 dl.socketId,
 		synCookie:                   0,

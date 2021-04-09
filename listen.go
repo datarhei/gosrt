@@ -13,7 +13,6 @@ import (
 	gosync "sync"
 	"syscall"
 	"time"
-	//"runtime"
 
 	"github.com/datarhei/gosrt/sync"
 )
@@ -126,7 +125,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	// net.inet.udp.recvspace: 786896 -> 1573792
 
 	go func() {
-		buffer := make([]byte, 16384 /*config.MSS*/) // MTU size
+		buffer := make([]byte, config.MSS) // MTU size
 
 		for {
 			if ln.isShutdown == true {
@@ -232,36 +231,41 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 			break
 		}
 
-		// create a new socket ID
+		// Create a new socket ID
 		socketId := uint32(time.Since(ln.start).Microseconds())
 
-		tsbpdDelay := uint64(request.handshake.recvTSBPDDelay) * 1000
-		if uint64(ln.config.ReceiverLatency.Microseconds()) > tsbpdDelay {
-			tsbpdDelay = uint64(ln.config.ReceiverLatency.Microseconds())
+		// Select the largest TSBPD delay advertised by the caller, but at
+		// least 120ms
+		tsbpdDelay := uint16(120)
+		if request.handshake.recvTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = request.handshake.recvTSBPDDelay
 		}
 
-		// new connection
-		conn := &srtConn{
+		if request.handshake.sendTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = request.handshake.sendTSBPDDelay
+		}
+
+		config := ln.config
+
+		config.StreamId = request.handshake.streamId
+		config.Passphrase = request.passphrase
+
+		// Create a new connection
+		conn := newSRTConn(srtConnConfig{
 			localAddr:                   ln.addr,
 			remoteAddr:                  request.addr,
-			config:                      ln.config,
+			config:                      config,
 			start:                       request.start,
 			socketId:                    socketId,
 			peerSocketId:                request.handshake.srtSocketId,
-			streamId:                    request.handshake.streamId,
 			tsbpdTimeBase:               uint64(request.timestamp),
-			tsbpdDelay:                  tsbpdDelay,
-			drift:                       0,
+			tsbpdDelay:                  uint64(tsbpdDelay) * 1000,
 			initialPacketSequenceNumber: request.handshake.initialPacketSequenceNumber,
 			crypto:                      request.crypto,
-			passphrase:                  request.passphrase,
 			keyBaseEncryption:           evenKeyEncrypted,
-			send:                        ln.send,
+			onSend:                      ln.send,
 			onShutdown:                  ln.handleShutdown,
-		}
-
-		// kick off the connection
-		conn.listenAndServe()
+		})
 
 		log("new connection: %#08x (%s)\n", conn.SocketId(), conn.StreamId())
 
@@ -277,13 +281,13 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 		request.handshake.srtFlags.PERIODICNAK = true
 		request.handshake.srtFlags.REXMITFLG = true
 		request.handshake.srtFlags.STREAM = false
-		request.handshake.srtFlags.PACKET_FILTER = true
+		request.handshake.srtFlags.PACKET_FILTER = false
 
 		log("outgoing: %s\n", request.handshake.String())
 
 		ln.accept(request)
 
-		// add the connection to the list of known connections
+		// Add the connection to the list of known connections
 		ln.lock.Lock()
 		ln.conns[conn.socketId] = conn
 		ln.lock.Unlock()
@@ -300,7 +304,7 @@ func (ln *listener) handleShutdown(socketId uint32) {
 	ln.lock.Unlock()
 }
 
-func (ln *listener) reject(request connRequest, reason uint32) {
+func (ln *listener) reject(request connRequest, reason handshakeType) {
 	p := newPacket(request.addr, nil)
 	p.Header().isControlPacket = true
 
@@ -438,7 +442,7 @@ func (ln *listener) writer() {
 			ln.pc.WriteTo(buffer, p.Header().addr)
 
 			if p.Header().isControlPacket == true {
-				// Control packets can be decommissioned because they will be sent again
+				// Control packets can be decommissioned because they will be not sent again
 				p.Decommission()
 			}
 		}
@@ -457,7 +461,7 @@ func (ln *listener) handleHandshake(p packet) {
 		return
 	}
 
-	// assemble the response (4.3.1.  Caller-Listener Handshake)
+	// Assemble the response (4.3.1.  Caller-Listener Handshake)
 
 	p.Header().controlType = CTRLTYPE_HANDSHAKE
 	p.Header().subType = 0
@@ -470,7 +474,7 @@ func (ln *listener) handleHandshake(p packet) {
 	if cif.handshakeType == HSTYPE_INDUCTION {
 		// cif
 		cif.version = 5
-		cif.encryptionField = 0
+		cif.encryptionField = 0 // Don't advertise any specific encryption method
 		cif.extensionField = 0x4A17
 		//cif.initialPacketSequenceNumber = newCircular(0, MAX_SEQUENCENUMBER)
 		//cif.maxTransmissionUnitSize = 0
@@ -502,6 +506,15 @@ func (ln *listener) handleHandshake(p packet) {
 			return
 		}
 
+		// Check if the peer version is sufficient
+		if cif.srtVersion < ln.config.MinVersion {
+			cif.handshakeType = REJ_VERSION
+			p.MarshalCIF(cif)
+			ln.send(p)
+
+			return
+		}
+
 		// Check the required SRT flags
 		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
 			cif.handshakeType = REJ_ROGUE
@@ -520,7 +533,28 @@ func (ln *listener) handleHandshake(p packet) {
 			return
 		}
 
-		// fill up a struct with all relevant data and put it into the backlog
+		// Peer is advertising a too big MSS
+		if cif.maxTransmissionUnitSize > MAX_MSS_SIZE {
+			cif.handshakeType = REJ_ROGUE
+			p.MarshalCIF(cif)
+			ln.send(p)
+
+			return
+		}
+
+		// If the peer has a smaller MTU size, adjust to it
+		if cif.maxTransmissionUnitSize < ln.config.MSS {
+			ln.config.MSS = cif.maxTransmissionUnitSize
+			ln.config.PayloadSize = ln.config.MSS - SRT_HEADER_SIZE - UDP_HEADER_SIZE
+
+			if ln.config.PayloadSize < MIN_PAYLOAD_SIZE {
+				cif.handshakeType = REJ_ROGUE
+				p.MarshalCIF(cif)
+				ln.send(p)
+			}
+		}
+
+		// Fill up a connection request with all relevant data and put it into the backlog
 
 		c := connRequest{
 			addr:      p.Header().addr,
@@ -544,7 +578,7 @@ func (ln *listener) handleHandshake(p packet) {
 			c.crypto = cr
 		}
 
-		// non-blocking
+		// If the backlog is full, reject the connection
 		select {
 		case ln.backlog <- c:
 		default:
@@ -553,6 +587,10 @@ func (ln *listener) handleHandshake(p packet) {
 			ln.send(p)
 		}
 	} else {
-		log("   unknown handshakeType\n")
+		if cif.handshakeType.IsRejection() == true {
+			log("Connection rejected: %s", cif.handshakeType.String())
+		} else {
+			log("Unsupported handshake: %s", cif.handshakeType.String())
+		}
 	}
 }

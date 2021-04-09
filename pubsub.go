@@ -111,7 +111,9 @@ func (pb *pubSub) Subscribe(c Conn) error {
 		case <-pb.abort:
 			return io.EOF
 		case p := <-l:
-			if err := conn.WritePacket(p); err != nil {
+			err := conn.WritePacket(p)
+			p.Decommission()
+			if err != nil {
 				return err
 			}
 		}

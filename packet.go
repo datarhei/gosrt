@@ -33,34 +33,117 @@ const (
 	CTRLTYPE_USER      uint16 = 0x7FFF
 )
 
+type handshakeType uint32
+
 // Table 4: Handshake Type
 const (
-	HSTYPE_DONE       uint32 = 0xFFFFFFFD
-	HSTYPE_AGREEMENT  uint32 = 0xFFFFFFFE
-	HSTYPE_CONCLUSION uint32 = 0xFFFFFFFF
-	HSTYPE_WAVEHAND   uint32 = 0x00000000
-	HSTYPE_INDUCTION  uint32 = 0x00000001
+	HSTYPE_DONE       handshakeType = 0xFFFFFFFD
+	HSTYPE_AGREEMENT  handshakeType = 0xFFFFFFFE
+	HSTYPE_CONCLUSION handshakeType = 0xFFFFFFFF
+	HSTYPE_WAVEHAND   handshakeType = 0x00000000
+	HSTYPE_INDUCTION  handshakeType = 0x00000001
 )
 
 // Table 7: Handshake Rejection Reason Codes
 const (
-	REJ_UNKNOWN    uint32 = 1000
-	REJ_SYSTEM     uint32 = 1001
-	REJ_PEER       uint32 = 1002
-	REJ_RESOURCE   uint32 = 1003
-	REJ_ROGUE      uint32 = 1004
-	REJ_BACKLOG    uint32 = 1005
-	REJ_IPE        uint32 = 1006
-	REJ_CLOSE      uint32 = 1007
-	REJ_VERSION    uint32 = 1008
-	REJ_RDVCOOKIE  uint32 = 1009
-	REJ_BADSECRET  uint32 = 1010
-	REJ_UNSECURE   uint32 = 1011
-	REJ_MESSAGEAPI uint32 = 1012
-	REJ_CONGESTION uint32 = 1013
-	REJ_FILTER     uint32 = 1014
-	REJ_GROUP      uint32 = 1015
+	REJ_UNKNOWN    handshakeType = 1000
+	REJ_SYSTEM     handshakeType = 1001
+	REJ_PEER       handshakeType = 1002
+	REJ_RESOURCE   handshakeType = 1003
+	REJ_ROGUE      handshakeType = 1004
+	REJ_BACKLOG    handshakeType = 1005
+	REJ_IPE        handshakeType = 1006
+	REJ_CLOSE      handshakeType = 1007
+	REJ_VERSION    handshakeType = 1008
+	REJ_RDVCOOKIE  handshakeType = 1009
+	REJ_BADSECRET  handshakeType = 1010
+	REJ_UNSECURE   handshakeType = 1011
+	REJ_MESSAGEAPI handshakeType = 1012
+	REJ_CONGESTION handshakeType = 1013
+	REJ_FILTER     handshakeType = 1014
+	REJ_GROUP      handshakeType = 1015
 )
+
+func (h handshakeType) String() string {
+	switch h {
+	case HSTYPE_DONE:
+		return "DONE"
+	case HSTYPE_AGREEMENT:
+		return "AGREEMENT"
+	case HSTYPE_CONCLUSION:
+		return "CONCLUSION"
+	case HSTYPE_WAVEHAND:
+		return "WAVEHAND"
+	case HSTYPE_INDUCTION:
+		return "INDUCTION"
+	case REJ_UNKNOWN:
+		return "REJ_UNKNOWN (unknown reason)"
+	case REJ_SYSTEM:
+		return "REJ_SYSTEM (system function error)"
+	case REJ_PEER:
+		return "REJ_PEER (rejected by peer)"
+	case REJ_RESOURCE:
+		return "REJ_RESOURCE (resource allocation problem)"
+	case REJ_ROGUE:
+		return "REJ_ROGUE (incorrect data in handshake)"
+	case REJ_BACKLOG:
+		return "REJ_BACKLOG (listener's backlog exceeded)"
+	case REJ_IPE:
+		return "REJ_IPE (internal program error)"
+	case REJ_CLOSE:
+		return "REJ_CLOSE (socket is closing)"
+	case REJ_VERSION:
+		return "REJ_VERSION (peer is older version than agent's min)"
+	case REJ_RDVCOOKIE:
+		return "REJ_RDVCOOKIE (rendezvous cookie collision)"
+	case REJ_BADSECRET:
+		return "REJ_BADSECRET (wrong password)"
+	case REJ_UNSECURE:
+		return "REJ_UNSECURE (password required or unexpected)"
+	case REJ_MESSAGEAPI:
+		return "REJ_MESSAGEAPI (stream flag collision)"
+	case REJ_CONGESTION:
+		return "REJ_CONGESTION (incompatible congestion-controller type)"
+	case REJ_FILTER:
+		return "REJ_FILTER (incompatible packet filter)"
+	case REJ_GROUP:
+		return "REJ_GROUP (incompatible group)"
+	}
+
+	return "unknown"
+}
+
+func (h handshakeType) IsUnknown() bool {
+	return h.String() == "unkonwn"
+}
+
+func (h handshakeType) IsHandshake() bool {
+	switch h {
+	case HSTYPE_DONE:
+	case HSTYPE_AGREEMENT:
+	case HSTYPE_CONCLUSION:
+	case HSTYPE_WAVEHAND:
+	case HSTYPE_INDUCTION:
+	default:
+		return false
+	}
+
+	return true
+}
+
+func (h handshakeType) IsRejection() bool {
+	if h.IsUnknown() == true {
+		return false
+	} else if h.IsHandshake() == true {
+		return false
+	}
+
+	return true
+}
+
+func (h handshakeType) Val() uint32 {
+	return uint32(h)
+}
 
 // Table 6: Handshake Extension Message Flags
 const (
@@ -336,7 +419,7 @@ type cifHandshake struct {
 	initialPacketSequenceNumber circular
 	maxTransmissionUnitSize     uint32
 	maxFlowWindowSize           uint32
-	handshakeType               uint32
+	handshakeType               handshakeType
 	srtSocketId                 uint32
 	synCookie                   uint32
 	peerIP                      IP
@@ -376,9 +459,9 @@ func (c cifHandshake) String() string {
 	fmt.Fprintf(&b, "   encryptionField: %#04x\n", c.encryptionField)
 	fmt.Fprintf(&b, "   extensionField: %#04x\n", c.extensionField)
 	fmt.Fprintf(&b, "   initialPacketSequenceNumber: %#08x\n", c.initialPacketSequenceNumber.Val())
-	fmt.Fprintf(&b, "   maxTransmissionUnitSize: %#08x\n", c.maxTransmissionUnitSize)
-	fmt.Fprintf(&b, "   maxFlowWindowSize: %#08x\n", c.maxFlowWindowSize)
-	fmt.Fprintf(&b, "   handshakeType: %#08x\n", c.handshakeType)
+	fmt.Fprintf(&b, "   maxTransmissionUnitSize: %#08x (%d)\n", c.maxTransmissionUnitSize, c.maxTransmissionUnitSize)
+	fmt.Fprintf(&b, "   maxFlowWindowSize: %#08x (%d)\n", c.maxFlowWindowSize, c.maxFlowWindowSize)
+	fmt.Fprintf(&b, "   handshakeType: %#08x (%s)\n", c.handshakeType.Val(), c.handshakeType.String())
 	fmt.Fprintf(&b, "   srtSocketId: %#08x\n", c.srtSocketId)
 	fmt.Fprintf(&b, "   synCookie: %#08x\n", c.synCookie)
 	fmt.Fprintf(&b, "   peerIP: %s\n", c.peerIP)
@@ -406,7 +489,7 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "      packetType: %d\n", c.srtKM.packetType)
 		fmt.Fprintf(&b, "      sign: %#08x\n", c.srtKM.sign)
 		fmt.Fprintf(&b, "      resv1: %d\n", c.srtKM.resv1)
-		fmt.Fprintf(&b, "      keyBasedEncryption: %d\n", c.srtKM.keyBasedEncryption)
+		fmt.Fprintf(&b, "      keyBasedEncryption: %s\n", c.srtKM.keyBasedEncryption.String())
 		fmt.Fprintf(&b, "      keyEncryptionKeyIndex: %d\n", c.srtKM.keyEncryptionKeyIndex)
 		fmt.Fprintf(&b, "      cipher: %d\n", c.srtKM.cipher)
 		fmt.Fprintf(&b, "      authentication: %d\n", c.srtKM.authentication)
@@ -438,7 +521,7 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 	c.initialPacketSequenceNumber = newCircular(binary.BigEndian.Uint32(data[8:])&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
 	c.maxTransmissionUnitSize = binary.BigEndian.Uint32(data[12:])
 	c.maxFlowWindowSize = binary.BigEndian.Uint32(data[16:])
-	c.handshakeType = binary.BigEndian.Uint32(data[20:])
+	c.handshakeType = handshakeType(binary.BigEndian.Uint32(data[20:]))
 	c.srtSocketId = binary.BigEndian.Uint32(data[24:])
 	c.synCookie = binary.BigEndian.Uint32(data[28:])
 	c.peerIP.Unmarshal(data[32:48])
@@ -591,7 +674,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[8:], c.initialPacketSequenceNumber.Val()) // initialPacketSequenceNumber
 	binary.BigEndian.PutUint32(buffer[12:], c.maxTransmissionUnitSize)          // maxTransmissionUnitSize
 	binary.BigEndian.PutUint32(buffer[16:], c.maxFlowWindowSize)                // maxFlowWindowSize
-	binary.BigEndian.PutUint32(buffer[20:], c.handshakeType)                    // handshakeType
+	binary.BigEndian.PutUint32(buffer[20:], c.handshakeType.Val())              // handshakeType
 	binary.BigEndian.PutUint32(buffer[24:], c.srtSocketId)                      // Socket ID of the Listener, should be some own generated ID
 	binary.BigEndian.PutUint32(buffer[28:], c.synCookie)                        // SYN cookie
 	c.peerIP.Marshal(buffer[32:])                                               // peerIP

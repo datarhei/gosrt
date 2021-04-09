@@ -11,6 +11,7 @@ import (
 	"net"
 	gosync "sync"
 	"time"
+
 	//"os"
 
 	"github.com/datarhei/gosrt/sync"
@@ -68,17 +69,13 @@ type srtConn struct {
 
 	config Config
 
-	streamId string
-
-	passphrase             string
 	crypto                 *crypto
 	keyBaseEncryption      packetEncryption
 	kmPreAnnounceCountdown uint64
 	kmRefreshCountdown     uint64
-	kmRefreshPeriod        bool
 	kmConfirmed            bool
 
-	timeout *time.Timer
+	peerIdleTimeout *time.Timer
 
 	rtt    float64
 	rttVar float64
@@ -95,7 +92,7 @@ type srtConn struct {
 	tsbpdWrapPeriod     bool
 	tsbpdTimeBaseOffset uint64
 	tsbpdDelay          uint64
-	drift               uint64
+	tsbpdDrift          uint64
 
 	// Queue for packets that are coming from the network
 	networkQueue     chan packet
@@ -105,6 +102,7 @@ type srtConn struct {
 	writeQueue     chan packet
 	stopWriteQueue sync.Stopper
 	writeBuffer    bytes.Buffer
+	writeData      []byte
 
 	// Queue for packets that will be read locally with ReadPacket()
 	readQueue  chan packet
@@ -112,7 +110,7 @@ type srtConn struct {
 
 	stopTicker sync.Stopper
 
-	send       func(p packet)
+	onSend     func(p packet)
 	onShutdown func(socketId uint32)
 
 	tick time.Duration
@@ -129,31 +127,41 @@ type srtConn struct {
 	}
 }
 
-func (c *srtConn) LocalAddr() net.Addr {
-	addr, _ := net.ResolveUDPAddr("udp", c.localAddr.String())
-	return addr
+type srtConnConfig struct {
+	localAddr                   net.Addr
+	remoteAddr                  net.Addr
+	config                      Config
+	start                       time.Time
+	socketId                    uint32
+	peerSocketId                uint32
+	tsbpdTimeBase               uint64
+	tsbpdDelay                  uint64
+	initialPacketSequenceNumber circular
+	crypto                      *crypto
+	keyBaseEncryption           packetEncryption
+	onSend                      func(p packet)
+	onShutdown                  func(socketId uint32)
 }
 
-func (c *srtConn) RemoteAddr() net.Addr {
-	addr, _ := net.ResolveUDPAddr("udp", c.remoteAddr.String())
-	return addr
-}
+func newSRTConn(config srtConnConfig) *srtConn {
+	c := &srtConn{
+		localAddr:                   config.localAddr,
+		remoteAddr:                  config.remoteAddr,
+		config:                      config.config,
+		start:                       config.start,
+		socketId:                    config.socketId,
+		peerSocketId:                config.peerSocketId,
+		tsbpdTimeBase:               config.tsbpdTimeBase,
+		tsbpdDelay:                  config.tsbpdDelay,
+		initialPacketSequenceNumber: config.initialPacketSequenceNumber,
+		crypto:                      config.crypto,
+		keyBaseEncryption:           config.keyBaseEncryption,
+		onSend:                      config.onSend,
+		onShutdown:                  config.onShutdown,
+	}
 
-func (c *srtConn) SocketId() uint32 {
-	return c.socketId
-}
-
-func (c *srtConn) PeerSocketId() uint32 {
-	return c.peerSocketId
-}
-
-func (c *srtConn) StreamId() string {
-	return c.streamId
-}
-
-func (c *srtConn) listenAndServe() {
-	if c.send == nil {
-		c.send = func(p packet) {}
+	if c.onSend == nil {
+		c.onSend = func(p packet) {}
 	}
 
 	if c.onShutdown == nil {
@@ -177,12 +185,13 @@ func (c *srtConn) listenAndServe() {
 
 	c.writeQueue = make(chan packet, 1024)
 	c.stopWriteQueue = sync.NewStopper()
+	c.writeData = make([]byte, int(c.config.PayloadSize))
 
 	c.readQueue = make(chan packet, 1024)
 
 	c.stopTicker = sync.NewStopper()
 
-	c.timeout = time.AfterFunc(c.config.PeerIdleTimeout, func() {
+	c.peerIdleTimeout = time.AfterFunc(c.config.PeerIdleTimeout, func() {
 		log("conn %d: no more data received from peer for %s. shutting down\n", c.socketId, c.config.PeerIdleTimeout)
 		go c.close()
 	})
@@ -219,6 +228,30 @@ func (c *srtConn) listenAndServe() {
 
 	c.debug.expectedRcvPacketSequenceNumber = c.initialPacketSequenceNumber
 	c.debug.expectedReadPacketSequenceNumber = c.initialPacketSequenceNumber
+
+	return c
+}
+
+func (c *srtConn) LocalAddr() net.Addr {
+	addr, _ := net.ResolveUDPAddr("udp", c.localAddr.String())
+	return addr
+}
+
+func (c *srtConn) RemoteAddr() net.Addr {
+	addr, _ := net.ResolveUDPAddr("udp", c.remoteAddr.String())
+	return addr
+}
+
+func (c *srtConn) SocketId() uint32 {
+	return c.socketId
+}
+
+func (c *srtConn) PeerSocketId() uint32 {
+	return c.peerSocketId
+}
+
+func (c *srtConn) StreamId() string {
+	return c.config.StreamId
 }
 
 func (c *srtConn) ticker() {
@@ -298,58 +331,47 @@ func (c *srtConn) WritePacket(p packet) error {
 		return nil
 	}
 
-	// Give the packet a deliver timestamp
-	p.Header().pktTsbpdTime = c.getTimestamp()
-
-	select {
-	case c.writeQueue <- p:
-		return nil
-	default:
+	_, err := c.Write(p.Data())
+	if err != nil {
+		return err
 	}
 
-	return io.EOF
+	return nil
 }
 
 func (c *srtConn) Write(b []byte) (int, error) {
 	c.writeBuffer.Write(b)
 
-	bufferlen := c.writeBuffer.Len()
-
-	if bufferlen < 188 {
-		return len(b), nil
-	}
-
-	data := make([]byte, 7*188)
-
 	for {
-		n := bufferlen % 188
-		if n > 7 {
-			n = 7
-		}
-
-		if _, err := c.writeBuffer.Read(data[:n*188]); err != nil {
+		n, err := c.writeBuffer.Read(c.writeData)
+		if err != nil {
 			return 0, err
 		}
 
 		p := newPacket(nil, nil)
 
-		p.SetData(data)
+		p.SetData(c.writeData[:n])
 
 		p.Header().isControlPacket = false
+		// Give the packet a deliver timestamp
+		p.Header().pktTsbpdTime = c.getTimestamp()
 
-		if err := c.WritePacket(p); err != nil {
-			return 0, err
+		if c.isShutdown == true {
+			return 0, io.EOF
 		}
 
-		bufferlen = c.writeBuffer.Len()
-		if bufferlen < 188 {
+		select {
+		case c.writeQueue <- p:
+		default:
+			return 0, io.EOF
+		}
+
+		if c.writeBuffer.Len() == 0 {
 			break
 		}
 	}
 
-	if bufferlen == 0 {
-		c.writeBuffer.Reset()
-	}
+	c.writeBuffer.Reset()
 
 	return len(b), nil
 }
@@ -415,7 +437,7 @@ func (c *srtConn) pop(p packet) {
 	}
 
 	// Send the packet on the wire
-	c.send(p)
+	c.onSend(p)
 }
 
 // reads from the network queue
@@ -472,7 +494,7 @@ func (c *srtConn) handlePacket(p packet) {
 		return
 	}
 
-	c.timeout.Reset(c.config.PeerIdleTimeout)
+	c.peerIdleTimeout.Reset(c.config.PeerIdleTimeout)
 
 	header := p.Header()
 
@@ -505,11 +527,12 @@ func (c *srtConn) handlePacket(p packet) {
 		*/
 
 		// Ignore FEC filter control packets
-		// https://github.com/Haivision/srt/blob/master/docs/packet-filtering-and-fec.md
+		// https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md
 		// "An FEC control packet is distinguished from a regular data packet by having
 		// its message number equal to 0. This value isn't normally used in SRT (message
 		// numbers start from 1, increment to a maximum, and then roll back to 1)."
 		if header.messageNumber == 0 {
+			log("dropped FEC filter control packet\n")
 			return
 		}
 
@@ -534,7 +557,7 @@ func (c *srtConn) handlePacket(p packet) {
 			}
 		}
 
-		header.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.timestamp) + c.tsbpdDelay + c.drift
+		header.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.timestamp) + c.tsbpdDelay + c.tsbpdDrift
 
 		if header.keyBaseEncryptionFlag != 0 && c.crypto != nil {
 			c.crypto.EncryptOrDecryptPayload(p.Data(), header.keyBaseEncryptionFlag, header.packetSequenceNumber.Val())
@@ -551,7 +574,7 @@ func (c *srtConn) handleKeepAlive(p packet) {
 	c.statistics.receive.keepalive++
 	c.statistics.send.keepalive++
 
-	c.timeout.Reset(2 * time.Second)
+	c.peerIdleTimeout.Reset(c.config.PeerIdleTimeout)
 
 	c.pop(p)
 }
@@ -675,7 +698,7 @@ func (c *srtConn) handleKMRequest(p packet) {
 			return
 		}
 	*/
-	if err := c.crypto.UnmarshalKM(cif, c.passphrase); err != nil {
+	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
 		c.statistics.receive.invalid++
 		//log("invalid KM. can't decode key with passphrase\n")
 		return
@@ -823,7 +846,7 @@ func (c *srtConn) sendKMRequest() {
 
 	cif := &cifKM{}
 
-	c.crypto.MarshalKM(cif, c.passphrase, c.keyBaseEncryption.Opposite())
+	c.crypto.MarshalKM(cif, c.config.Passphrase, c.keyBaseEncryption.Opposite())
 
 	p := newPacket(c.remoteAddr, nil)
 
@@ -850,9 +873,9 @@ func (c *srtConn) close() {
 	c.isShutdown = true
 
 	c.closeOnce.Do(func() {
-		log("conn %d: stopping timeout\n", c.socketId)
+		log("conn %d: stopping peer idle timeout\n", c.socketId)
 
-		c.timeout.Stop()
+		c.peerIdleTimeout.Stop()
 
 		log("conn %d: sending shutdown message to peer\n", c.socketId)
 
