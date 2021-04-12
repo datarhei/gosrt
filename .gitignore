@@ -3,6 +3,5 @@
 /client/client*
 *.prof
 *.out
-*.txt
 *.ts
 *.mp4
