@@ -1,15 +1,13 @@
 Implementation of the SRT protocol in pure go
 
 - [SRT reference implementation](https://github.com/Haivision/srt)
-- [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-mops-srt.txt)
+- [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
 - [SRT Technical Overview](https://github.com/Haivision/srt/files/2489142/SRT_Protocol_TechnicalOverview_DRAFT_2018-10-17.pdf)
 
 # TODO
 
-Everything
-
-- nicer API <- done
-- less CPU <- the ticker per connection uses up a lot of CPU because it is in a tight loop
+- statistics
+- bitrate control
 
 # Try it out
 
@@ -52,6 +50,16 @@ Alternatively you can use the pure golang client:
 cd client
 go build
 ```
+
+## StreamID
+
+In SRT the StreamID is used to transport somewhat arbitrary information from the caller to the listener. The provided example apps use this
+machanism to decide who is the sender and who is the receiver. The server must know if the connecting client wants to publish a stream or
+if it wants to subscribe to a stream.
+
+The example server looks for the `publish:` prefix in the StreamID. If this prefix is present, the server assumes that it is the receiver
+and the client will send the data. Whatever comes after the prefix is not relevant for the server. The subcribing clients must use the same
+StreamID (withouth the `publish:` prefix) in order to be able to receive data.
 
 ## Connect the pieces
 
@@ -157,3 +165,8 @@ Receive an encrypted stream from the server:
 cd client
 ./client -from "srt://127.0.0.1:6001/?streamid=/live/stream&passphrase=foobarfoobar" -to - | ffplay -f mpegts -i -
 ``` 
+
+## Docker
+
+The docker image you can build with `docker build -t srt .` provides the example SRT client and server as mentioned in the paragraph above.
+E.g. run the server with `docker run -it --rm -p 6001:6001/udp srt srt-server -addr :6001`.
