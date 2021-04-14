@@ -25,7 +25,7 @@ const (
 	SUBSCRIBE
 )
 
-var ErrServerClosed = errors.New("srt: Server closed")
+var ErrServerClosed = errors.New("srt: server closed")
 
 type Listener interface {
 	Accept(func(req ConnRequest) ConnType) (Conn, ConnType, error)
@@ -128,7 +128,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 		buffer := make([]byte, config.MSS) // MTU size
 
 		for {
-			if ln.isShutdown == true {
+			if ln.isShutdown {
 				ln.doneChan <- ErrServerClosed
 				return
 			}
@@ -136,11 +136,11 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 			ln.pc.SetReadDeadline(time.Now().Add(3 * time.Second))
 			n, addr, err := ln.pc.ReadFrom(buffer)
 			if err != nil {
-				if errors.Is(err, os.ErrDeadlineExceeded) == true {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
 					continue
 				}
 
-				if ln.isShutdown == true {
+				if ln.isShutdown {
 					ln.doneChan <- ErrServerClosed
 					return
 				}
@@ -194,7 +194,7 @@ func (req *connRequest) IsEncrypted() bool {
 
 func (req *connRequest) SetPassphrase(passphrase string) error {
 	if req.crypto == nil {
-		return fmt.Errorf("request without encryption")
+		return fmt.Errorf("listen: request without encryption")
 	}
 
 	if err := req.crypto.UnmarshalKM(req.handshake.srtKM, passphrase); err != nil {
@@ -207,7 +207,7 @@ func (req *connRequest) SetPassphrase(passphrase string) error {
 }
 
 func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnType, error) {
-	if ln.isShutdown == true {
+	if ln.isShutdown {
 		return nil, REJECT, ErrServerClosed
 	}
 
@@ -340,7 +340,7 @@ func (ln *listener) accept(request connRequest) {
 }
 
 func (ln *listener) Close() {
-	if ln.isShutdown == true {
+	if ln.isShutdown {
 		return
 	}
 
@@ -374,19 +374,15 @@ func (ln *listener) reader() {
 		case <-ln.stopReader.Check():
 			return
 		case p := <-ln.rcvQueue:
-			if ln.isShutdown == true {
+			if ln.isShutdown {
 				break
 			}
 
 			//logIn("packet-received: bytes=%d from=%s\n", len(buffer), addr.String())
 			//logIn("%s", hex.Dump(buffer[:16]))
 
-			if p.Header().isControlPacket == true {
-				//logIn("%s", p.String())
-			}
-
 			if p.Header().destinationSocketId == 0 {
-				if p.Header().isControlPacket == true && p.Header().controlType == CTRLTYPE_HANDSHAKE {
+				if p.Header().isControlPacket && p.Header().controlType == CTRLTYPE_HANDSHAKE {
 					ln.handleHandshake(p)
 				}
 
@@ -441,7 +437,7 @@ func (ln *listener) writer() {
 			// Write the packet's contents to the wire
 			ln.pc.WriteTo(buffer, p.Header().addr)
 
-			if p.Header().isControlPacket == true {
+			if p.Header().isControlPacket {
 				// Control packets can be decommissioned because they will be not sent again
 				p.Decommission()
 			}
@@ -489,7 +485,7 @@ func (ln *listener) handleHandshake(p packet) {
 		ln.send(p)
 	} else if cif.handshakeType == HSTYPE_CONCLUSION {
 		// Verify the SYN cookie
-		if ln.syncookie.Verify(cif.synCookie, p.Header().addr.String()) == false {
+		if !ln.syncookie.Verify(cif.synCookie, p.Header().addr.String()) {
 			cif.handshakeType = REJ_ROGUE
 			p.MarshalCIF(cif)
 			ln.send(p)
@@ -516,7 +512,7 @@ func (ln *listener) handleHandshake(p packet) {
 		}
 
 		// Check the required SRT flags
-		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
+		if !cif.srtFlags.TSBPDSND || !cif.srtFlags.TSBPDRCV || !cif.srtFlags.TLPKTDROP || !cif.srtFlags.PERIODICNAK || !cif.srtFlags.REXMITFLG {
 			cif.handshakeType = REJ_ROGUE
 			p.MarshalCIF(cif)
 			ln.send(p)
@@ -525,7 +521,7 @@ func (ln *listener) handleHandshake(p packet) {
 		}
 
 		// We only support live streaming
-		if cif.srtFlags.STREAM == true {
+		if cif.srtFlags.STREAM {
 			cif.handshakeType = REJ_MESSAGEAPI
 			p.MarshalCIF(cif)
 			ln.send(p)
@@ -587,7 +583,7 @@ func (ln *listener) handleHandshake(p packet) {
 			ln.send(p)
 		}
 	} else {
-		if cif.handshakeType.IsRejection() == true {
+		if cif.handshakeType.IsRejection() {
 			log("Connection rejected: %s", cif.handshakeType.String())
 		} else {
 			log("Unsupported handshake: %s", cif.handshakeType.String())

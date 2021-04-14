@@ -12,16 +12,16 @@ import (
 )
 
 const (
-	UDP_HEADER_SIZE  = 28
-	SRT_HEADER_SIZE  = 16
-	MIN_MSS_SIZE     = 76
-	MAX_MSS_SIZE     = 1500
-	MIN_PAYLOAD_SIZE = MIN_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
-	MAX_PAYLOAD_SIZE = MAX_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
+	UDP_HEADER_SIZE     = 28
+	SRT_HEADER_SIZE     = 16
+	MIN_MSS_SIZE        = 76
+	MAX_MSS_SIZE        = 1500
+	MIN_PAYLOAD_SIZE    = MIN_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
+	MAX_PAYLOAD_SIZE    = MAX_MSS_SIZE - UDP_HEADER_SIZE - SRT_HEADER_SIZE
 	MIN_PASSPHRASE_SIZE = 10
 	MAX_PASSPHRASE_SIZE = 79
-	MAX_STREAMID_SIZE = 512
-	SRT_VERSION      = 0x010402
+	MAX_STREAMID_SIZE   = 512
+	SRT_VERSION         = 0x010402
 )
 
 type Config struct {
@@ -174,8 +174,8 @@ type Config struct {
 var DefaultConfig Config = Config{
 	Congestion:            "live",
 	ConnectionTimeout:     3 * time.Second,
-	DriftTracer:            true,
-	EnforcedEncryption:     true,
+	DriftTracer:           true,
+	EnforcedEncryption:    true,
 	FC:                    25600,
 	GroupConnect:          false,
 	GroupStabilityTimeout: 0,
@@ -216,7 +216,7 @@ func (c *Config) UnmarshalURL(addr string) error {
 	}
 
 	if u.Scheme != "srt" {
-		return fmt.Errorf("The URL doesn't seem to be an srt:// url.")
+		return fmt.Errorf("the URL doesn't seem to be an srt:// URL")
 	}
 
 	return c.UnmarshalQuery(u.RawQuery)
@@ -242,15 +242,19 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("drifttracer"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.DriftTracer = true
-		case "no", "off", "false", "0": c.DriftTracer = false
+		case "yes", "on", "true", "1":
+			c.DriftTracer = true
+		case "no", "off", "false", "0":
+			c.DriftTracer = false
 		}
 	}
 
 	if s := v.Get("enforcedencryption"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.EnforcedEncryption = true
-		case "no", "off", "false", "0": c.EnforcedEncryption = true
+		case "yes", "on", "true", "1":
+			c.EnforcedEncryption = true
+		case "no", "off", "false", "0":
+			c.EnforcedEncryption = true
 		}
 	}
 
@@ -262,8 +266,10 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("groupconnect"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.GroupConnect = true
-		case "no", "off", "false", "0": c.GroupConnect = false
+		case "yes", "on", "true", "1":
+			c.GroupConnect = true
+		case "no", "off", "false", "0":
+			c.GroupConnect = false
 		}
 	}
 
@@ -335,8 +341,10 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("messageapi"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.MessageAPI = true
-		case "no", "off", "false", "0": c.MessageAPI = false
+		case "yes", "on", "true", "1":
+			c.MessageAPI = true
+		case "no", "off", "false", "0":
+			c.MessageAPI = false
 		}
 	}
 
@@ -350,8 +358,10 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("nakreport"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.NAKReport = true
-		case "no", "off", "false", "0": c.NAKReport = false
+		case "yes", "on", "true", "1":
+			c.NAKReport = true
+		case "no", "off", "false", "0":
+			c.NAKReport = false
 		}
 	}
 
@@ -425,8 +435,10 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("tlpktdrop"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.TooLatePacketDrop = true
-		case "no", "off", "false", "0": c.TooLatePacketDrop = false
+		case "yes", "on", "true", "1":
+			c.TooLatePacketDrop = true
+		case "no", "off", "false", "0":
+			c.TooLatePacketDrop = false
 		}
 	}
 
@@ -436,8 +448,10 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 	if s := v.Get("tsbpdmode"); len(s) != 0 {
 		switch s {
-		case "yes", "on", "true", "1": c.TSBPDMode = true
-		case "no", "off", "false", "0": c.TSBPDMode = false
+		case "yes", "on", "true", "1":
+			c.TSBPDMode = true
+		case "no", "off", "false", "0":
+			c.TSBPDMode = false
 		}
 	}
 
@@ -446,7 +460,7 @@ func (c *Config) UnmarshalQuery(query string) error {
 
 func (c Config) Validate() error {
 	if c.TransmissionType != "live" {
-		return fmt.Errorf("TransmissionType must be 'live'.")
+		return fmt.Errorf("config: TransmissionType must be 'live'")
 	}
 
 	c.Congestion = "live"
@@ -455,32 +469,32 @@ func (c Config) Validate() error {
 	c.TSBPDMode = true
 
 	if c.Congestion != "live" {
-		return fmt.Errorf("Congestion mode must be 'live'.")
+		return fmt.Errorf("config: Congestion mode must be 'live'")
 	}
 
 	if c.ConnectionTimeout <= 0 {
-		return fmt.Errorf("ConnectionTimeout must be greater than 0.")
+		return fmt.Errorf("config: ConnectionTimeout must be greater than 0")
 	}
 
-	if c.GroupConnect == true {
-		return fmt.Errorf("GroupConnect is not supported.")
+	if c.GroupConnect {
+		return fmt.Errorf("config: GroupConnect is not supported")
 	}
 
 	if c.IPTOS > 0 && c.IPTOS > 255 {
-		return fmt.Errorf("IPTOS must be lower than 255.")
+		return fmt.Errorf("config: IPTOS must be lower than 255")
 	}
 
 	if c.IPTTL > 0 && c.IPTTL > 255 {
-		return fmt.Errorf("IPTTL must be between 1 and 255.")
+		return fmt.Errorf("config: IPTTL must be between 1 and 255")
 	}
 
 	if c.IPv6Only > 0 {
-		return fmt.Errorf("IPv6Only is not supported.")
+		return fmt.Errorf("config: IPv6Only is not supported")
 	}
 
 	if c.KMRefreshRate != 0 {
 		if c.KMPreAnnounce < 1 || c.KMPreAnnounce > c.KMRefreshRate/2 {
-			return fmt.Errorf("KMPreAnnounce must be greater than 1 and smaller than KMRefreshRate/2.")
+			return fmt.Errorf("config: KMPreAnnounce must be greater than 1 and smaller than KMRefreshRate/2")
 		}
 	}
 
@@ -490,69 +504,69 @@ func (c Config) Validate() error {
 	}
 
 	if c.MinVersion != SRT_VERSION {
-		return fmt.Errorf("MinVersion must be %#06x.", SRT_VERSION)
+		return fmt.Errorf("config: MinVersion must be %#06x", SRT_VERSION)
 	}
 
 	if c.MSS < MIN_MSS_SIZE || c.MSS > MAX_MSS_SIZE {
-		return fmt.Errorf("MSS must be between %d and %d (both inclusive).", MIN_MSS_SIZE, MAX_MSS_SIZE)
+		return fmt.Errorf("config: MSS must be between %d and %d (both inclusive)", MIN_MSS_SIZE, MAX_MSS_SIZE)
 	}
 
-	if c.NAKReport == false {
-		return fmt.Errorf("NAKReport must be enabled.")
+	if !c.NAKReport {
+		return fmt.Errorf("config: NAKReport must be enabled")
 	}
 
 	if c.OverheadBW < 10 || c.OverheadBW > 100 {
-		return fmt.Errorf("OverheadBW must be between 10 and 100.")
+		return fmt.Errorf("config: OverheadBW must be between 10 and 100")
 	}
 
 	if len(c.PacketFilter) != 0 {
-		return fmt.Errorf("PacketFilter are not supported.")
+		return fmt.Errorf("config: PacketFilter are not supported")
 	}
 
 	if len(c.Passphrase) != 0 {
 		if len(c.Passphrase) < MIN_PASSPHRASE_SIZE || len(c.Passphrase) > MAX_PASSPHRASE_SIZE {
-			return fmt.Errorf("Passphrase must be between %d and %d bytes long.", MIN_PASSPHRASE_SIZE, MAX_PASSPHRASE_SIZE)
+			return fmt.Errorf("config: Passphrase must be between %d and %d bytes long", MIN_PASSPHRASE_SIZE, MAX_PASSPHRASE_SIZE)
 		}
 	}
 
 	if c.PayloadSize < MIN_PAYLOAD_SIZE || c.PayloadSize > MAX_PAYLOAD_SIZE {
-		return fmt.Errorf("PayloadSize must be between %d and %d (both inclusive).", MIN_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE)
+		return fmt.Errorf("config: PayloadSize must be between %d and %d (both inclusive)", MIN_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE)
 	}
 
 	if c.PayloadSize > c.MSS-uint32(SRT_HEADER_SIZE+UDP_HEADER_SIZE) {
-		return fmt.Errorf("PayloadSize must not be larger than %d (MSS - %d)", c.MSS-uint32(SRT_HEADER_SIZE+UDP_HEADER_SIZE), SRT_HEADER_SIZE-UDP_HEADER_SIZE)
+		return fmt.Errorf("config: PayloadSize must not be larger than %d (MSS - %d)", c.MSS-uint32(SRT_HEADER_SIZE+UDP_HEADER_SIZE), SRT_HEADER_SIZE-UDP_HEADER_SIZE)
 	}
 
 	if c.PBKeylen != 16 && c.PBKeylen != 24 && c.PBKeylen != 32 {
-		return fmt.Errorf("PBKeylen must be 16, 24, or 32 bytes.")
+		return fmt.Errorf("config: PBKeylen must be 16, 24, or 32 bytes")
 	}
 
 	if c.PeerLatency < 0 {
-		return fmt.Errorf("PeerLatency must be greater than 0.")
+		return fmt.Errorf("config: PeerLatency must be greater than 0")
 	}
 
 	if c.ReceiverLatency < 0 {
-		return fmt.Errorf("ReceiverLatency must be greater than 0.")
+		return fmt.Errorf("config: ReceiverLatency must be greater than 0")
 	}
 
 	if c.SendDropDelay < 0 {
-		return fmt.Errorf("SendDropDelay must be greater than 0.")
+		return fmt.Errorf("config: SendDropDelay must be greater than 0")
 	}
 
 	if len(c.StreamId) > MAX_STREAMID_SIZE {
-		return fmt.Errorf("StreamId must be shorter than or equal to %d bytes.", MAX_STREAMID_SIZE)
+		return fmt.Errorf("config: StreamId must be shorter than or equal to %d bytes", MAX_STREAMID_SIZE)
 	}
 
-	if c.TooLatePacketDrop == false {
-		return fmt.Errorf("TooLatePacketDrop must be enabled.")
+	if !c.TooLatePacketDrop {
+		return fmt.Errorf("config: TooLatePacketDrop must be enabled")
 	}
 
 	if c.TransmissionType != "live" {
-		return fmt.Errorf("TransmissionType must be 'live'.")
+		return fmt.Errorf("config: TransmissionType must be 'live'")
 	}
 
-	if c.TSBPDMode == false {
-		return fmt.Errorf("TSBPDMode must be enabled.")
+	if !c.TSBPDMode {
+		return fmt.Errorf("config: TSBPDMode must be enabled")
 	}
 
 	return nil

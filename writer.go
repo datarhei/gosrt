@@ -42,7 +42,7 @@ func NewNonblockingWriter(wr io.Writer, size int) NonblockingWriter {
 }
 
 func (u *nonblockingWriter) Write(p []byte) (int, error) {
-	if u.done == true {
+	if u.done {
 		return 0, io.EOF
 	}
 
@@ -67,7 +67,7 @@ func (u *nonblockingWriter) writer() {
 		u.lock.RUnlock()
 
 		if n == 0 || err == io.EOF {
-			if u.done == true {
+			if u.done {
 				break
 			}
 

@@ -132,9 +132,9 @@ func (h handshakeType) IsHandshake() bool {
 }
 
 func (h handshakeType) IsRejection() bool {
-	if h.IsUnknown() == true {
+	if h.IsUnknown() {
 		return false
-	} else if h.IsHandshake() == true {
+	} else if h.IsHandshake() {
 		return false
 	}
 
@@ -264,8 +264,6 @@ func newPacket(addr net.Addr, rawdata []byte) packet {
 func (p *pkt) Decommission() {
 	payloadPool.Put(p.payload)
 	p.payload = nil
-
-	return
 }
 
 func (p pkt) String() string {
@@ -273,7 +271,7 @@ func (p pkt) String() string {
 
 	fmt.Fprintf(&b, "timestamp=%#08x, destId=%#08x\n", p.header.timestamp, p.header.destinationSocketId)
 
-	if p.header.isControlPacket == true {
+	if p.header.isControlPacket {
 		fmt.Fprintf(&b, "control packet:\n")
 		fmt.Fprintf(&b, "   controlType=%#04x\n", p.header.controlType)
 		fmt.Fprintf(&b, "   subType=%#04x\n", p.header.subType)
@@ -326,7 +324,7 @@ func (p *pkt) Unmarshal(data []byte) error {
 
 	p.header.isControlPacket = (data[0] & 0x80) != 0
 
-	if p.header.isControlPacket == true {
+	if p.header.isControlPacket {
 		p.header.controlType = binary.BigEndian.Uint16(data[0:]) & ^uint16(1<<15) // clear the first bit
 		p.header.subType = binary.BigEndian.Uint16(data[2:])
 		p.header.typeSpecific = binary.BigEndian.Uint32(data[4:])
@@ -351,7 +349,7 @@ func (p *pkt) Unmarshal(data []byte) error {
 func (p *pkt) Marshal(w io.Writer) {
 	var buffer [16]byte
 
-	if p.header.isControlPacket == true {
+	if p.header.isControlPacket {
 		binary.BigEndian.PutUint16(buffer[0:], p.header.controlType)  // control type
 		binary.BigEndian.PutUint16(buffer[2:], p.header.subType)      // sub type
 		binary.BigEndian.PutUint32(buffer[4:], p.header.typeSpecific) // type specific
@@ -363,11 +361,11 @@ func (p *pkt) Marshal(w io.Writer) {
 		p.header.typeSpecific = 0
 
 		p.header.typeSpecific |= (uint32(p.header.packetPositionFlag) << 6)
-		if p.header.orderFlag == true {
+		if p.header.orderFlag {
 			p.header.typeSpecific |= (1 << 5)
 		}
 		p.header.typeSpecific |= (uint32(p.header.keyBaseEncryptionFlag) << 3)
-		if p.header.retransmittedPacketFlag == true {
+		if p.header.retransmittedPacketFlag {
 			p.header.typeSpecific |= (1 << 2)
 		}
 		p.header.typeSpecific = p.header.typeSpecific << 24
@@ -388,7 +386,7 @@ func (p *pkt) Dump() string {
 }
 
 func (p *pkt) MarshalCIF(c cifInterface) {
-	if p.header.isControlPacket == false {
+	if !p.header.isControlPacket {
 		return
 	}
 
@@ -397,7 +395,7 @@ func (p *pkt) MarshalCIF(c cifInterface) {
 }
 
 func (p *pkt) UnmarshalCIF(c cifInterface) error {
-	if p.header.isControlPacket == false {
+	if !p.header.isControlPacket {
 		return nil
 	}
 
@@ -466,7 +464,7 @@ func (c cifHandshake) String() string {
 	fmt.Fprintf(&b, "   synCookie: %#08x\n", c.synCookie)
 	fmt.Fprintf(&b, "   peerIP: %s\n", c.peerIP)
 
-	if c.hasHS == true {
+	if c.hasHS {
 		fmt.Fprintf(&b, "   SRT_CMD_HS(REQ/RSP)\n")
 		fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.srtVersion)
 		fmt.Fprintf(&b, "      srtFlags:\n")
@@ -482,7 +480,7 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.sendTSBPDDelay, c.sendTSBPDDelay)
 	}
 
-	if c.hasKM == true {
+	if c.hasKM {
 		fmt.Fprintf(&b, "   SRT_CMD_KM(REQ/RSP)\n")
 		fmt.Fprintf(&b, "      s: %d\n", c.srtKM.s)
 		fmt.Fprintf(&b, "      version: %d\n", c.srtKM.version)
@@ -502,7 +500,7 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "      wrap: %#08x\n", c.srtKM.wrap)
 	}
 
-	if c.hasSID == true {
+	if c.hasSID {
 		fmt.Fprintf(&b, "   SRT_CMD_SID\n")
 		fmt.Fprintf(&b, "      streamId : %s\n", c.streamId)
 	}
@@ -632,7 +630,7 @@ func (c *cifHandshake) Unmarshal(data []byte) error {
 
 			c.streamId = strings.TrimRight(b.String(), "\x00")
 		} else {
-			return fmt.Errorf("unimplemented extension (%d)\n", extensionType)
+			return fmt.Errorf("unimplemented extension (%d)", extensionType)
 		}
 
 		if len(pivot) > extensionLength {
@@ -656,15 +654,15 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		c.extensionField = 0
 	}
 
-	if c.hasHS == true {
+	if c.hasHS {
 		c.extensionField = c.extensionField | 1
 	}
 
-	if c.hasKM == true {
+	if c.hasKM {
 		c.extensionField = c.extensionField | 2
 	}
 
-	if c.hasSID == true {
+	if c.hasSID {
 		c.extensionField = c.extensionField | 4
 	}
 
@@ -681,8 +679,8 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 
 	w.Write(buffer[:48])
 
-	if c.hasHS == true {
-		if c.isRequest == true {
+	if c.hasHS {
+		if c.isRequest {
 			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSREQ)
 		} else {
 			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSRSP)
@@ -732,12 +730,12 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		w.Write(buffer[:16])
 	}
 
-	if c.hasKM == true {
+	if c.hasKM {
 		var data bytes.Buffer
 
 		c.srtKM.Marshal(&data)
 
-		if c.isRequest == true {
+		if c.isRequest {
 			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMREQ)
 		} else {
 			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMRSP)
@@ -749,7 +747,7 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 		w.Write(data.Bytes())
 	}
 
-	if c.hasSID == true {
+	if c.hasSID {
 		streamId := bytes.NewBufferString(c.streamId)
 
 		missing := (4 - streamId.Len()%4)
@@ -775,8 +773,6 @@ func (c *cifHandshake) Marshal(w io.Writer) {
 			w.Write(buffer[:4])
 		}
 	}
-
-	return
 }
 
 // 3.2.2.  Key Material
@@ -851,7 +847,7 @@ func (c *cifKM) Unmarshal(data []byte) error {
 
 	c.resv1 = uint8(data[3] & 0b1111_1100 >> 2)
 	c.keyBasedEncryption = packetEncryption(data[3] & 0b0000_0011)
-	if c.keyBasedEncryption.IsValid() == false || c.keyBasedEncryption == unencryptedPacket {
+	if !c.keyBasedEncryption.IsValid() || c.keyBasedEncryption == unencryptedPacket {
 		return fmt.Errorf("invalid extension format (KK must not be 0)")
 	}
 
@@ -971,9 +967,9 @@ func (c cifACK) String() string {
 	var b strings.Builder
 
 	ackType := "full"
-	if c.isLite == true {
+	if c.isLite {
 		ackType = "lite"
-	} else if c.isSmall == true {
+	} else if c.isSmall {
 		ackType = "small"
 	}
 
@@ -981,7 +977,7 @@ func (c cifACK) String() string {
 
 	fmt.Fprintf(&b, "   lastACKPacketSequenceNumber: %#08x (%d)\n", c.lastACKPacketSequenceNumber.Val(), c.lastACKPacketSequenceNumber.Val())
 
-	if c.isLite == false {
+	if !c.isLite {
 		fmt.Fprintf(&b, "   rtt: %#08x\n", c.rtt)
 		fmt.Fprintf(&b, "   rttVar: %#08x\n", c.rttVar)
 		fmt.Fprintf(&b, "   availableBufferSize: %#08x\n", c.availableBufferSize)
@@ -1040,9 +1036,9 @@ func (c *cifACK) Marshal(w io.Writer) {
 	binary.BigEndian.PutUint32(buffer[20:], c.estimatedLinkCapacity)
 	binary.BigEndian.PutUint32(buffer[24:], c.receivingRate)
 
-	if c.isLite == true {
+	if c.isLite {
 		w.Write(buffer[0:4])
-	} else if c.isSmall == true {
+	} else if c.isSmall {
 		w.Write(buffer[0:16])
 	} else {
 		w.Write(buffer[0:])
@@ -1093,7 +1089,7 @@ func (c *cifNAK) Unmarshal(data []byte) error {
 		if data[i]&0b10000000 == 0 {
 			c.lostPacketSequenceNumber = append(c.lostPacketSequenceNumber, sequenceNumber)
 
-			if isRange == false {
+			if !isRange {
 				c.lostPacketSequenceNumber = append(c.lostPacketSequenceNumber, sequenceNumber)
 			}
 

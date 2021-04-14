@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datarhei/gosrt"
+	srt "github.com/datarhei/gosrt"
 )
 
 type stats struct {
@@ -46,23 +46,20 @@ func (s *stats) tick() {
 	ticker := time.NewTicker(s.period)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case c := <-ticker.C:
-			s.lock.Lock()
-			diff := c.Sub(s.last)
+	for c := range ticker.C {
+		s.lock.Lock()
+		diff := c.Sub(s.last)
 
-			bavg := float64(s.btotal-s.bprev) * 8 / (1000 * 1000 * diff.Seconds())
-			avg := float64(s.total-s.prev) / diff.Seconds()
+		bavg := float64(s.btotal-s.bprev) * 8 / (1000 * 1000 * diff.Seconds())
+		avg := float64(s.total-s.prev) / diff.Seconds()
 
-			s.bprev = s.btotal
-			s.prev = s.total
-			s.last = c
+		s.bprev = s.btotal
+		s.prev = s.total
+		s.last = c
 
-			s.lock.Unlock()
+		s.lock.Unlock()
 
-			fmt.Fprintf(os.Stderr, "%s: %f packets/s, %f Mbps\n", c, avg, bavg)
-		}
+		fmt.Fprintf(os.Stderr, "%s: %f packets/s, %f Mbps\n", c, avg, bavg)
 	}
 }
 
@@ -125,7 +122,7 @@ func main() {
 	}()
 
 	go func() {
-		quit := make(chan os.Signal)
+		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, os.Interrupt)
 		<-quit
 
@@ -138,7 +135,7 @@ func main() {
 
 	r.Close()
 
-	if srtconn, ok := r.(srt.Conn); ok == true {
+	if srtconn, ok := r.(srt.Conn); ok {
 		stats := srtconn.Stats()
 
 		fmt.Fprintf(os.Stderr, "%+v\n", stats)
@@ -149,7 +146,7 @@ func main() {
 
 func openReader(addr string) (io.ReadWriteCloser, error) {
 	if len(addr) == 0 {
-		return nil, fmt.Errorf("The address must not be empty")
+		return nil, fmt.Errorf("reader: the address must not be empty")
 	}
 
 	if addr == "-" {
@@ -189,7 +186,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			if conn == nil {
-				return nil, fmt.Errorf("Incoming connection rejected")
+				return nil, fmt.Errorf("reader: incoming connection rejected")
 			}
 
 			return conn, nil
@@ -201,7 +198,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else {
-			return nil, fmt.Errorf("Unsupported mode")
+			return nil, fmt.Errorf("reader: unsupported mode")
 		}
 	}
 
@@ -219,12 +216,12 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 		return conn, nil
 	}
 
-	return nil, fmt.Errorf("unsupported reader")
+	return nil, fmt.Errorf("reader: unsupported reader")
 }
 
 func openWriter(addr string) (io.ReadWriteCloser, error) {
 	if len(addr) == 0 {
-		return nil, fmt.Errorf("The address must not be empty")
+		return nil, fmt.Errorf("writer: the address must not be empty")
 	}
 
 	if addr == "-" {
@@ -264,7 +261,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 			}
 
 			if conn == nil {
-				return nil, fmt.Errorf("Incoming connection rejected")
+				return nil, fmt.Errorf("writer: incoming connection rejected")
 			}
 
 			return conn, nil
@@ -276,7 +273,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else {
-			return nil, fmt.Errorf("Unsupported mode")
+			return nil, fmt.Errorf("writer: unsupported mode")
 		}
 	}
 
@@ -294,5 +291,5 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 		return conn, nil
 	}
 
-	return nil, fmt.Errorf("unsupported writer")
+	return nil, fmt.Errorf("writer: unsupported writer")
 }

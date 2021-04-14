@@ -286,9 +286,6 @@ type liveRecv struct {
 	packetList            *list.List
 	lock                  sync.RWMutex
 
-	start uint32
-	ticks uint32
-
 	nPackets uint
 
 	periodicACKInterval uint64 // config
@@ -433,7 +430,7 @@ func (r *liveRecv) Push(pkt packet) {
 				// bytes in buffer ++
 				r.statistics.bytes.buffer += pkt.Len()
 
-				if pkt.Header().retransmittedPacketFlag == true {
+				if pkt.Header().retransmittedPacketFlag {
 					r.statistics.packets.retransmitted++
 					r.statistics.bytes.retransmitted += pkt.Len()
 				}
@@ -493,7 +490,7 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, li
 		} else {
 			for e = e.Next(); e != nil; e = e.Next() {
 				p = e.Value.(packet)
-				if p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
+				if !p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) {
 					break
 				}
 
@@ -539,7 +536,7 @@ func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to circular) {
 
 		for e = e.Next(); e != nil; e = e.Next() {
 			p = e.Value.(packet)
-			if p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) == false {
+			if !p.Header().packetSequenceNumber.Equals(ackSequenceNumber.Inc()) {
 				nackSequenceNumber := ackSequenceNumber.Inc()
 
 				ok = true
@@ -558,12 +555,12 @@ func (r *liveRecv) periodicNAK(now uint64) (ok bool, from, to circular) {
 }
 
 func (r *liveRecv) Tick(now uint64) {
-	if ok, sequenceNumber, lite := r.periodicACK(now); ok == true {
+	if ok, sequenceNumber, lite := r.periodicACK(now); ok {
 		//log("sending periodic ACK for up to %d (lite: %v)\n", sequenceNumber, lite)
 		r.sendACK(sequenceNumber, lite)
 	}
 
-	if ok, from, to := r.periodicNAK(now); ok == true {
+	if ok, from, to := r.periodicNAK(now); ok {
 		//log("sending periodic NAK for (%d, %d)\n", nackSequenceNumber.Val(), p.packetSequenceNumber.Dec().Val())
 		r.sendNAK(from, to)
 	}

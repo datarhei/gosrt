@@ -276,29 +276,26 @@ func (c *srtConn) ticker() {
 }
 
 func (c *srtConn) ReadPacket() (packet, error) {
-	if c.isShutdown == true {
+	if c.isShutdown {
 		return nil, io.EOF
 	}
 
-	select {
-	case p := <-c.readQueue:
-		if p == nil {
-			break
-		}
-
-		if p.Header().packetSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) == true {
-			log("lost packets. got: %d, expected: %d (%d)\n", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
-		} else if p.Header().packetSequenceNumber.Lt(c.debug.expectedReadPacketSequenceNumber) == true {
-			log("packet out of order. got: %d, expected: %d (%d)\n", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
-			return nil, io.EOF
-		}
-
-		c.debug.expectedReadPacketSequenceNumber = p.Header().packetSequenceNumber.Inc()
-
-		return p, nil
+	p := <-c.readQueue
+	if p == nil {
+		return nil, io.EOF
 	}
 
-	return nil, io.EOF
+	if p.Header().packetSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) {
+		log("lost packets. got: %d, expected: %d (%d)\n", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
+	} else if p.Header().packetSequenceNumber.Lt(c.debug.expectedReadPacketSequenceNumber) {
+		log("packet out of order. got: %d, expected: %d (%d)\n", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
+		return nil, io.EOF
+	}
+
+	c.debug.expectedReadPacketSequenceNumber = p.Header().packetSequenceNumber.Inc()
+
+	return p, nil
+
 }
 
 func (c *srtConn) Read(b []byte) (int, error) {
@@ -322,11 +319,11 @@ func (c *srtConn) Read(b []byte) (int, error) {
 }
 
 func (c *srtConn) WritePacket(p packet) error {
-	if c.isShutdown == true {
+	if c.isShutdown {
 		return io.EOF
 	}
 
-	if p.Header().isControlPacket == true {
+	if p.Header().isControlPacket {
 		// Ignore control packets
 		return nil
 	}
@@ -356,7 +353,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 		// Give the packet a deliver timestamp
 		p.Header().pktTsbpdTime = c.getTimestamp()
 
-		if c.isShutdown == true {
+		if c.isShutdown {
 			return 0, io.EOF
 		}
 
@@ -378,7 +375,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 
 // This is where packets come in from the network
 func (c *srtConn) push(p packet) {
-	if c.isShutdown == true {
+	if c.isShutdown {
 		return
 	}
 
@@ -403,7 +400,7 @@ func (c *srtConn) pop(p packet) {
 	p.Header().addr = c.remoteAddr
 	p.Header().destinationSocketId = c.peerSocketId
 
-	if p.Header().isControlPacket == false {
+	if !p.Header().isControlPacket {
 		if c.crypto != nil {
 			p.Header().keyBaseEncryptionFlag = c.keyBaseEncryption
 			c.crypto.EncryptOrDecryptPayload(p.Data(), p.Header().keyBaseEncryptionFlag, p.Header().packetSequenceNumber.Val())
@@ -411,7 +408,7 @@ func (c *srtConn) pop(p packet) {
 			c.kmPreAnnounceCountdown--
 			c.kmRefreshCountdown--
 
-			if c.kmPreAnnounceCountdown == 0 && c.kmConfirmed == false {
+			if c.kmPreAnnounceCountdown == 0 && !c.kmConfirmed {
 				c.sendKMRequest()
 
 				// Resend the request until we get a response
@@ -477,7 +474,7 @@ func (c *srtConn) writeQueueReader() {
 
 // writes to the read queue
 func (c *srtConn) deliver(p packet) {
-	if c.isShutdown == true {
+	if c.isShutdown {
 		return
 	}
 
@@ -498,7 +495,7 @@ func (c *srtConn) handlePacket(p packet) {
 
 	header := p.Header()
 
-	if header.isControlPacket == true {
+	if header.isControlPacket {
 		if header.controlType == CTRLTYPE_KEEPALIVE {
 			c.handleKeepAlive(p)
 		} else if header.controlType == CTRLTYPE_SHUTDOWN {
@@ -537,7 +534,7 @@ func (c *srtConn) handlePacket(p packet) {
 		}
 
 		// 4.5.1.1.  TSBPD Time Base Calculation
-		if c.tsbpdWrapPeriod == false {
+		if !c.tsbpdWrapPeriod {
 			if header.timestamp > MAX_TIMESTAMP-(30*1000000) {
 				c.tsbpdWrapPeriod = true
 				log("TSBPD wrapping period started\n")
@@ -551,7 +548,7 @@ func (c *srtConn) handlePacket(p packet) {
 		}
 
 		tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
-		if c.tsbpdWrapPeriod == true {
+		if c.tsbpdWrapPeriod {
 			if header.timestamp < (30 * 1000000) {
 				tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
 			}
@@ -602,7 +599,7 @@ func (c *srtConn) handleACK(p packet) {
 
 	c.snd.ACK(cif.lastACKPacketSequenceNumber)
 
-	if cif.isLite == false && cif.isSmall == false {
+	if !cif.isLite && !cif.isSmall {
 		// 4.10.  Round-Trip Time Estimation
 		c.recalculateRTT(time.Duration(int64(cif.rtt)) * time.Microsecond)
 
@@ -635,7 +632,7 @@ func (c *srtConn) handleACKACK(p packet) {
 	c.statistics.receive.ackack++
 
 	// p.typeSpecific is the ACKNumber
-	if ts, ok := c.ackNumbers[p.Header().typeSpecific]; ok == true {
+	if ts, ok := c.ackNumbers[p.Header().typeSpecific]; ok {
 		// 4.10.  Round-Trip Time Estimation
 		c.recalculateRTT(time.Since(ts))
 		delete(c.ackNumbers, p.Header().typeSpecific)
@@ -711,8 +708,6 @@ func (c *srtConn) handleKMRequest(p packet) {
 	//log("sending out KM response\n")
 
 	c.pop(p)
-
-	return
 }
 
 func (c *srtConn) handleKMResponse(p packet) {
@@ -732,8 +727,6 @@ func (c *srtConn) handleKMResponse(p packet) {
 	}
 
 	c.kmConfirmed = true
-
-	return
 }
 
 func (c *srtConn) sendShutdown() {
@@ -788,7 +781,7 @@ func (c *srtConn) sendACK(seq circular, lite bool) {
 	c.ackLock.Lock()
 	defer c.ackLock.Unlock()
 
-	if lite == true {
+	if lite {
 		cif.isLite = true
 
 		p.Header().typeSpecific = 0

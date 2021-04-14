@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/datarhei/gosrt"
+	srt "github.com/datarhei/gosrt"
 )
 
 // server is an implementation of the Server interface
@@ -85,13 +85,11 @@ func main() {
 		}
 	}()
 
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
 	s.Shutdown()
-
-	return
 }
 
 func (s *server) log(who, action, path, message string, client net.Addr) {
@@ -104,10 +102,10 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	streamId := req.StreamId()
 	path := streamId
 
-	if strings.HasPrefix(streamId, "publish:") == true {
+	if strings.HasPrefix(streamId, "publish:") {
 		mode = srt.PUBLISH
 		path = strings.TrimPrefix(streamId, "publish:")
-	} else if strings.HasPrefix(streamId, "subscribe:") == true {
+	} else if strings.HasPrefix(streamId, "subscribe:") {
 		path = strings.TrimPrefix(streamId, "subscribe:")
 	}
 
@@ -116,7 +114,7 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		return srt.REJECT
 	}
 
-	if req.IsEncrypted() == true {
+	if req.IsEncrypted() {
 		if err := req.SetPassphrase(s.passphrase); err != nil {
 			s.log("CONNECT", "FORBIDDEN", u.Path, err.Error(), client)
 			return srt.REJECT

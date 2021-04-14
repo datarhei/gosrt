@@ -31,7 +31,7 @@ func newCrypto(keyLength int) (*crypto, error) {
 	case 24:
 	case 32:
 	default:
-		return nil, fmt.Errorf("Invalid key size, must be either 16, 24, or 32")
+		return nil, fmt.Errorf("crypto: invalid key size, must be either 16, 24, or 32")
 	}
 
 	c := &crypto{
@@ -41,7 +41,7 @@ func newCrypto(keyLength int) (*crypto, error) {
 	// 3.2.2.  Key Material: "The only valid length of salt defined is 128 bits."
 	c.salt = make([]byte, 16)
 	if err := c.prng(c.salt); err != nil {
-		return nil, fmt.Errorf("can't generate salt: %w", err)
+		return nil, fmt.Errorf("crypto: can't generate salt: %w", err)
 	}
 
 	c.evenSEK = make([]byte, c.keyLength)
@@ -58,17 +58,17 @@ func newCrypto(keyLength int) (*crypto, error) {
 }
 
 func (c *crypto) GenerateSEK(key packetEncryption) error {
-	if key.IsValid() == false {
-		return fmt.Errorf("unknown key type")
+	if !key.IsValid() {
+		return fmt.Errorf("crypto: unknown key type")
 	}
 
 	if key == evenKeyEncrypted {
 		if err := c.prng(c.evenSEK); err != nil {
-			return fmt.Errorf("can't generate even key: %w", err)
+			return fmt.Errorf("crypto: can't generate even key: %w", err)
 		}
 	} else if key == oddKeyEncrypted {
 		if err := c.prng(c.oddSEK); err != nil {
-			return fmt.Errorf("can't generate odd key: %w", err)
+			return fmt.Errorf("crypto: can't generate odd key: %w", err)
 		}
 	}
 
@@ -93,7 +93,7 @@ func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
 	}
 
 	if len(unwrap) != n*c.keyLength {
-		return fmt.Errorf("The unwrapped key has the wrong length")
+		return fmt.Errorf("crypto: the unwrapped key has the wrong length")
 	}
 
 	if km.keyBasedEncryption == evenKeyEncrypted {
@@ -109,8 +109,8 @@ func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
 }
 
 func (c *crypto) MarshalKM(km *cifKM, passphrase string, key packetEncryption) error {
-	if key == unencryptedPacket || key.IsValid() == false {
-		return fmt.Errorf("Invalid key for encryption. Must be even or odd or both")
+	if key == unencryptedPacket || !key.IsValid() {
+		return fmt.Errorf("crypto: invalid key for encryption. Must be even or odd or both")
 	}
 
 	km.s = 0
@@ -193,7 +193,7 @@ func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, pack
 	} else if key == oddKeyEncrypted {
 		sek = c.oddSEK
 	} else {
-		return fmt.Errorf("Invalid SEK selected. Must be either even or odd")
+		return fmt.Errorf("crypto: invalid SEK selected. Must be either even or odd")
 	}
 
 	// 6.2.2.  Encrypting the Payload
@@ -221,7 +221,7 @@ func (c *crypto) prng(p []byte) error {
 	}
 
 	if n != len(p) {
-		return fmt.Errorf("Random byte sequence is too short")
+		return fmt.Errorf("crypto: random byte sequence is too short")
 	}
 
 	return nil

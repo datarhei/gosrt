@@ -36,12 +36,9 @@ func (s *stopper) Check() <-chan int {
 func (s *stopper) Stop() {
 	s.c <- stopperStop
 
-	for {
-		select {
-		case n := <-s.d:
-			if n == stopperDone {
-				return
-			}
+	for n := range s.d {
+		if n == stopperDone {
+			return
 		}
 	}
 }

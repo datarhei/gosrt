@@ -22,7 +22,7 @@ func (i IP) String() string {
 func (i *IP) Parse(ip string) {
 	i.ip = net.ParseIP(ip)
 
-	if i.ip == nil || i.ip.IsUnspecified() == true {
+	if i.ip == nil || i.ip.IsUnspecified() {
 		i.setDefault()
 	}
 }
@@ -30,7 +30,7 @@ func (i *IP) Parse(ip string) {
 func (i *IP) FromNetIP(ip net.IP) {
 	i.ip = net.ParseIP(ip.String())
 
-	if i.ip == nil || i.ip.IsUnspecified() == true {
+	if i.ip == nil || i.ip.IsUnspecified() {
 		i.setDefault()
 	}
 }
@@ -42,7 +42,7 @@ func (i *IP) FromNetAddr(addr net.Addr) {
 		i.setDefault()
 	}
 
-	if i.ip.IsUnspecified() == true {
+	if i.ip.IsUnspecified() {
 		i.setDefault()
 	}
 }
@@ -126,6 +126,4 @@ func (i *IP) Marshal(data []byte) {
 		data[14] = i.ip[1]
 		data[16] = i.ip[0]
 	}
-
-	return
 }

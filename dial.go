@@ -18,7 +18,7 @@ import (
 	"github.com/datarhei/gosrt/sync"
 )
 
-var ErrClientClosed = errors.New("srt: Client closed")
+var ErrClientClosed = errors.New("srt: client closed")
 
 // dial will implement the Conn interface
 type dialer struct {
@@ -123,7 +123,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 		index := 0
 
 		for {
-			if dl.isShutdown == true {
+			if dl.isShutdown {
 				dl.doneChan <- ErrClientClosed
 				return
 			}
@@ -131,11 +131,11 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 			pc.SetReadDeadline(time.Now().Add(3 * time.Second))
 			n, _, err := pc.ReadFrom(buffer)
 			if err != nil {
-				if errors.Is(err, os.ErrDeadlineExceeded) == true {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
 					continue
 				}
 
-				if dl.isShutdown == true {
+				if dl.isShutdown {
 					dl.doneChan <- ErrClientClosed
 					return
 				}
@@ -208,7 +208,7 @@ func (dl *dialer) reader() {
 		case <-dl.stopReader.Check():
 			return
 		case p := <-dl.rcvQueue:
-			if dl.isShutdown == true {
+			if dl.isShutdown {
 				break
 			}
 
@@ -223,7 +223,7 @@ func (dl *dialer) reader() {
 				break
 			}
 
-			if p.Header().isControlPacket == true && p.Header().controlType == CTRLTYPE_HANDSHAKE {
+			if p.Header().isControlPacket && p.Header().controlType == CTRLTYPE_HANDSHAKE {
 				dl.handleHandshake(p)
 				break
 			}
@@ -267,7 +267,7 @@ func (dl *dialer) writer() {
 			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
 
-			if p.Header().isControlPacket == true {
+			if p.Header().isControlPacket {
 				// Control packets can be decommissioned because they will be sent again
 				p.Decommission()
 			}
@@ -298,7 +298,7 @@ func (dl *dialer) handleHandshake(p packet) {
 		if cif.version != 5 {
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer doesn't support handshake v5"),
+				err:  fmt.Errorf("dial: peer doesn't support handshake v5"),
 			}
 
 			return
@@ -308,7 +308,7 @@ func (dl *dialer) handleHandshake(p packet) {
 		if cif.extensionField != 0x4A17 {
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer sent the wrong magic number"),
+				err:  fmt.Errorf("dial: peer sent the wrong magic number"),
 			}
 
 			return
@@ -335,7 +335,7 @@ func (dl *dialer) handleHandshake(p packet) {
 			if err != nil {
 				dl.connChan <- connResponse{
 					conn: nil,
-					err:  fmt.Errorf("Failed creating crypto context: %w", err),
+					err:  fmt.Errorf("dial: failed creating crypto context: %w", err),
 				}
 			}
 
@@ -392,7 +392,7 @@ func (dl *dialer) handleHandshake(p packet) {
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer doesn't support handshake v5"),
+				err:  fmt.Errorf("dial: peer doesn't support handshake v5"),
 			}
 
 			return
@@ -404,31 +404,31 @@ func (dl *dialer) handleHandshake(p packet) {
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer SRT version is not sufficient"),
+				err:  fmt.Errorf("dial: peer SRT version is not sufficient"),
 			}
 
 			return
 		}
 
 		// Check the required SRT flags
-		if cif.srtFlags.TSBPDSND == false || cif.srtFlags.TSBPDRCV == false || cif.srtFlags.TLPKTDROP == false || cif.srtFlags.PERIODICNAK == false || cif.srtFlags.REXMITFLG == false {
+		if !cif.srtFlags.TSBPDSND || !cif.srtFlags.TSBPDRCV || !cif.srtFlags.TLPKTDROP || !cif.srtFlags.PERIODICNAK || !cif.srtFlags.REXMITFLG {
 			dl.sendShutdown(cif.srtSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer doesn't agree on SRT flags"),
+				err:  fmt.Errorf("dial: peer doesn't agree on SRT flags"),
 			}
 
 			return
 		}
 
 		// We only support live streaming
-		if cif.srtFlags.STREAM == true {
+		if cif.srtFlags.STREAM {
 			dl.sendShutdown(cif.srtSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("Peer doesn't support live streaming"),
+				err:  fmt.Errorf("dial: peer doesn't support live streaming"),
 			}
 
 			return
@@ -455,7 +455,7 @@ func (dl *dialer) handleHandshake(p packet) {
 
 				dl.connChan <- connResponse{
 					conn: nil,
-					err:  fmt.Errorf("Effective MSS too small (%d bytes) to fit the minimal payload size (%d bytes)", dl.config.MSS, MIN_PAYLOAD_SIZE),
+					err:  fmt.Errorf("dial: effective MSS too small (%d bytes) to fit the minimal payload size (%d bytes)", dl.config.MSS, MIN_PAYLOAD_SIZE),
 				}
 
 				return
@@ -490,10 +490,10 @@ func (dl *dialer) handleHandshake(p packet) {
 	} else {
 		var err error
 
-		if cif.handshakeType.IsRejection() == true {
-			err = fmt.Errorf("Connection rejected: %s", cif.handshakeType.String())
+		if cif.handshakeType.IsRejection() {
+			err = fmt.Errorf("dial: connection rejected: %s", cif.handshakeType.String())
 		} else {
-			err = fmt.Errorf("Unsupported handshake: %s", cif.handshakeType.String())
+			err = fmt.Errorf("dial: unsupported handshake: %s", cif.handshakeType.String())
 		}
 
 		dl.connChan <- connResponse{
@@ -578,7 +578,7 @@ func (dl *dialer) StreamId() string {
 }
 
 func (dl *dialer) Close() error {
-	if dl.isShutdown == true {
+	if dl.isShutdown {
 		return nil
 	}
 

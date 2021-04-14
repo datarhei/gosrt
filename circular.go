@@ -35,7 +35,7 @@ func (a circular) Equals(b circular) bool {
 }
 
 func (a circular) Distance(b circular) uint32 {
-	if a.Equals(b) == true {
+	if a.Equals(b) {
 		return 0
 	}
 
@@ -55,7 +55,7 @@ func (a circular) Distance(b circular) uint32 {
 }
 
 func (a circular) Lt(b circular) bool {
-	if a.Equals(b) == true {
+	if a.Equals(b) {
 		return false
 	}
 
@@ -77,7 +77,7 @@ func (a circular) Lt(b circular) bool {
 }
 
 func (a circular) Lte(b circular) bool {
-	if a.Equals(b) == true {
+	if a.Equals(b) {
 		return true
 	}
 
@@ -85,7 +85,7 @@ func (a circular) Lte(b circular) bool {
 }
 
 func (a circular) Gt(b circular) bool {
-	if a.Equals(b) == true {
+	if a.Equals(b) {
 		return false
 	}
 
@@ -107,7 +107,7 @@ func (a circular) Gt(b circular) bool {
 }
 
 func (a circular) Gte(b circular) bool {
-	if a.Equals(b) == true {
+	if a.Equals(b) {
 		return true
 	}
 
