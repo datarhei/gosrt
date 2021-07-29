@@ -408,7 +408,7 @@ func (ln *listener) send(p packet) {
 	select {
 	case ln.sndQueue <- p:
 	default:
-		log("server: send queue is full")
+		log("server: send queue is full\n")
 	}
 }
 
@@ -438,7 +438,7 @@ func (ln *listener) writer() {
 			ln.pc.WriteTo(buffer, p.Header().addr)
 
 			if p.Header().isControlPacket {
-				// Control packets can be decommissioned because they will be not sent again
+				// Control packets can be decommissioned because they will not be sent again
 				p.Decommission()
 			}
 		}
