@@ -5,10 +5,19 @@
 package srt
 
 import (
+	"fmt"
 	"testing"
 )
 
 const max uint32 = 0b11111111_11111111_11111111_11111111
+
+func Examplecircular_Inc() {
+	a := newCircular(42, max)
+	b := a.Inc()
+
+	fmt.Println(b.Val())
+	// Output: 43
+}
 
 func TestIncNoWrap(t *testing.T) {
 	a := newCircular(42, max)
