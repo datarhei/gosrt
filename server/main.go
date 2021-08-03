@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	srt "github.com/datarhei/gosrt"
+	//"github.com/pkg/profile"
 )
 
 // server is an implementation of the Server interface
@@ -46,6 +47,8 @@ func (s *server) Shutdown() {
 }
 
 func main() {
+	//defer profile.Start(profile.NoShutdownHook).Stop()
+
 	s := server{
 		channels: make(map[string]srt.PubSub),
 	}

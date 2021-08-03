@@ -59,7 +59,7 @@ func (s *stats) tick() {
 
 		s.lock.Unlock()
 
-		fmt.Fprintf(os.Stderr, "%s: %f packets/s, %f Mbps\n", c, avg, bavg)
+		fmt.Fprintf(os.Stderr, "\r%-54s: %8.3f kpackets (%8.3f packets/s), %8.3f mbytes (%8.3f Mbps)", c, float64(s.total)/1024, avg, float64(s.btotal)/1024/1024, bavg)
 	}
 }
 

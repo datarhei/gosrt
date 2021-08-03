@@ -1,13 +1,13 @@
 Implementation of the SRT protocol in pure go
 
-- [SRT reference implementation](https://github.com/Haivision/srt)
-- [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
-- [SRT Technical Overview](https://github.com/Haivision/srt/files/2489142/SRT_Protocol_TechnicalOverview_DRAFT_2018-10-17.pdf)
+-   [SRT reference implementation](https://github.com/Haivision/srt)
+-   [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
+-   [SRT Technical Overview](https://github.com/Haivision/srt/files/2489142/SRT_Protocol_TechnicalOverview_DRAFT_2018-10-17.pdf)
 
 # TODO
 
-- statistics
-- bitrate control
+-   statistics
+-   bitrate control
 
 # Try it out
 
@@ -15,9 +15,9 @@ Do this only on your own risk. You should have:
 
 ## Setup
 
-- macOS (something recent)
-- Homebrew
-- go
+-   macOS (something recent)
+-   Homebrew
+-   go
 
 Install ffmpeg and libsrt:
 
@@ -92,7 +92,7 @@ SRT parameters specified:
     streamid = 'publish:/live/stream'
 Opening SRT target caller on 127.0.0.1:6001
 Connecting to 127.0.0.1:6001
-SRT target connected 
+SRT target connected
 ```
 
 The console where the SRT server is running should also show something about handshake and so on.
@@ -141,7 +141,7 @@ If the server is not on localhost, you might adjust the `peerlatency` in order t
 Now you can play the stream:
 
 ```
-ffplay -f mpegts -transtype live -rcvlatency 1000000 -i "srt://192.168.1.154:6001?streamid=/live/stream"
+ffplay -f mpegts -transtype live -rcvlatency 1000000 -i "srt://127.0.0.1:6001?streamid=/live/stream"
 ```
 
 ## Encryption
@@ -164,7 +164,7 @@ Receive an encrypted stream from the server:
 ```
 cd client
 ./client -from "srt://127.0.0.1:6001/?streamid=/live/stream&passphrase=foobarfoobar" -to - | ffplay -f mpegts -i -
-``` 
+```
 
 ## Docker
 

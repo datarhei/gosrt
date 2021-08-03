@@ -85,7 +85,7 @@ type Config struct {
 	// SRTO_LOSSMAXTTL
 	LossMaxTTL uint32
 
-	// Bandwidth limit in bytes.
+	// Bandwidth limit in bytes/s.
 	// SRTO_MAXBW
 	MaxBW int64
 

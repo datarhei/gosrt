@@ -71,7 +71,7 @@ func (pb *pubSub) Publish(c Conn) error {
 	}
 
 	for {
-		p, err = conn.ReadPacket()
+		p, err = conn.readPacket()
 		if err != nil {
 			break
 		}
@@ -111,7 +111,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 		case <-pb.abort:
 			return io.EOF
 		case p := <-l:
-			err := conn.WritePacket(p)
+			err := conn.writePacket(p)
 			p.Decommission()
 			if err != nil {
 				return err
