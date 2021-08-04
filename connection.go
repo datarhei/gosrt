@@ -39,21 +39,22 @@ type Conn interface {
 }
 
 type connStats struct {
-	headerSize       uint64
-	pktSentACK       uint64
-	pktRecvACK       uint64
-	pktSentACKACK    uint64
-	pktRecvACKACK    uint64
-	pktSentNAK       uint64
-	pktRecvNAK       uint64
-	pktSentKM        uint64
-	pktRecvKM        uint64
-	pktRecvUndecrypt uint64
-	pktRecvInvalid   uint64
-	pktSentKeepalive uint64
-	pktRecvKeepalive uint64
-	pktSentShutdown  uint64
-	pktRecvShutdown  uint64
+	headerSize        uint64
+	pktSentACK        uint64
+	pktRecvACK        uint64
+	pktSentACKACK     uint64
+	pktRecvACKACK     uint64
+	pktSentNAK        uint64
+	pktRecvNAK        uint64
+	pktSentKM         uint64
+	pktRecvKM         uint64
+	pktRecvUndecrypt  uint64
+	byteRecvUndecrypt uint64
+	pktRecvInvalid    uint64
+	pktSentKeepalive  uint64
+	pktRecvKeepalive  uint64
+	pktSentShutdown   uint64
+	pktRecvShutdown   uint64
 }
 
 // Check if we implemenet the net.Conn interface
@@ -92,11 +93,11 @@ type srtConn struct {
 
 	initialPacketSequenceNumber circular
 
-	tsbpdTimeBase       uint64
+	tsbpdTimeBase       uint64 // microseconds
 	tsbpdWrapPeriod     bool
-	tsbpdTimeBaseOffset uint64
-	tsbpdDelay          uint64
-	tsbpdDrift          uint64
+	tsbpdTimeBaseOffset uint64 // microseconds
+	tsbpdDelay          uint64 // microseconds
+	tsbpdDrift          uint64 // microseconds
 
 	// Queue for packets that are coming from the network
 	networkQueue     chan packet
@@ -138,7 +139,7 @@ type srtConnConfig struct {
 	start                       time.Time
 	socketId                    uint32
 	peerSocketId                uint32
-	tsbpdTimeBase               uint64
+	tsbpdTimeBase               uint64 // microseconds
 	tsbpdDelay                  uint64
 	initialPacketSequenceNumber circular
 	crypto                      *crypto
@@ -565,8 +566,16 @@ func (c *srtConn) handlePacket(p packet) {
 
 		header.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.timestamp) + c.tsbpdDelay + c.tsbpdDrift
 
-		if header.keyBaseEncryptionFlag != 0 && c.crypto != nil {
-			c.crypto.EncryptOrDecryptPayload(p.Data(), header.keyBaseEncryptionFlag, header.packetSequenceNumber.Val())
+		if c.crypto != nil {
+			if header.keyBaseEncryptionFlag != 0 {
+				if err := c.crypto.EncryptOrDecryptPayload(p.Data(), header.keyBaseEncryptionFlag, header.packetSequenceNumber.Val()); err != nil {
+					c.statistics.pktRecvUndecrypt++
+					c.statistics.byteRecvUndecrypt += p.Len()
+				}
+			} else {
+				c.statistics.pktRecvUndecrypt++
+				c.statistics.byteRecvUndecrypt += p.Len()
+			}
 		}
 
 		// Put the packet into receive congestion control
@@ -931,40 +940,37 @@ func (c *srtConn) Stats() Statistics {
 		MsTimeStamp: uint64(time.Since(c.start).Milliseconds()),
 
 		// Accumulated
-		PktSent:            send.pktSent,
-		PktRecv:            recv.pktRecv,
-		PktSentUnique:      send.pktSentUnique,
-		PktRecvUnique:      recv.pktRecvUnique,
-		PktSndLoss:         send.pktSndLoss,
-		PktRcvLoss:         recv.pktRcvLoss,
-		PktRetrans:         send.pktRetrans,
-		PktRcvRetrans:      recv.pktRcvRetrans,
-		PktSentACK:         c.statistics.pktSentACK,
-		PktRecvACK:         c.statistics.pktRecvACK,
-		PktSentNAK:         c.statistics.pktSentNAK,
-		PktRecvNAK:         c.statistics.pktRecvNAK,
-		UsSndDuration:      0,
-		PktSndDrop:         send.pktSndDrop,
-		PktRcvDrop:         recv.pktRcvDrop,
-		PktRcvUndecrypt:    c.statistics.pktRecvUndecrypt,
-		PktSndFilterExtra:  0,
-		PktRcvFilterExtra:  0,
-		PktRcvFilterSupply: 0,
-		PktRcvFilterLoss:   0,
-		ByteSent:           send.byteSent + (send.pktSent * c.statistics.headerSize),
-		ByteRecv:           recv.byteRecv + (recv.pktRecv * c.statistics.headerSize),
-		ByteSentUnique:     send.byteSentUnique + (send.pktSentUnique * c.statistics.headerSize),
-		ByteRecvUnique:     recv.byteRecvUnique + (recv.pktRecvUnique * c.statistics.headerSize),
-		ByteRcvLoss:        recv.byteRcvLoss + (recv.pktRcvLoss * c.statistics.headerSize),
-		ByteRetrans:        send.byteRetrans + (send.pktRetrans * c.statistics.headerSize),
-		ByteSndDrop:        send.byteSndDrop + (send.pktSndDrop * c.statistics.headerSize),
-		ByteRcvDrop:        recv.byteRcvDrop + (recv.pktRcvDrop * c.statistics.headerSize),
-		ByteRcvUndecrypt:   0,
+		PktSent:          send.pktSent,
+		PktRecv:          recv.pktRecv,
+		PktSentUnique:    send.pktSentUnique,
+		PktRecvUnique:    recv.pktRecvUnique,
+		PktSndLoss:       send.pktSndLoss,
+		PktRcvLoss:       recv.pktRcvLoss,
+		PktRetrans:       send.pktRetrans,
+		PktRcvRetrans:    recv.pktRcvRetrans,
+		PktSentACK:       c.statistics.pktSentACK,
+		PktRecvACK:       c.statistics.pktRecvACK,
+		PktSentNAK:       c.statistics.pktSentNAK,
+		PktRecvNAK:       c.statistics.pktRecvNAK,
+		PktSentKM:        c.statistics.pktSentKM,
+		PktRecvKM:        c.statistics.pktRecvKM,
+		UsSndDuration:    send.usSndDuration,
+		PktSndDrop:       send.pktSndDrop,
+		PktRcvDrop:       recv.pktRcvDrop,
+		PktRcvUndecrypt:  c.statistics.pktRecvUndecrypt,
+		ByteSent:         send.byteSent + (send.pktSent * c.statistics.headerSize),
+		ByteRecv:         recv.byteRecv + (recv.pktRecv * c.statistics.headerSize),
+		ByteSentUnique:   send.byteSentUnique + (send.pktSentUnique * c.statistics.headerSize),
+		ByteRecvUnique:   recv.byteRecvUnique + (recv.pktRecvUnique * c.statistics.headerSize),
+		ByteRcvLoss:      recv.byteRcvLoss + (recv.pktRcvLoss * c.statistics.headerSize),
+		ByteRetrans:      send.byteRetrans + (send.pktRetrans * c.statistics.headerSize),
+		ByteSndDrop:      send.byteSndDrop + (send.pktSndDrop * c.statistics.headerSize),
+		ByteRcvDrop:      recv.byteRcvDrop + (recv.pktRcvDrop * c.statistics.headerSize),
+		ByteRcvUndecrypt: c.statistics.byteRecvUndecrypt + (c.statistics.pktRecvUndecrypt * c.statistics.headerSize),
 
 		// Instantaneous
 		UsPktSndPeriod:       send.usPktSndPeriod,
 		PktFlowWindow:        uint64(c.config.FC),
-		PktCongestionWindow:  0,
 		PktFlightSize:        send.pktFlightSize,
 		MsRTT:                c.rtt / 1_000,
 		MbpsBandwidth:        0,
@@ -974,11 +980,11 @@ func (c *srtConn) Stats() Statistics {
 		ByteMSS:              uint64(c.config.MSS),
 		PktSndBuf:            send.pktSndBuf,
 		ByteSndBuf:           send.byteSndBuf,
-		MsSndBuf:             0,
+		MsSndBuf:             send.msSndBuf,
 		MsSndTsbPdDelay:      uint64(c.config.PeerLatency),
 		PktRcvBuf:            recv.pktRcvBuf,
 		ByteRcvBuf:           recv.byteRcvBuf,
-		MsRcvBuf:             0,
+		MsRcvBuf:             recv.msRcvBuf,
 		MsRcvTsbPdDelay:      uint64(c.config.ReceiverLatency),
 		PktReorderTolerance:  0,
 		PktRcvAvgBelatedTime: 0,

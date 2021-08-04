@@ -187,7 +187,7 @@ type packet interface {
 type pktHeader struct {
 	addr            net.Addr
 	isControlPacket bool
-	pktTsbpdTime    uint64
+	pktTsbpdTime    uint64 // microseconds
 
 	// control packet fields
 	controlType  uint16
@@ -203,7 +203,8 @@ type pktHeader struct {
 	messageNumber           uint32
 
 	// common fields
-	timestamp           uint32
+
+	timestamp           uint32 // microseconds
 	destinationSocketId uint32
 }
 
@@ -955,12 +956,12 @@ type cifACK struct {
 	isLite                      bool
 	isSmall                     bool
 	lastACKPacketSequenceNumber circular
-	rtt                         uint32
-	rttVar                      uint32
-	availableBufferSize         uint32
-	packetsReceivingRate        uint32
+	rtt                         uint32 // microseconds
+	rttVar                      uint32 // microseconds
+	availableBufferSize         uint32 // bytes
+	packetsReceivingRate        uint32 // packets/s
 	estimatedLinkCapacity       uint32
-	receivingRate               uint32
+	receivingRate               uint32 // bytes/s
 }
 
 func (c cifACK) String() string {
@@ -978,8 +979,8 @@ func (c cifACK) String() string {
 	fmt.Fprintf(&b, "   lastACKPacketSequenceNumber: %#08x (%d)\n", c.lastACKPacketSequenceNumber.Val(), c.lastACKPacketSequenceNumber.Val())
 
 	if !c.isLite {
-		fmt.Fprintf(&b, "   rtt: %#08x\n", c.rtt)
-		fmt.Fprintf(&b, "   rttVar: %#08x\n", c.rttVar)
+		fmt.Fprintf(&b, "   rtt: %#08x (%dus)\n", c.rtt, c.rtt)
+		fmt.Fprintf(&b, "   rttVar: %#08x (%dus)\n", c.rttVar, c.rttVar)
 		fmt.Fprintf(&b, "   availableBufferSize: %#08x\n", c.availableBufferSize)
 		fmt.Fprintf(&b, "   packetsReceivingRate: %#08x\n", c.packetsReceivingRate)
 		fmt.Fprintf(&b, "   estimatedLinkCapacity: %#08x\n", c.estimatedLinkCapacity)

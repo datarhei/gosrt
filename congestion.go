@@ -33,6 +33,7 @@ type liveSendStats struct {
 	// instantaneous
 	pktSndBuf  uint64
 	byteSndBuf uint64
+	msSndBuf   uint64
 
 	pktFlightSize uint64
 
@@ -113,9 +114,16 @@ func (s *liveSend) Stats() liveSendStats {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	s.statistics.usSndDuration = 0
 	s.statistics.usPktSndPeriod = s.pktSndPeriod
 	s.statistics.bytePayload = uint64(s.avgPayloadSize)
+	s.statistics.msSndBuf = 0
+
+	max := s.lossList.Back()
+	min := s.lossList.Front()
+
+	if max != nil && min != nil {
+		s.statistics.msSndBuf = (max.Value.(packet).Header().pktTsbpdTime - min.Value.(packet).Header().pktTsbpdTime) / 1_000
+	}
 
 	return s.statistics
 }
@@ -181,6 +189,8 @@ func (s *liveSend) Tick(now uint64) {
 			// bytes delivered
 			s.statistics.byteSent += p.Len()
 			s.statistics.byteSentUnique += p.Len()
+
+			s.statistics.usSndDuration += uint64(s.pktSndPeriod)
 
 			//  5.1.2. SRT's Default LiveCC Algorithm
 			s.avgPayloadSize = 0.875*s.avgPayloadSize + 0.125*float64(p.Len())
@@ -336,6 +346,7 @@ type liveRecvStats struct {
 	// instantaneous
 	pktRcvBuf  uint64
 	byteRcvBuf uint64
+	msRcvBuf   uint64
 
 	bytePayload uint64
 }
@@ -590,6 +601,8 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, li
 		lite = true
 	}
 
+	minPktTsbpdTime, maxPktTsbpdTime := uint64(0), uint64(0)
+
 	// find the sequence number up until we have all in a row.
 	// where the first gap is (or at the end of the list) is where we can ACK to.
 	e := r.packetList.Front()
@@ -597,6 +610,8 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, li
 		p := e.Value.(packet)
 
 		ackSequenceNumber := p.Header().packetSequenceNumber
+		minPktTsbpdTime = p.Header().pktTsbpdTime
+		maxPktTsbpdTime = p.Header().pktTsbpdTime
 
 		if p.Header().pktTsbpdTime > r.lastPktTsbpdTime {
 			ackSequenceNumber = r.lastACKSequenceNumber
@@ -608,6 +623,7 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, li
 				}
 
 				ackSequenceNumber = p.Header().packetSequenceNumber
+				maxPktTsbpdTime = p.Header().pktTsbpdTime
 			}
 		}
 
@@ -621,6 +637,8 @@ func (r *liveRecv) periodicACK(now uint64) (ok bool, sequenceNumber circular, li
 
 	r.lastPeriodicACK = now
 	r.nPackets = 0
+
+	r.statistics.msRcvBuf = (maxPktTsbpdTime - minPktTsbpdTime) / 1_000
 
 	return
 }
