@@ -15,7 +15,7 @@ import (
 	"sync"
 
 	srt "github.com/datarhei/gosrt"
-	//"github.com/pkg/profile"
+	"github.com/pkg/profile"
 )
 
 // server is an implementation of the Server interface
@@ -25,6 +25,8 @@ type server struct {
 	app        string
 	token      string
 	passphrase string
+	logtopics  string
+	profile    bool
 
 	server *srt.Server
 
@@ -47,8 +49,6 @@ func (s *server) Shutdown() {
 }
 
 func main() {
-	//defer profile.Start(profile.NoShutdownHook).Stop()
-
 	s := server{
 		channels: make(map[string]srt.PubSub),
 	}
@@ -57,6 +57,8 @@ func main() {
 	flag.StringVar(&s.app, "app", "", "path prefix for streamid")
 	flag.StringVar(&s.token, "token", "", "token query param for streamid")
 	flag.StringVar(&s.passphrase, "passphrase", "", "passphrase for de- and enrcypting the data")
+	flag.StringVar(&s.logtopics, "logtopics", "", "topics for the log output")
+	flag.BoolVar(&s.profile, "profile", false, "enable profiling")
 
 	flag.Parse()
 
@@ -65,7 +67,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if s.profile {
+		defer profile.Start(profile.NoShutdownHook).Stop()
+	}
+
 	config := srt.DefaultConfig
+
+	if len(s.logtopics) != 0 {
+		config.Logger = srt.NewLogger(strings.Split(s.logtopics, ","))
+	}
 
 	config.KMPreAnnounce = 200
 	config.KMRefreshRate = 10000
@@ -82,6 +92,16 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Listening on %s\n", s.addr)
 
 	go func() {
+		if config.Logger == nil {
+			return
+		}
+
+		for m := range config.Logger.Listen() {
+			fmt.Fprintf(os.Stderr, "%#08x %s (in %s:%d)\n%s \n", m.SocketId, m.Topic, m.File, m.Line, m.Message)
+		}
+	}()
+
+	go func() {
 		if err := s.ListenAndServe(); err != nil && err != srt.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "SRT Server: %s\n", err)
 			os.Exit(2)
@@ -93,6 +113,10 @@ func main() {
 	<-quit
 
 	s.Shutdown()
+
+	if config.Logger != nil {
+		config.Logger.Close()
+	}
 }
 
 func (s *server) log(who, action, path, message string, client net.Addr) {
@@ -169,7 +193,9 @@ func (s *server) handlePublish(conn srt.Conn) {
 	s.lock.Lock()
 	pubsub := s.channels[u.Path]
 	if pubsub == nil {
-		pubsub = srt.NewPubSub()
+		pubsub = srt.NewPubSub(srt.PubSubConfig{
+			Logger: s.server.Config.Logger,
+		})
 		s.channels[u.Path] = pubsub
 	} else {
 		pubsub = nil

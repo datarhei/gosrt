@@ -7,6 +7,7 @@ type Statistics struct {
 	MsTimeStamp uint64 // The time elapsed, in milliseconds, since the SRT socket has been created
 
 	// Accumulated
+
 	PktSent         uint64 // The total number of sent DATA packets, including retransmitted packets
 	PktRecv         uint64 // The total number of received DATA packets, including retransmitted packets
 	PktSentUnique   uint64 // The total number of unique DATA packets sent by the SRT sender
@@ -37,6 +38,7 @@ type Statistics struct {
 	ByteRcvUndecrypt uint64 // Same as pktRcvUndecrypt, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 
 	// Instantaneous
+
 	UsPktSndPeriod       float64 // Current minimum time interval between which consecutive packets are sent, in microseconds
 	PktFlowWindow        uint64  // The maximum number of packets that can be "in flight"
 	PktFlightSize        uint64  // The number of packets in flight

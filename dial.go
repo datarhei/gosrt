@@ -60,6 +60,10 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 		return nil, fmt.Errorf("dial: invalid config: %w", err)
 	}
 
+	if config.Logger == nil {
+		config.Logger = NewLogger(nil)
+	}
+
 	dl := &dialer{
 		config: config,
 	}
@@ -163,7 +167,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	// Send the initial handshake request
 	dl.sendInduction()
 
-	log("waiting for response\n")
+	dl.log("dial", func() string { return "waiting for response" })
 
 	timer := time.AfterFunc(dl.config.ConnectionTimeout, func() {
 		dl.connChan <- connResponse{
@@ -199,7 +203,7 @@ func (dl *dialer) checkConnection() error {
 
 func (dl *dialer) reader() {
 	defer func() {
-		log("client: left reader loop\n")
+		dl.log("dial", func() string { return "left reader loop" })
 		dl.stopReader.Done()
 	}()
 
@@ -212,12 +216,7 @@ func (dl *dialer) reader() {
 				break
 			}
 
-			//log("packet-received: bytes=%d from=%s\n", len(p.data), p.addr.String())
-			//log("%s", hex.Dump(buffer[:16]))
-
-			//if p.isControlPacket == true {
-			//log("%s", p.String())
-			//}
+			dl.log("packet:recv:dump", func() string { return p.Dump() })
 
 			if p.Header().destinationSocketId != dl.socketId {
 				break
@@ -238,14 +237,14 @@ func (dl *dialer) send(p packet) {
 	select {
 	case dl.sndQueue <- p:
 	default:
-		log("client: send queue is full\n")
+		dl.log("dial", func() string { return "send queue is full" })
 	}
 }
 
 // send packets to the wire
 func (dl *dialer) writer() {
 	defer func() {
-		log("client: left writer loop\n")
+		dl.log("dial", func() string { return "left writer loop" })
 		dl.stopWriter.Done()
 	}()
 
@@ -262,7 +261,7 @@ func (dl *dialer) writer() {
 
 			buffer := data.Bytes()
 
-			//log("packet-send: bytes=%d to=%s\n", len(buffer), p.addr.String())
+			dl.log("packet:send:dump", func() string { return p.Dump() })
 
 			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
@@ -278,12 +277,15 @@ func (dl *dialer) writer() {
 func (dl *dialer) handleHandshake(p packet) {
 	cif := &cifHandshake{}
 
-	if err := p.UnmarshalCIF(cif); err != nil {
-		log("cif error: %s\n", err)
+	err := p.UnmarshalCIF(cif)
+
+	dl.log("handshake:recv:dump", func() string { return p.Dump() })
+	dl.log("handshake:recv:cif", func() string { return cif.String() })
+
+	if err != nil {
+		dl.log("handshake:recv:error", func() string { return err.Error() })
 		return
 	}
-
-	log("incoming: %s\n", cif.String())
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 
@@ -382,7 +384,8 @@ func (dl *dialer) handleHandshake(p packet) {
 
 		p.MarshalCIF(cif)
 
-		log("outgoing: %s\n", cif.String())
+		dl.log("handshake:send:dump", func() string { return p.Dump() })
+		dl.log("handshake:send:cif", func() string { return cif.String() })
 
 		dl.send(p)
 	} else if cif.handshakeType == HSTYPE_CONCLUSION {
@@ -476,12 +479,11 @@ func (dl *dialer) handleHandshake(p packet) {
 			crypto:                      dl.crypto,
 			keyBaseEncryption:           evenKeyEncrypted,
 			onSend:                      dl.send,
-			onShutdown: func(socketId uint32) {
-				dl.Close()
-			},
+			onShutdown:                  func(socketId uint32) { dl.Close() },
+			logger:                      dl.config.Logger,
 		})
 
-		log("new connection: %#08x (%s)\n", conn.SocketId(), conn.StreamId())
+		dl.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s)", conn.SocketId(), conn.StreamId()) })
 
 		dl.connChan <- connResponse{
 			conn: conn,
@@ -530,9 +532,10 @@ func (dl *dialer) sendInduction() {
 
 	cif.peerIP.FromNetAddr(dl.localAddr)
 
-	log("outgoing: %s\n", cif.String())
-
 	p.MarshalCIF(cif)
+
+	dl.log("handshake:send:dump", func() string { return p.Dump() })
+	dl.log("handshake:send:cif", func() string { return cif.String() })
 
 	dl.send(p)
 }
@@ -552,6 +555,8 @@ func (dl *dialer) sendShutdown(peerSocketId uint32) {
 
 	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
 	p.Header().destinationSocketId = peerSocketId
+
+	dl.log("control:send:shutdown:dump", func() string { return p.Dump() })
 
 	dl.send(p)
 }
@@ -591,7 +596,7 @@ func (dl *dialer) Close() error {
 	dl.stopReader.Stop()
 	dl.stopWriter.Stop()
 
-	log("client: closing socket\n")
+	dl.log("dial", func() string { return "closing socket" })
 	dl.pc.Close()
 
 	select {
@@ -622,3 +627,7 @@ func (dl *dialer) SetDeadline(t time.Time) error      { return dl.conn.SetDeadli
 func (dl *dialer) SetReadDeadline(t time.Time) error  { return dl.conn.SetReadDeadline(t) }
 func (dl *dialer) SetWriteDeadline(t time.Time) error { return dl.conn.SetWriteDeadline(t) }
 func (dl *dialer) Stats() Statistics                  { return dl.conn.Stats() }
+
+func (dl *dialer) log(topic string, message func() string) {
+	dl.config.Logger.Print(topic, dl.socketId, 2, message)
+}

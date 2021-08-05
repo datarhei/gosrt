@@ -10,6 +10,10 @@ import (
 	"sync"
 )
 
+type PubSubConfig struct {
+	Logger Logger
+}
+
 type PubSub interface {
 	Publish(c Conn) error
 	Subscribe(c Conn) error
@@ -20,13 +24,19 @@ type pubSub struct {
 	abort     chan struct{}
 	lock      sync.Mutex
 	listeners map[uint32]chan packet
+	logger    Logger
 }
 
-func NewPubSub() PubSub {
+func NewPubSub(config PubSubConfig) PubSub {
 	pb := &pubSub{
 		incoming:  make(chan packet, 1024),
 		listeners: make(map[uint32]chan packet),
 		abort:     make(chan struct{}),
+		logger:    config.Logger,
+	}
+
+	if pb.logger == nil {
+		pb.logger = NewLogger(nil)
 	}
 
 	go pb.broadcast()
@@ -36,8 +46,10 @@ func NewPubSub() PubSub {
 
 func (pb *pubSub) broadcast() {
 	defer func() {
-		log("exiting broadcast loop\n")
+		pb.logger.Print("pubsub:close", 0, 1, func() string { return "exiting broadcast loop" })
 	}()
+
+	pb.logger.Print("pubsub:new", 0, 1, func() string { return "starting broadcast loop" })
 
 	for {
 		select {
@@ -45,13 +57,13 @@ func (pb *pubSub) broadcast() {
 			return
 		case p := <-pb.incoming:
 			pb.lock.Lock()
-			for _, c := range pb.listeners {
+			for socketId, c := range pb.listeners {
 				pp := p.Clone()
 
 				select {
 				case c <- pp:
 				default:
-					log("broadcast target queue is full\n")
+					pb.logger.Print("pubsub:error", socketId, 1, func() string { return "broadcast target queue is full" })
 				}
 			}
 			pb.lock.Unlock()
@@ -67,19 +79,24 @@ func (pb *pubSub) Publish(c Conn) error {
 	var err error
 	conn, ok := c.(*srtConn)
 	if !ok {
-		return fmt.Errorf("the provided connection is not a SRT connection")
+		err := fmt.Errorf("the provided connection is not a SRT connection")
+		pb.logger.Print("pubsub:error", 0, 1, func() string { return err.Error() })
+		return err
 	}
+
+	pb.logger.Print("pubsub:publish", conn.SocketId(), 1, func() string { return "new publisher" })
 
 	for {
 		p, err = conn.readPacket()
 		if err != nil {
+			pb.logger.Print("pubsub:error", conn.SocketId(), 1, func() string { return err.Error() })
 			break
 		}
 
 		select {
 		case pb.incoming <- p:
 		default:
-			log("incoming queue is full\n")
+			pb.logger.Print("pubsub:error", conn.SocketId(), 1, func() string { return "incoming queue is full" })
 		}
 	}
 
@@ -93,8 +110,12 @@ func (pb *pubSub) Subscribe(c Conn) error {
 	socketId := c.SocketId()
 	conn, ok := c.(*srtConn)
 	if !ok {
-		return fmt.Errorf("the provided connection is not a SRT connection")
+		err := fmt.Errorf("the provided connection is not a SRT connection")
+		pb.logger.Print("pubsub:error", 0, 1, func() string { return err.Error() })
+		return err
 	}
+
+	pb.logger.Print("pubsub:subscribe", conn.SocketId(), 1, func() string { return "new subscriber" })
 
 	pb.lock.Lock()
 	pb.listeners[socketId] = l
@@ -114,6 +135,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 			err := conn.writePacket(p)
 			p.Decommission()
 			if err != nil {
+				pb.logger.Print("pubsub:error", conn.SocketId(), 1, func() string { return err.Error() })
 				return err
 			}
 		}

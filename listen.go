@@ -19,6 +19,19 @@ import (
 
 type ConnType int
 
+func (c ConnType) String() string {
+	switch c {
+	case REJECT:
+		return "REJECT"
+	case PUBLISH:
+		return "PUBLISH"
+	case SUBSCRIBE:
+		return "SUBSCRIBE"
+	default:
+		return ""
+	}
+}
+
 const (
 	REJECT ConnType = ConnType(1 << iota)
 	PUBLISH
@@ -43,8 +56,7 @@ type listener struct {
 	conns   map[uint32]*srtConn
 	lock    gosync.RWMutex
 
-	start      time.Time
-	nbReceiver int
+	start time.Time
 
 	rcvQueue chan packet
 	sndQueue chan packet
@@ -62,6 +74,10 @@ type listener struct {
 func Listen(protocol, address string, config Config) (Listener, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("listen: invalid config: %w", err)
+	}
+
+	if config.Logger == nil {
+		config.Logger = NewLogger(nil)
 	}
 
 	ln := &listener{
@@ -117,12 +133,9 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	ln.doneChan = make(chan error)
 
 	ln.start = time.Now()
-	ln.nbReceiver = 1 // runtime.NumCPU()
 
 	go ln.reader()
 	go ln.writer()
-
-	// net.inet.udp.recvspace: 786896 -> 1573792
 
 	go func() {
 		buffer := make([]byte, config.MSS) // MTU size
@@ -245,16 +258,14 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 			tsbpdDelay = request.handshake.sendTSBPDDelay
 		}
 
-		config := ln.config
-
-		config.StreamId = request.handshake.streamId
-		config.Passphrase = request.passphrase
+		ln.config.StreamId = request.handshake.streamId
+		ln.config.Passphrase = request.passphrase
 
 		// Create a new connection
 		conn := newSRTConn(srtConnConfig{
 			localAddr:                   ln.addr,
 			remoteAddr:                  request.addr,
-			config:                      config,
+			config:                      ln.config,
 			start:                       request.start,
 			socketId:                    socketId,
 			peerSocketId:                request.handshake.srtSocketId,
@@ -265,9 +276,10 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 			keyBaseEncryption:           evenKeyEncrypted,
 			onSend:                      ln.send,
 			onShutdown:                  ln.handleShutdown,
+			logger:                      ln.config.Logger,
 		})
 
-		log("new connection: %#08x (%s)\n", conn.SocketId(), conn.StreamId())
+		ln.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s) %s", conn.SocketId(), conn.StreamId(), mode) })
 
 		request.handshake.srtSocketId = socketId
 		request.handshake.synCookie = 0
@@ -282,8 +294,6 @@ func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnT
 		request.handshake.srtFlags.REXMITFLG = true
 		request.handshake.srtFlags.STREAM = false
 		request.handshake.srtFlags.PACKET_FILTER = false
-
-		log("outgoing: %s\n", request.handshake.String())
 
 		ln.accept(request)
 
@@ -319,6 +329,9 @@ func (ln *listener) reject(request connRequest, reason handshakeType) {
 
 	p.MarshalCIF(request.handshake)
 
+	ln.log("handshake:send:dump", func() string { return p.Dump() })
+	ln.log("handshake:send:cif", func() string { return request.handshake.String() })
+
 	ln.send(p)
 }
 
@@ -335,6 +348,9 @@ func (ln *listener) accept(request connRequest) {
 	p.Header().destinationSocketId = request.socketId
 
 	p.MarshalCIF(request.handshake)
+
+	ln.log("handshake:send:dump", func() string { return p.Dump() })
+	ln.log("handshake:send:cif", func() string { return request.handshake.String() })
 
 	ln.send(p)
 }
@@ -355,7 +371,8 @@ func (ln *listener) Close() {
 	ln.stopReader.Stop()
 	ln.stopWriter.Stop()
 
-	log("server: closing socket\n")
+	ln.log("listen", func() string { return "closing socket" })
+
 	ln.pc.Close()
 }
 
@@ -365,7 +382,7 @@ func (ln *listener) Addr() net.Addr {
 
 func (ln *listener) reader() {
 	defer func() {
-		log("server: left reader loop\n")
+		ln.log("listen", func() string { return "left reader loop" })
 		ln.stopReader.Done()
 	}()
 
@@ -378,8 +395,7 @@ func (ln *listener) reader() {
 				break
 			}
 
-			//logIn("packet-received: bytes=%d from=%s\n", len(buffer), addr.String())
-			//logIn("%s", hex.Dump(buffer[:16]))
+			ln.log("packet:recv:dump", func() string { return p.Dump() })
 
 			if p.Header().destinationSocketId == 0 {
 				if p.Header().isControlPacket && p.Header().controlType == CTRLTYPE_HANDSHAKE {
@@ -408,13 +424,13 @@ func (ln *listener) send(p packet) {
 	select {
 	case ln.sndQueue <- p:
 	default:
-		log("server: send queue is full\n")
+		ln.log("listen", func() string { return "send queue is full" })
 	}
 }
 
 func (ln *listener) writer() {
 	defer func() {
-		log("server: left writer loop\n")
+		ln.log("listen", func() string { return "left writer loop" })
 		ln.stopWriter.Done()
 	}()
 
@@ -431,14 +447,13 @@ func (ln *listener) writer() {
 
 			buffer := data.Bytes()
 
-			//logOut("packet-send: bytes=%d to=%s\n", len(buffer), b.addr.String())
-			//logOut("%s", hex.Dump(buffer))
+			ln.log("packet:send:dump", func() string { return p.Dump() })
 
 			// Write the packet's contents to the wire
 			ln.pc.WriteTo(buffer, p.Header().addr)
 
 			if p.Header().isControlPacket {
-				// Control packets can be decommissioned because they will not be sent again
+				// Control packets can be decommissioned because they will not be sent again (data packets might be retransferred)
 				p.Decommission()
 			}
 		}
@@ -450,10 +465,11 @@ func (ln *listener) handleHandshake(p packet) {
 
 	err := p.UnmarshalCIF(cif)
 
-	log("incoming: %s\n", cif.String())
+	ln.log("handshake:recv:dump", func() string { return p.Dump() })
+	ln.log("handshake:recv:cif", func() string { return cif.String() })
 
 	if err != nil {
-		log("cif error: %s\n", err)
+		ln.log("handshake:recv:error", func() string { return err.Error() })
 		return
 	}
 
@@ -480,14 +496,18 @@ func (ln *listener) handleHandshake(p packet) {
 
 		p.MarshalCIF(cif)
 
-		log("outgoing: %s\n", cif.String())
+		ln.log("handshake:send:dump", func() string { return p.Dump() })
+		ln.log("handshake:send:cif", func() string { return cif.String() })
 
 		ln.send(p)
 	} else if cif.handshakeType == HSTYPE_CONCLUSION {
 		// Verify the SYN cookie
 		if !ln.syncookie.Verify(cif.synCookie, p.Header().addr.String()) {
 			cif.handshakeType = REJ_ROGUE
+			ln.log("handshake:recv:error", func() string { return "invalid SYN cookie" })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -496,7 +516,10 @@ func (ln *listener) handleHandshake(p packet) {
 		// We only support HSv5
 		if cif.version != 5 {
 			cif.handshakeType = REJ_ROGUE
+			ln.log("handshake:recv:error", func() string { return "only HSv5 is supported" })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -505,7 +528,10 @@ func (ln *listener) handleHandshake(p packet) {
 		// Check if the peer version is sufficient
 		if cif.srtVersion < ln.config.MinVersion {
 			cif.handshakeType = REJ_VERSION
+			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("peer version insufficient (%#08x)", cif.srtVersion) })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -514,7 +540,10 @@ func (ln *listener) handleHandshake(p packet) {
 		// Check the required SRT flags
 		if !cif.srtFlags.TSBPDSND || !cif.srtFlags.TSBPDRCV || !cif.srtFlags.TLPKTDROP || !cif.srtFlags.PERIODICNAK || !cif.srtFlags.REXMITFLG {
 			cif.handshakeType = REJ_ROGUE
+			ln.log("handshake:recv:error", func() string { return "not all required flags are set" })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -523,7 +552,10 @@ func (ln *listener) handleHandshake(p packet) {
 		// We only support live streaming
 		if cif.srtFlags.STREAM {
 			cif.handshakeType = REJ_MESSAGEAPI
+			ln.log("handshake:recv:error", func() string { return "only live streaming is supported" })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -532,7 +564,10 @@ func (ln *listener) handleHandshake(p packet) {
 		// Peer is advertising a too big MSS
 		if cif.maxTransmissionUnitSize > MAX_MSS_SIZE {
 			cif.handshakeType = REJ_ROGUE
+			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("MTU is too big (%d bytes)", cif.maxTransmissionUnitSize) })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
 			return
@@ -545,7 +580,10 @@ func (ln *listener) handleHandshake(p packet) {
 
 			if ln.config.PayloadSize < MIN_PAYLOAD_SIZE {
 				cif.handshakeType = REJ_ROGUE
+				ln.log("handshake:recv:error", func() string { return fmt.Sprintf("payload size is too small (%d bytes)", ln.config.PayloadSize) })
 				p.MarshalCIF(cif)
+				ln.log("handshake:send:dump", func() string { return p.Dump() })
+				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 			}
 		}
@@ -565,7 +603,10 @@ func (ln *listener) handleHandshake(p packet) {
 			cr, err := newCrypto(int(cif.srtKM.kLen))
 			if err != nil {
 				cif.handshakeType = REJ_ROGUE
+				ln.log("handshake:recv:error", func() string { return fmt.Sprintf("crypto: %s", err) })
 				p.MarshalCIF(cif)
+				ln.log("handshake:send:dump", func() string { return p.Dump() })
+				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
 				return
@@ -579,14 +620,21 @@ func (ln *listener) handleHandshake(p packet) {
 		case ln.backlog <- c:
 		default:
 			cif.handshakeType = REJ_BACKLOG
+			ln.log("handshake:recv:error", func() string { return "backlog is full" })
 			p.MarshalCIF(cif)
+			ln.log("handshake:send:dump", func() string { return p.Dump() })
+			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 		}
 	} else {
 		if cif.handshakeType.IsRejection() {
-			log("Connection rejected: %s", cif.handshakeType.String())
+			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("connection rejected: %s", cif.handshakeType.String()) })
 		} else {
-			log("Unsupported handshake: %s", cif.handshakeType.String())
+			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("unsupported handshake: %s", cif.handshakeType.String()) })
 		}
 	}
+}
+
+func (ln *listener) log(topic string, message func() string) {
+	ln.config.Logger.Print(topic, 0, 2, message)
 }

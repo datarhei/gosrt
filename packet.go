@@ -287,7 +287,7 @@ func (p pkt) String() string {
 		fmt.Fprintf(&b, "   messageNumber=%#08x (%d)\n", p.header.messageNumber, p.header.messageNumber)
 	}
 
-	fmt.Fprintf(&b, "data (%d bytes)\n%s", p.Len(), p.Dump())
+	fmt.Fprintf(&b, "data (%d bytes)", p.Len())
 
 	return b.String()
 }
@@ -383,7 +383,10 @@ func (p *pkt) Marshal(w io.Writer) {
 }
 
 func (p *pkt) Dump() string {
-	return hex.Dump(p.payload.Bytes())
+	var data bytes.Buffer
+	p.Marshal(&data)
+
+	return p.String() + "\n" + hex.Dump(data.Bytes())
 }
 
 func (p *pkt) MarshalCIF(c cifInterface) {
@@ -452,7 +455,7 @@ type cifHandshake struct {
 func (c cifHandshake) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "handshake\n")
+	fmt.Fprintf(&b, "--- handshake ---\n")
 
 	fmt.Fprintf(&b, "   version: %#08x\n", c.version)
 	fmt.Fprintf(&b, "   encryptionField: %#04x\n", c.encryptionField)
@@ -505,6 +508,8 @@ func (c cifHandshake) String() string {
 		fmt.Fprintf(&b, "   SRT_CMD_SID\n")
 		fmt.Fprintf(&b, "      streamId : %s\n", c.streamId)
 	}
+
+	fmt.Fprintf(&b, "--- /handshake ---")
 
 	return b.String()
 }
@@ -799,7 +804,7 @@ type cifKM struct {
 func (c cifKM) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "KM\n")
+	fmt.Fprintf(&b, "--- KM ---\n")
 
 	fmt.Fprintf(&b, "   s: %d\n", c.s)
 	fmt.Fprintf(&b, "   version: %d\n", c.version)
@@ -817,6 +822,8 @@ func (c cifKM) String() string {
 	fmt.Fprintf(&b, "   kLen: %d (%d)\n", c.kLen, c.kLen/4)
 	fmt.Fprintf(&b, "   salt: %#08x\n", c.salt)
 	fmt.Fprintf(&b, "   wrap: %#08x\n", c.wrap)
+
+	fmt.Fprintf(&b, "--- /KM ---")
 
 	return b.String()
 }
@@ -974,7 +981,7 @@ func (c cifACK) String() string {
 		ackType = "small"
 	}
 
-	fmt.Fprintf(&b, "ACK (type: %s)\n", ackType)
+	fmt.Fprintf(&b, "--- ACK (type: %s) ---\n", ackType)
 
 	fmt.Fprintf(&b, "   lastACKPacketSequenceNumber: %#08x (%d)\n", c.lastACKPacketSequenceNumber.Val(), c.lastACKPacketSequenceNumber.Val())
 
@@ -986,6 +993,8 @@ func (c cifACK) String() string {
 		fmt.Fprintf(&b, "   estimatedLinkCapacity: %#08x\n", c.estimatedLinkCapacity)
 		fmt.Fprintf(&b, "   receivingRate: %#08x\n", c.receivingRate)
 	}
+
+	fmt.Fprintf(&b, "--- /ACK ---")
 
 	return b.String()
 }
@@ -1054,7 +1063,7 @@ type cifNAK struct {
 func (c cifNAK) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "NAK\n")
+	fmt.Fprintf(&b, "--- NAK ---\n")
 
 	if len(c.lostPacketSequenceNumber)%2 != 0 {
 		fmt.Fprintf(&b, "   invalid list of sequence numbers\n")
@@ -1068,6 +1077,8 @@ func (c cifNAK) String() string {
 			fmt.Fprintf(&b, "      row: %#08x to %#08x\n", c.lostPacketSequenceNumber[i].Val(), c.lostPacketSequenceNumber[i+1].Val())
 		}
 	}
+
+	fmt.Fprintf(&b, "--- /NAK ---")
 
 	return b.String()
 }
@@ -1134,7 +1145,7 @@ func (c *cifNAK) Marshal(w io.Writer) {
 type cifShutdown struct{}
 
 func (c cifShutdown) String() string {
-	return "Shutdown\n"
+	return "--- Shutdown ---"
 }
 
 func (c *cifShutdown) Unmarshal(data []byte) error {

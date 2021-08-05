@@ -169,6 +169,8 @@ type Config struct {
 	// Timestamp-based packet delivery mode.
 	// SRTO_TSBPDMODE
 	TSBPDMode bool
+
+	Logger Logger
 }
 
 var DefaultConfig Config = Config{
