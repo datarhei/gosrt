@@ -20,7 +20,7 @@ import (
 
 var ErrClientClosed = errors.New("srt: client closed")
 
-// dial will implement the Conn interface
+// dialer will implement the Conn interface
 type dialer struct {
 	pc *net.UDPConn
 
@@ -55,6 +55,7 @@ type connResponse struct {
 	err  error
 }
 
+// Dial connects to the address using the SRT protocol
 func Dial(protocol, address string, config Config) (Conn, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("dial: invalid config: %w", err)
@@ -152,8 +153,6 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 			if p == nil {
 				continue
 			}
-
-			//log("incoming: %s\n", p.String())
 
 			dl.rcvQueue <- p
 

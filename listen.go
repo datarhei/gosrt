@@ -125,7 +125,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	ln.rcvQueue = make(chan packet, 1024)
 	ln.sndQueue = make(chan packet, 1024)
 
-	ln.syncookie = newSYNCookie(ln.addr.String())
+	ln.syncookie = newSYNCookie(ln.addr.String(), time.Now().UnixNano())
 
 	ln.stopReader = sync.NewStopper()
 	ln.stopWriter = sync.NewStopper()

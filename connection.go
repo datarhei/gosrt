@@ -19,23 +19,42 @@ import (
 	"github.com/datarhei/gosrt/sync"
 )
 
+// Conn is a SRT network connection.
 type Conn interface {
+	// Read reads data from the connection.
+	// Read can be made to time out and return an error after a fixed
+	// time limit; see SetDeadline and SetReadDeadline.
 	Read(p []byte) (int, error)
+
+	// Write writes data to the connection.
+	// Write can be made to time out and return an error after a fixed
+	// time limit; see SetDeadline and SetWriteDeadline.
 	Write(p []byte) (int, error)
 
+	// Close closes the connection.
+	// Any blocked Read or Write operations will be unblocked and return errors.
 	Close() error
 
+	// LocalAddr returns the local network address.
 	LocalAddr() net.Addr
+
+	// RemoteAddr returns the remote network address.
 	RemoteAddr() net.Addr
 
 	SetDeadline(t time.Time) error
 	SetReadDeadline(t time.Time) error
 	SetWriteDeadline(t time.Time) error
 
+	// SocketId return the socketid of the connection.
 	SocketId() uint32
+
+	// PeerSocketId returns the socketid of the peer of the connection.
 	PeerSocketId() uint32
+
+	// StreamId returns the streamid use for the connection.
 	StreamId() string
 
+	// Stats returns accumulated and instantaneous statistics of the connection.
 	Stats() Statistics
 }
 
@@ -249,11 +268,13 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	return c
 }
 
+// LocalAddr returns the local network address. The Addr returned is not shared by other invocations of LocalAddr.
 func (c *srtConn) LocalAddr() net.Addr {
 	addr, _ := net.ResolveUDPAddr("udp", c.localAddr.String())
 	return addr
 }
 
+// RemoteAddr returns the remote network address. The Addr returned is not shared by other invocations of RemoteAddr.
 func (c *srtConn) RemoteAddr() net.Addr {
 	addr, _ := net.ResolveUDPAddr("udp", c.remoteAddr.String())
 	return addr
@@ -271,6 +292,8 @@ func (c *srtConn) StreamId() string {
 	return c.config.StreamId
 }
 
+// ticker invokes the congestion control in regular intervals with
+// the current connection time.
 func (c *srtConn) ticker() {
 	ticker := time.NewTicker(c.tick)
 	defer ticker.Stop()
@@ -292,6 +315,8 @@ func (c *srtConn) ticker() {
 	}
 }
 
+// readPacket reads a packet from the queue of received packets. It blocks
+// if the queue is empty. Only data packets are returned.
 func (c *srtConn) readPacket() (packet, error) {
 	if c.isShutdown {
 		return nil, io.EOF
@@ -339,6 +364,8 @@ func (c *srtConn) Read(b []byte) (int, error) {
 	return c.readBuffer.Read(b)
 }
 
+// writePacket writes a packet to the write queue. Packets on the write queue
+// will be sent to the peer of the connection. Only data packets will be sent.
 func (c *srtConn) writePacket(p packet) error {
 	if c.isShutdown {
 		return io.EOF
@@ -378,6 +405,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 			return 0, io.EOF
 		}
 
+		// Non-blocking write to the write queue
 		select {
 		case c.writeQueue <- p:
 		default:
@@ -394,7 +422,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// This is where packets come in from the network
+// push puts a packet on the network queue. This is where packets come in from the network.
 func (c *srtConn) push(p packet) {
 	if c.isShutdown {
 		return
@@ -408,15 +436,19 @@ func (c *srtConn) push(p packet) {
 	}
 }
 
+// getTimestamp returns the elapsed time since the start of the connection in microseconds.
 func (c *srtConn) getTimestamp() uint64 {
 	return uint64(time.Since(c.start).Microseconds())
 }
 
+// getTimestampForPacket returns the elapsed time since the start of the connection in
+// microseconds clamped a 32bit value.
 func (c *srtConn) getTimestampForPacket() uint32 {
 	return uint32(c.getTimestamp() & uint64(MAX_TIMESTAMP))
 }
 
-// This is where packets go out to the network
+// pop adds the destination address and socketid to the packet and sends it out to the network.
+// The packet will be encrypted if required.
 func (c *srtConn) pop(p packet) {
 	p.Header().addr = c.remoteAddr
 	p.Header().destinationSocketId = c.peerSocketId
@@ -460,7 +492,7 @@ func (c *srtConn) pop(p packet) {
 	c.onSend(p)
 }
 
-// reads from the network queue
+// networkQueueReader reads the packets from the network queue in order to process them.
 func (c *srtConn) networkQueueReader() {
 	defer func() {
 		c.log("connection:close", func() string { return "left network queue reader loop" })
@@ -477,7 +509,8 @@ func (c *srtConn) networkQueueReader() {
 	}
 }
 
-// writes to send congestion control
+// writeQueueReader reads the packets from the write queue and puts them into congestion
+// control for sending.
 func (c *srtConn) writeQueueReader() {
 	defer func() {
 		c.log("connection:close", func() string { return "left write queue reader loop" })
@@ -495,7 +528,7 @@ func (c *srtConn) writeQueueReader() {
 	}
 }
 
-// writes to the read queue
+// deliver writes the packets to the read queue in order to be consumed by the Read function.
 func (c *srtConn) deliver(p packet) {
 	if c.isShutdown {
 		return
@@ -509,6 +542,9 @@ func (c *srtConn) deliver(p packet) {
 	}
 }
 
+// handlePacket checks the packet header. If it is a control packet it will forwarded to the
+// respective handler. If it is a data packet it will be put into congestion control for
+// receiving. The packet will be decrypted if required.
 func (c *srtConn) handlePacket(p packet) {
 	if p == nil {
 		return
@@ -598,6 +634,7 @@ func (c *srtConn) handlePacket(p packet) {
 	}
 }
 
+// handleKeepAlive resets the idle timeout and sends a keepalive to the peer.
 func (c *srtConn) handleKeepAlive(p packet) {
 	c.log("control:recv:keepalive:dump", func() string { return p.Dump() })
 
@@ -611,6 +648,7 @@ func (c *srtConn) handleKeepAlive(p packet) {
 	c.pop(p)
 }
 
+// handleShutdown closes the connection
 func (c *srtConn) handleShutdown(p packet) {
 	c.log("control:recv:shutdown:dump", func() string { return p.Dump() })
 
@@ -619,6 +657,8 @@ func (c *srtConn) handleShutdown(p packet) {
 	go c.close()
 }
 
+// handleACK forwards the acknowledge sequence number to the congestion control and
+// returns a ACKACK (on a full ACK). The RTT is also updated in case of a full ACK.
 func (c *srtConn) handleACK(p packet) {
 	c.log("control:recv:ACK:dump", func() string { return p.Dump() })
 
@@ -644,6 +684,7 @@ func (c *srtConn) handleACK(p packet) {
 	}
 }
 
+// handleNAK forwards the lost sequence number to the congestion control.
 func (c *srtConn) handleNAK(p packet) {
 	c.log("control:recv:NAK:dump", func() string { return p.Dump() })
 
@@ -663,6 +704,7 @@ func (c *srtConn) handleNAK(p packet) {
 	c.snd.NAK(cif.lostPacketSequenceNumber)
 }
 
+// handleACKACK updates the RTT and NAK interval for the congestion control.
 func (c *srtConn) handleACKACK(p packet) {
 	c.ackLock.RLock()
 
@@ -693,6 +735,7 @@ func (c *srtConn) handleACKACK(p packet) {
 	c.recv.SetNAKInterval(nakInterval)
 }
 
+// recalculateRTT recalculates the RTT based on a full ACK exchange
 func (c *srtConn) recalculateRTT(rtt time.Duration) {
 	// 4.10.  Round-Trip Time Estimation
 	lastRTT := float64(rtt.Microseconds())
@@ -713,6 +756,7 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 	})
 }
 
+// handleKMRequest checks if the key material is valid and responds with a KM response.
 func (c *srtConn) handleKMRequest(p packet) {
 	c.log("control:recv:KM:dump", func() string { return p.Dump() })
 
@@ -752,6 +796,7 @@ func (c *srtConn) handleKMRequest(p packet) {
 	c.pop(p)
 }
 
+// handleKMResponse confirms the change of encryption keys.
 func (c *srtConn) handleKMResponse(p packet) {
 	c.log("control:recv:KM:dump", func() string { return p.Dump() })
 
@@ -771,6 +816,7 @@ func (c *srtConn) handleKMResponse(p packet) {
 	c.kmConfirmed = true
 }
 
+// sendShutdown sends a shutdown packet to the peer.
 func (c *srtConn) sendShutdown() {
 	p := newPacket(c.remoteAddr, nil)
 
@@ -791,6 +837,7 @@ func (c *srtConn) sendShutdown() {
 	c.pop(p)
 }
 
+// sendNAK sends a NAK to the peer with the given range of sequence numbers.
 func (c *srtConn) sendNAK(from, to circular) {
 	p := newPacket(c.remoteAddr, nil)
 
@@ -814,6 +861,7 @@ func (c *srtConn) sendNAK(from, to circular) {
 	c.pop(p)
 }
 
+// sendACK sends an ACK to the peer with the given sequence number.
 func (c *srtConn) sendACK(seq circular, lite bool) {
 	p := newPacket(c.remoteAddr, nil)
 
@@ -835,8 +883,6 @@ func (c *srtConn) sendACK(seq circular, lite bool) {
 		p.Header().typeSpecific = 0
 	} else {
 		pps, _ := c.recv.PacketRate()
-
-		//log("pps: %d, bps: %d\n", pps, bps)
 
 		cif.rtt = uint32(c.rtt)
 		cif.rttVar = uint32(c.rttVar)
@@ -864,6 +910,7 @@ func (c *srtConn) sendACK(seq circular, lite bool) {
 	c.pop(p)
 }
 
+// sendACKACK sends an ACKACK to the peer with the given ACK sequence.
 func (c *srtConn) sendACKACK(ackSequence uint32) {
 	p := newPacket(c.remoteAddr, nil)
 
@@ -881,6 +928,7 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 	c.pop(p)
 }
 
+// sendKMRequest sends a KM request to the peer.
 func (c *srtConn) sendKMRequest() {
 	if c.crypto == nil {
 		c.log("control:send:KM:error", func() string { return "connection is not encrypted" })
@@ -909,12 +957,14 @@ func (c *srtConn) sendKMRequest() {
 	c.pop(p)
 }
 
+// Close closes the connection.
 func (c *srtConn) Close() error {
 	c.close()
 
 	return nil
 }
 
+// close closes the connection.
 func (c *srtConn) close() {
 	c.isShutdown = true
 

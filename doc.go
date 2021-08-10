@@ -30,6 +30,8 @@ The Dial function connects to a server:
 		// ...
 	}
 
+	conn.Close()
+
 	// ...
 
 The Listen function creates servers:
@@ -56,6 +58,10 @@ The Listen function creates servers:
 			go handleSubscribe(conn)
 		}
 	}
+
+The ln.Accept function expects a function that takes a srt.ConnRequest
+and returns a srt.ConnType. The srt.ConnRequest lets you retrieve the
+streamid with on which you can decide what mode (srt.ConnType) to return.
 
 Check out the Server type that wraps the Listen and Accept into a
 convenient framework for your own SRT server.

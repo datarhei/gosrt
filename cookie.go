@@ -18,14 +18,14 @@ type synCookie struct {
 	daddr   string
 }
 
-func newSYNCookie(daddr string) synCookie {
+func newSYNCookie(daddr string, seed int64) synCookie {
 	s := synCookie{
 		daddr: daddr,
 	}
 
 	// https://www.calhoun.io/creating-random-strings-in-go/
 	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	seededRand := rand.New(rand.NewSource(seed))
 
 	stringWithCharset := func(length int, charset string) string {
 		b := make([]byte, length)
