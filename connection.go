@@ -11,12 +11,14 @@ import (
 	"math"
 	"net"
 	"strings"
-	gosync "sync"
+	"sync"
 	"time"
 
-	//"os"
-
-	"github.com/datarhei/gosrt/sync"
+	"github.com/datarhei/gosrt/internal/circular"
+	"github.com/datarhei/gosrt/internal/congestion"
+	"github.com/datarhei/gosrt/internal/crypto"
+	"github.com/datarhei/gosrt/internal/packet"
+	srtsync "github.com/datarhei/gosrt/internal/sync"
 )
 
 // Conn is a SRT network connection.
@@ -87,15 +89,15 @@ type srtConn struct {
 	start time.Time
 
 	isShutdown bool
-	closeOnce  gosync.Once
+	closeOnce  sync.Once
 
 	socketId     uint32
 	peerSocketId uint32
 
 	config Config
 
-	crypto                 *crypto
-	keyBaseEncryption      packetEncryption
+	crypto                 crypto.Crypto
+	keyBaseEncryption      packet.PacketEncryption
 	kmPreAnnounceCountdown uint64
 	kmRefreshCountdown     uint64
 	kmConfirmed            bool
@@ -107,11 +109,11 @@ type srtConn struct {
 
 	nakInterval float64
 
-	ackLock       gosync.RWMutex
+	ackLock       sync.RWMutex
 	ackNumbers    map[uint32]time.Time
-	nextACKNumber circular
+	nextACKNumber circular.Number
 
-	initialPacketSequenceNumber circular
+	initialPacketSequenceNumber circular.Number
 
 	tsbpdTimeBase       uint64 // microseconds
 	tsbpdWrapPeriod     bool
@@ -120,37 +122,37 @@ type srtConn struct {
 	tsbpdDrift          uint64 // microseconds
 
 	// Queue for packets that are coming from the network
-	networkQueue     chan packet
-	stopNetworkQueue sync.Stopper
+	networkQueue     chan packet.Packet
+	stopNetworkQueue srtsync.Stopper
 
 	// Queue for packets that are written with WritePacket() and will be send to the network
-	writeQueue     chan packet
-	stopWriteQueue sync.Stopper
+	writeQueue     chan packet.Packet
+	stopWriteQueue srtsync.Stopper
 	writeBuffer    bytes.Buffer
 	writeData      []byte
 
 	// Queue for packets that will be read locally with ReadPacket()
-	readQueue  chan packet
+	readQueue  chan packet.Packet
 	readBuffer bytes.Buffer
 
-	stopTicker sync.Stopper
+	stopTicker srtsync.Stopper
 
-	onSend     func(p packet)
+	onSend     func(p packet.Packet)
 	onShutdown func(socketId uint32)
 
 	tick time.Duration
 
 	// Congestion control
-	recv *liveRecv
-	snd  *liveSend
+	recv congestion.Receive
+	snd  congestion.Send
 
 	statistics connStats
 
 	logger Logger
 
 	debug struct {
-		expectedRcvPacketSequenceNumber  circular
-		expectedReadPacketSequenceNumber circular
+		expectedRcvPacketSequenceNumber  circular.Number
+		expectedReadPacketSequenceNumber circular.Number
 	}
 }
 
@@ -163,10 +165,10 @@ type srtConnConfig struct {
 	peerSocketId                uint32
 	tsbpdTimeBase               uint64 // microseconds
 	tsbpdDelay                  uint64
-	initialPacketSequenceNumber circular
-	crypto                      *crypto
-	keyBaseEncryption           packetEncryption
-	onSend                      func(p packet)
+	initialPacketSequenceNumber circular.Number
+	crypto                      crypto.Crypto
+	keyBaseEncryption           packet.PacketEncryption
+	onSend                      func(p packet.Packet)
 	onShutdown                  func(socketId uint32)
 	logger                      Logger
 }
@@ -190,14 +192,14 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	}
 
 	if c.onSend == nil {
-		c.onSend = func(p packet) {}
+		c.onSend = func(p packet.Packet) {}
 	}
 
 	if c.onShutdown == nil {
 		c.onShutdown = func(socketId uint32) {}
 	}
 
-	c.nextACKNumber = newCircular(1, MAX_TIMESTAMP)
+	c.nextACKNumber = circular.New(1, packet.MAX_TIMESTAMP)
 	c.ackNumbers = make(map[uint32]time.Time)
 
 	c.kmPreAnnounceCountdown = c.config.KMRefreshRate - c.config.KMPreAnnounce
@@ -209,16 +211,16 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	c.nakInterval = float64((20 * time.Millisecond).Microseconds())
 
-	c.networkQueue = make(chan packet, 1024)
-	c.stopNetworkQueue = sync.NewStopper()
+	c.networkQueue = make(chan packet.Packet, 1024)
+	c.stopNetworkQueue = srtsync.NewStopper()
 
-	c.writeQueue = make(chan packet, 1024)
-	c.stopWriteQueue = sync.NewStopper()
+	c.writeQueue = make(chan packet.Packet, 1024)
+	c.stopWriteQueue = srtsync.NewStopper()
 	c.writeData = make([]byte, int(c.config.PayloadSize))
 
-	c.readQueue = make(chan packet, 1024)
+	c.readQueue = make(chan packet.Packet, 1024)
 
-	c.stopTicker = sync.NewStopper()
+	c.stopTicker = srtsync.NewStopper()
 
 	c.peerIdleTimeout = time.AfterFunc(c.config.PeerIdleTimeout, func() {
 		c.log("connection:close", func() string {
@@ -231,24 +233,24 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	// 4.8.1.  Packet Acknowledgement (ACKs, ACKACKs) -> periodicACK = 10 milliseconds
 	// 4.8.2.  Packet Retransmission (NAKs) -> periodicNAK at least 20 milliseconds
-	c.recv = newLiveRecv(liveRecvConfig{
-		initialSequenceNumber: c.initialPacketSequenceNumber,
-		periodicACKInterval:   10_000,
-		periodicNAKInterval:   20_000,
-		onSendACK:             c.sendACK,
-		onSendNAK:             c.sendNAK,
-		onDeliver:             c.deliver,
+	c.recv = congestion.NewLiveReceive(congestion.ReceiveConfig{
+		InitialSequenceNumber: c.initialPacketSequenceNumber,
+		PeriodicACKInterval:   10_000,
+		PeriodicNAKInterval:   20_000,
+		OnSendACK:             c.sendACK,
+		OnSendNAK:             c.sendNAK,
+		OnDeliver:             c.deliver,
 	})
 
 	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
-	c.snd = newLiveSend(liveSendConfig{
-		initialSequenceNumber: c.initialPacketSequenceNumber,
-		dropInterval:          uint64(c.config.SendDropDelay.Microseconds()),
-		maxBW:                 c.config.MaxBW,
-		inputBW:               c.config.InputBW,
-		minInputBW:            c.config.MinInputBW,
-		overheadBW:            c.config.OverheadBW,
-		onDeliver:             c.pop,
+	c.snd = congestion.NewLiveSend(congestion.SendConfig{
+		InitialSequenceNumber: c.initialPacketSequenceNumber,
+		DropInterval:          uint64(c.config.SendDropDelay.Microseconds()),
+		MaxBW:                 c.config.MaxBW,
+		InputBW:               c.config.InputBW,
+		MinInputBW:            c.config.MinInputBW,
+		OverheadBW:            c.config.OverheadBW,
+		OnDeliver:             c.pop,
 	})
 
 	go c.networkQueueReader()
@@ -317,7 +319,7 @@ func (c *srtConn) ticker() {
 
 // readPacket reads a packet from the queue of received packets. It blocks
 // if the queue is empty. Only data packets are returned.
-func (c *srtConn) readPacket() (packet, error) {
+func (c *srtConn) readPacket() (packet.Packet, error) {
 	if c.isShutdown {
 		return nil, io.EOF
 	}
@@ -327,18 +329,18 @@ func (c *srtConn) readPacket() (packet, error) {
 		return nil, io.EOF
 	}
 
-	if p.Header().packetSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) {
+	if p.Header().PacketSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) {
 		c.log("connection:error", func() string {
-			return fmt.Sprintf("lost packets. got: %d, expected: %d (%d)", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
+			return fmt.Sprintf("lost packets. got: %d, expected: %d (%d)", p.Header().PacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().PacketSequenceNumber))
 		})
-	} else if p.Header().packetSequenceNumber.Lt(c.debug.expectedReadPacketSequenceNumber) {
+	} else if p.Header().PacketSequenceNumber.Lt(c.debug.expectedReadPacketSequenceNumber) {
 		c.log("connection:error", func() string {
-			return fmt.Sprintf("packet out of order. got: %d, expected: %d (%d)", p.Header().packetSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().packetSequenceNumber))
+			return fmt.Sprintf("packet out of order. got: %d, expected: %d (%d)", p.Header().PacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Val(), c.debug.expectedReadPacketSequenceNumber.Distance(p.Header().PacketSequenceNumber))
 		})
 		return nil, io.EOF
 	}
 
-	c.debug.expectedReadPacketSequenceNumber = p.Header().packetSequenceNumber.Inc()
+	c.debug.expectedReadPacketSequenceNumber = p.Header().PacketSequenceNumber.Inc()
 
 	return p, nil
 
@@ -366,12 +368,12 @@ func (c *srtConn) Read(b []byte) (int, error) {
 
 // writePacket writes a packet to the write queue. Packets on the write queue
 // will be sent to the peer of the connection. Only data packets will be sent.
-func (c *srtConn) writePacket(p packet) error {
+func (c *srtConn) writePacket(p packet.Packet) error {
 	if c.isShutdown {
 		return io.EOF
 	}
 
-	if p.Header().isControlPacket {
+	if p.Header().IsControlPacket {
 		// Ignore control packets
 		return nil
 	}
@@ -393,13 +395,13 @@ func (c *srtConn) Write(b []byte) (int, error) {
 			return 0, err
 		}
 
-		p := newPacket(nil, nil)
+		p := packet.NewPacket(nil, nil)
 
 		p.SetData(c.writeData[:n])
 
-		p.Header().isControlPacket = false
+		p.Header().IsControlPacket = false
 		// Give the packet a deliver timestamp
-		p.Header().pktTsbpdTime = c.getTimestamp()
+		p.Header().PktTsbpdTime = c.getTimestamp()
 
 		if c.isShutdown {
 			return 0, io.EOF
@@ -423,7 +425,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 }
 
 // push puts a packet on the network queue. This is where packets come in from the network.
-func (c *srtConn) push(p packet) {
+func (c *srtConn) push(p packet.Packet) {
 	if c.isShutdown {
 		return
 	}
@@ -444,19 +446,19 @@ func (c *srtConn) getTimestamp() uint64 {
 // getTimestampForPacket returns the elapsed time since the start of the connection in
 // microseconds clamped a 32bit value.
 func (c *srtConn) getTimestampForPacket() uint32 {
-	return uint32(c.getTimestamp() & uint64(MAX_TIMESTAMP))
+	return uint32(c.getTimestamp() & uint64(packet.MAX_TIMESTAMP))
 }
 
 // pop adds the destination address and socketid to the packet and sends it out to the network.
 // The packet will be encrypted if required.
-func (c *srtConn) pop(p packet) {
-	p.Header().addr = c.remoteAddr
-	p.Header().destinationSocketId = c.peerSocketId
+func (c *srtConn) pop(p packet.Packet) {
+	p.Header().Addr = c.remoteAddr
+	p.Header().DestinationSocketId = c.peerSocketId
 
-	if !p.Header().isControlPacket {
+	if !p.Header().IsControlPacket {
 		if c.crypto != nil {
-			p.Header().keyBaseEncryptionFlag = c.keyBaseEncryption
-			c.crypto.EncryptOrDecryptPayload(p.Data(), p.Header().keyBaseEncryptionFlag, p.Header().packetSequenceNumber.Val())
+			p.Header().KeyBaseEncryptionFlag = c.keyBaseEncryption
+			c.crypto.EncryptOrDecryptPayload(p.Data(), p.Header().KeyBaseEncryptionFlag, p.Header().PacketSequenceNumber.Val())
 
 			c.kmPreAnnounceCountdown--
 			c.kmRefreshCountdown--
@@ -529,7 +531,7 @@ func (c *srtConn) writeQueueReader() {
 }
 
 // deliver writes the packets to the read queue in order to be consumed by the Read function.
-func (c *srtConn) deliver(p packet) {
+func (c *srtConn) deliver(p packet.Packet) {
 	if c.isShutdown {
 		return
 	}
@@ -545,7 +547,7 @@ func (c *srtConn) deliver(p packet) {
 // handlePacket checks the packet header. If it is a control packet it will forwarded to the
 // respective handler. If it is a data packet it will be put into congestion control for
 // receiving. The packet will be decrypted if required.
-func (c *srtConn) handlePacket(p packet) {
+func (c *srtConn) handlePacket(p packet.Packet) {
 	if p == nil {
 		return
 	}
@@ -554,22 +556,22 @@ func (c *srtConn) handlePacket(p packet) {
 
 	header := p.Header()
 
-	if header.isControlPacket {
-		if header.controlType == CTRLTYPE_KEEPALIVE {
+	if header.IsControlPacket {
+		if header.ControlType == packet.CTRLTYPE_KEEPALIVE {
 			c.handleKeepAlive(p)
-		} else if header.controlType == CTRLTYPE_SHUTDOWN {
+		} else if header.ControlType == packet.CTRLTYPE_SHUTDOWN {
 			c.handleShutdown(p)
-		} else if header.controlType == CTRLTYPE_NAK {
+		} else if header.ControlType == packet.CTRLTYPE_NAK {
 			c.handleNAK(p)
-		} else if header.controlType == CTRLTYPE_ACK {
+		} else if header.ControlType == packet.CTRLTYPE_ACK {
 			c.handleACK(p)
-		} else if header.controlType == CTRLTYPE_ACKACK {
+		} else if header.ControlType == packet.CTRLTYPE_ACKACK {
 			c.handleACKACK(p)
-		} else if header.controlType == CTRLTYPE_USER {
+		} else if header.ControlType == packet.CTRLTYPE_USER {
 			// 3.2.2.  Key Material
-			if header.subType == EXTTYPE_KMREQ {
+			if header.SubType == packet.EXTTYPE_KMREQ {
 				c.handleKMRequest(p)
-			} else if header.subType == EXTTYPE_KMRSP {
+			} else if header.SubType == packet.EXTTYPE_KMRSP {
 				c.handleKMResponse(p)
 			}
 		}
@@ -587,39 +589,39 @@ func (c *srtConn) handlePacket(p packet) {
 		// "An FEC control packet is distinguished from a regular data packet by having
 		// its message number equal to 0. This value isn't normally used in SRT (message
 		// numbers start from 1, increment to a maximum, and then roll back to 1)."
-		if header.messageNumber == 0 {
+		if header.MessageNumber == 0 {
 			c.log("connection:filter", func() string { return "dropped FEC filter control packet" })
 			return
 		}
 
 		// 4.5.1.1.  TSBPD Time Base Calculation
 		if !c.tsbpdWrapPeriod {
-			if header.timestamp > MAX_TIMESTAMP-(30*1000000) {
+			if header.Timestamp > packet.MAX_TIMESTAMP-(30*1000000) {
 				c.tsbpdWrapPeriod = true
 				c.log("connection:tsbpd", func() string { return "TSBPD wrapping period started" })
 			}
 		} else {
-			if header.timestamp >= (30*1000000) && header.timestamp <= (60*1000000) {
+			if header.Timestamp >= (30*1000000) && header.Timestamp <= (60*1000000) {
 				c.tsbpdWrapPeriod = false
-				c.tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
+				c.tsbpdTimeBaseOffset += uint64(packet.MAX_TIMESTAMP) + 1
 				c.log("connection:tsbpd", func() string { return "TSBPD wrapping period finished" })
 			}
 		}
 
 		tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
 		if c.tsbpdWrapPeriod {
-			if header.timestamp < (30 * 1000000) {
-				tsbpdTimeBaseOffset += uint64(MAX_TIMESTAMP) + 1
+			if header.Timestamp < (30 * 1000000) {
+				tsbpdTimeBaseOffset += uint64(packet.MAX_TIMESTAMP) + 1
 			}
 		}
 
-		header.pktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.timestamp) + c.tsbpdDelay + c.tsbpdDrift
+		header.PktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.Timestamp) + c.tsbpdDelay + c.tsbpdDrift
 
 		c.log("data:recv:dump", func() string { return p.Dump() })
 
 		if c.crypto != nil {
-			if header.keyBaseEncryptionFlag != 0 {
-				if err := c.crypto.EncryptOrDecryptPayload(p.Data(), header.keyBaseEncryptionFlag, header.packetSequenceNumber.Val()); err != nil {
+			if header.KeyBaseEncryptionFlag != 0 {
+				if err := c.crypto.EncryptOrDecryptPayload(p.Data(), header.KeyBaseEncryptionFlag, header.PacketSequenceNumber.Val()); err != nil {
 					c.statistics.pktRecvUndecrypt++
 					c.statistics.byteRecvUndecrypt += p.Len()
 				}
@@ -635,7 +637,7 @@ func (c *srtConn) handlePacket(p packet) {
 }
 
 // handleKeepAlive resets the idle timeout and sends a keepalive to the peer.
-func (c *srtConn) handleKeepAlive(p packet) {
+func (c *srtConn) handleKeepAlive(p packet.Packet) {
 	c.log("control:recv:keepalive:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvKeepalive++
@@ -649,7 +651,7 @@ func (c *srtConn) handleKeepAlive(p packet) {
 }
 
 // handleShutdown closes the connection
-func (c *srtConn) handleShutdown(p packet) {
+func (c *srtConn) handleShutdown(p packet.Packet) {
 	c.log("control:recv:shutdown:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvShutdown++
@@ -659,12 +661,12 @@ func (c *srtConn) handleShutdown(p packet) {
 
 // handleACK forwards the acknowledge sequence number to the congestion control and
 // returns a ACKACK (on a full ACK). The RTT is also updated in case of a full ACK.
-func (c *srtConn) handleACK(p packet) {
+func (c *srtConn) handleACK(p packet.Packet) {
 	c.log("control:recv:ACK:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvACK++
 
-	cif := &cifACK{}
+	cif := &packet.CIFACK{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
 		c.statistics.pktRecvInvalid++
@@ -674,23 +676,23 @@ func (c *srtConn) handleACK(p packet) {
 
 	c.log("control:recv:ACK:cif", func() string { return cif.String() })
 
-	c.snd.ACK(cif.lastACKPacketSequenceNumber)
+	c.snd.ACK(cif.LastACKPacketSequenceNumber)
 
-	if !cif.isLite && !cif.isSmall {
+	if !cif.IsLite && !cif.IsSmall {
 		// 4.10.  Round-Trip Time Estimation
-		c.recalculateRTT(time.Duration(int64(cif.rtt)) * time.Microsecond)
+		c.recalculateRTT(time.Duration(int64(cif.RTT)) * time.Microsecond)
 
-		c.sendACKACK(p.Header().typeSpecific)
+		c.sendACKACK(p.Header().TypeSpecific)
 	}
 }
 
 // handleNAK forwards the lost sequence number to the congestion control.
-func (c *srtConn) handleNAK(p packet) {
+func (c *srtConn) handleNAK(p packet.Packet) {
 	c.log("control:recv:NAK:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvNAK++
 
-	cif := &cifNAK{}
+	cif := &packet.CIFNAK{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
 		c.statistics.pktRecvInvalid++
@@ -701,11 +703,11 @@ func (c *srtConn) handleNAK(p packet) {
 	c.log("control:recv:NAK:cif", func() string { return cif.String() })
 
 	// Inform congestion control about lost packets
-	c.snd.NAK(cif.lostPacketSequenceNumber)
+	c.snd.NAK(cif.LostPacketSequenceNumber)
 }
 
 // handleACKACK updates the RTT and NAK interval for the congestion control.
-func (c *srtConn) handleACKACK(p packet) {
+func (c *srtConn) handleACKACK(p packet.Packet) {
 	c.ackLock.RLock()
 
 	c.statistics.pktRecvACKACK++
@@ -713,17 +715,17 @@ func (c *srtConn) handleACKACK(p packet) {
 	c.log("control:recv:ACKACK:dump", func() string { return p.Dump() })
 
 	// p.typeSpecific is the ACKNumber
-	if ts, ok := c.ackNumbers[p.Header().typeSpecific]; ok {
+	if ts, ok := c.ackNumbers[p.Header().TypeSpecific]; ok {
 		// 4.10.  Round-Trip Time Estimation
 		c.recalculateRTT(time.Since(ts))
-		delete(c.ackNumbers, p.Header().typeSpecific)
+		delete(c.ackNumbers, p.Header().TypeSpecific)
 	} else {
-		c.log("control:recv:ACKACK:error", func() string { return fmt.Sprintf("got unknown ACKACK (%d)", p.Header().typeSpecific) })
+		c.log("control:recv:ACKACK:error", func() string { return fmt.Sprintf("got unknown ACKACK (%d)", p.Header().TypeSpecific) })
 		c.statistics.pktRecvInvalid++
 	}
 
 	for i := range c.ackNumbers {
-		if i < p.Header().typeSpecific {
+		if i < p.Header().TypeSpecific {
 			delete(c.ackNumbers, i)
 		}
 	}
@@ -757,7 +759,7 @@ func (c *srtConn) recalculateRTT(rtt time.Duration) {
 }
 
 // handleKMRequest checks if the key material is valid and responds with a KM response.
-func (c *srtConn) handleKMRequest(p packet) {
+func (c *srtConn) handleKMRequest(p packet.Packet) {
 	c.log("control:recv:KM:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvKM++
@@ -767,7 +769,7 @@ func (c *srtConn) handleKMRequest(p packet) {
 		return
 	}
 
-	cif := &cifKM{}
+	cif := &packet.CIFKM{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
 		c.statistics.pktRecvInvalid++
@@ -789,7 +791,7 @@ func (c *srtConn) handleKMRequest(p packet) {
 		return
 	}
 
-	p.Header().subType = EXTTYPE_KMRSP
+	p.Header().SubType = packet.EXTTYPE_KMRSP
 
 	c.statistics.pktSentKM++
 
@@ -797,7 +799,7 @@ func (c *srtConn) handleKMRequest(p packet) {
 }
 
 // handleKMResponse confirms the change of encryption keys.
-func (c *srtConn) handleKMResponse(p packet) {
+func (c *srtConn) handleKMResponse(p packet.Packet) {
 	c.log("control:recv:KM:dump", func() string { return p.Dump() })
 
 	c.statistics.pktRecvKM++
@@ -818,14 +820,14 @@ func (c *srtConn) handleKMResponse(p packet) {
 
 // sendShutdown sends a shutdown packet to the peer.
 func (c *srtConn) sendShutdown() {
-	p := newPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_SHUTDOWN
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.Header().ControlType = packet.CTRLTYPE_SHUTDOWN
+	p.Header().Timestamp = c.getTimestampForPacket()
 
-	cif := cifShutdown{}
+	cif := packet.CIFShutdown{}
 
 	p.MarshalCIF(&cif)
 
@@ -838,18 +840,18 @@ func (c *srtConn) sendShutdown() {
 }
 
 // sendNAK sends a NAK to the peer with the given range of sequence numbers.
-func (c *srtConn) sendNAK(from, to circular) {
-	p := newPacket(c.remoteAddr, nil)
+func (c *srtConn) sendNAK(from, to circular.Number) {
+	p := packet.NewPacket(c.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_NAK
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.Header().ControlType = packet.CTRLTYPE_NAK
+	p.Header().Timestamp = c.getTimestampForPacket()
 
-	cif := cifNAK{}
+	cif := packet.CIFNAK{}
 
-	cif.lostPacketSequenceNumber = append(cif.lostPacketSequenceNumber, from)
-	cif.lostPacketSequenceNumber = append(cif.lostPacketSequenceNumber, to)
+	cif.LostPacketSequenceNumber = append(cif.LostPacketSequenceNumber, from)
+	cif.LostPacketSequenceNumber = append(cif.LostPacketSequenceNumber, to)
 
 	p.MarshalCIF(&cif)
 
@@ -862,38 +864,38 @@ func (c *srtConn) sendNAK(from, to circular) {
 }
 
 // sendACK sends an ACK to the peer with the given sequence number.
-func (c *srtConn) sendACK(seq circular, lite bool) {
-	p := newPacket(c.remoteAddr, nil)
+func (c *srtConn) sendACK(seq circular.Number, lite bool) {
+	p := packet.NewPacket(c.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_ACK
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.Header().ControlType = packet.CTRLTYPE_ACK
+	p.Header().Timestamp = c.getTimestampForPacket()
 
-	cif := cifACK{
-		lastACKPacketSequenceNumber: seq,
+	cif := packet.CIFACK{
+		LastACKPacketSequenceNumber: seq,
 	}
 
 	c.ackLock.Lock()
 	defer c.ackLock.Unlock()
 
 	if lite {
-		cif.isLite = true
+		cif.IsLite = true
 
-		p.Header().typeSpecific = 0
+		p.Header().TypeSpecific = 0
 	} else {
 		pps, _ := c.recv.PacketRate()
 
-		cif.rtt = uint32(c.rtt)
-		cif.rttVar = uint32(c.rttVar)
-		cif.availableBufferSize = c.config.FC // TODO: available buffer size (packets)
-		cif.packetsReceivingRate = pps        // packets receiving rate (packets/s)
-		cif.estimatedLinkCapacity = 0         // estimated link capacity (packets/s), not relevant for live mode
-		cif.receivingRate = 0                 // receiving rate (bytes/s), not relevant for live mode
+		cif.RTT = uint32(c.rtt)
+		cif.RTTVar = uint32(c.rttVar)
+		cif.AvailableBufferSize = c.config.FC // TODO: available buffer size (packets)
+		cif.PacketsReceivingRate = pps        // packets receiving rate (packets/s)
+		cif.EstimatedLinkCapacity = 0         // estimated link capacity (packets/s), not relevant for live mode
+		cif.ReceivingRate = 0                 // receiving rate (bytes/s), not relevant for live mode
 
-		p.Header().typeSpecific = c.nextACKNumber.Val()
+		p.Header().TypeSpecific = c.nextACKNumber.Val()
 
-		c.ackNumbers[p.Header().typeSpecific] = time.Now()
+		c.ackNumbers[p.Header().TypeSpecific] = time.Now()
 		c.nextACKNumber = c.nextACKNumber.Inc()
 		if c.nextACKNumber.Val() == 0 {
 			c.nextACKNumber = c.nextACKNumber.Inc()
@@ -912,14 +914,14 @@ func (c *srtConn) sendACK(seq circular, lite bool) {
 
 // sendACKACK sends an ACKACK to the peer with the given ACK sequence.
 func (c *srtConn) sendACKACK(ackSequence uint32) {
-	p := newPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_ACKACK
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.Header().ControlType = packet.CTRLTYPE_ACKACK
+	p.Header().Timestamp = c.getTimestampForPacket()
 
-	p.Header().typeSpecific = ackSequence
+	p.Header().TypeSpecific = ackSequence
 
 	c.log("control:send:ACKACK:dump", func() string { return p.Dump() })
 
@@ -935,17 +937,17 @@ func (c *srtConn) sendKMRequest() {
 		return
 	}
 
-	cif := &cifKM{}
+	cif := &packet.CIFKM{}
 
 	c.crypto.MarshalKM(cif, c.config.Passphrase, c.keyBaseEncryption.Opposite())
 
-	p := newPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_USER
-	p.Header().subType = EXTTYPE_KMREQ
-	p.Header().timestamp = c.getTimestampForPacket()
+	p.Header().ControlType = packet.CTRLTYPE_USER
+	p.Header().SubType = packet.EXTTYPE_KMREQ
+	p.Header().Timestamp = c.getTimestampForPacket()
 
 	p.MarshalCIF(cif)
 
@@ -1029,51 +1031,51 @@ func (c *srtConn) Stats() Statistics {
 		MsTimeStamp: uint64(time.Since(c.start).Milliseconds()),
 
 		// Accumulated
-		PktSent:          send.pktSent,
-		PktRecv:          recv.pktRecv,
-		PktSentUnique:    send.pktSentUnique,
-		PktRecvUnique:    recv.pktRecvUnique,
-		PktSndLoss:       send.pktSndLoss,
-		PktRcvLoss:       recv.pktRcvLoss,
-		PktRetrans:       send.pktRetrans,
-		PktRcvRetrans:    recv.pktRcvRetrans,
+		PktSent:          send.PktSent,
+		PktRecv:          recv.PktRecv,
+		PktSentUnique:    send.PktSentUnique,
+		PktRecvUnique:    recv.PktRecvUnique,
+		PktSndLoss:       send.PktSndLoss,
+		PktRcvLoss:       recv.PktRcvLoss,
+		PktRetrans:       send.PktRetrans,
+		PktRcvRetrans:    recv.PktRcvRetrans,
 		PktSentACK:       c.statistics.pktSentACK,
 		PktRecvACK:       c.statistics.pktRecvACK,
 		PktSentNAK:       c.statistics.pktSentNAK,
 		PktRecvNAK:       c.statistics.pktRecvNAK,
 		PktSentKM:        c.statistics.pktSentKM,
 		PktRecvKM:        c.statistics.pktRecvKM,
-		UsSndDuration:    send.usSndDuration,
-		PktSndDrop:       send.pktSndDrop,
-		PktRcvDrop:       recv.pktRcvDrop,
+		UsSndDuration:    send.UsSndDuration,
+		PktSndDrop:       send.PktSndDrop,
+		PktRcvDrop:       recv.PktRcvDrop,
 		PktRcvUndecrypt:  c.statistics.pktRecvUndecrypt,
-		ByteSent:         send.byteSent + (send.pktSent * c.statistics.headerSize),
-		ByteRecv:         recv.byteRecv + (recv.pktRecv * c.statistics.headerSize),
-		ByteSentUnique:   send.byteSentUnique + (send.pktSentUnique * c.statistics.headerSize),
-		ByteRecvUnique:   recv.byteRecvUnique + (recv.pktRecvUnique * c.statistics.headerSize),
-		ByteRcvLoss:      recv.byteRcvLoss + (recv.pktRcvLoss * c.statistics.headerSize),
-		ByteRetrans:      send.byteRetrans + (send.pktRetrans * c.statistics.headerSize),
-		ByteSndDrop:      send.byteSndDrop + (send.pktSndDrop * c.statistics.headerSize),
-		ByteRcvDrop:      recv.byteRcvDrop + (recv.pktRcvDrop * c.statistics.headerSize),
+		ByteSent:         send.ByteSent + (send.PktSent * c.statistics.headerSize),
+		ByteRecv:         recv.ByteRecv + (recv.PktRecv * c.statistics.headerSize),
+		ByteSentUnique:   send.ByteSentUnique + (send.PktSentUnique * c.statistics.headerSize),
+		ByteRecvUnique:   recv.ByteRecvUnique + (recv.PktRecvUnique * c.statistics.headerSize),
+		ByteRcvLoss:      recv.ByteRcvLoss + (recv.PktRcvLoss * c.statistics.headerSize),
+		ByteRetrans:      send.ByteRetrans + (send.PktRetrans * c.statistics.headerSize),
+		ByteSndDrop:      send.ByteSndDrop + (send.PktSndDrop * c.statistics.headerSize),
+		ByteRcvDrop:      recv.ByteRcvDrop + (recv.PktRcvDrop * c.statistics.headerSize),
 		ByteRcvUndecrypt: c.statistics.byteRecvUndecrypt + (c.statistics.pktRecvUndecrypt * c.statistics.headerSize),
 
 		// Instantaneous
-		UsPktSndPeriod:       send.usPktSndPeriod,
+		UsPktSndPeriod:       send.UsPktSndPeriod,
 		PktFlowWindow:        uint64(c.config.FC),
-		PktFlightSize:        send.pktFlightSize,
+		PktFlightSize:        send.PktFlightSize,
 		MsRTT:                c.rtt / 1_000,
 		MbpsBandwidth:        0,
 		ByteAvailSndBuf:      0,
 		ByteAvailRcvBuf:      0,
 		MbpsMaxBW:            float64(c.config.MaxBW / 1024 / 1024),
 		ByteMSS:              uint64(c.config.MSS),
-		PktSndBuf:            send.pktSndBuf,
-		ByteSndBuf:           send.byteSndBuf,
-		MsSndBuf:             send.msSndBuf,
+		PktSndBuf:            send.PktSndBuf,
+		ByteSndBuf:           send.ByteSndBuf,
+		MsSndBuf:             send.MsSndBuf,
 		MsSndTsbPdDelay:      uint64(c.config.PeerLatency),
-		PktRcvBuf:            recv.pktRcvBuf,
-		ByteRcvBuf:           recv.byteRcvBuf,
-		MsRcvBuf:             recv.msRcvBuf,
+		PktRcvBuf:            recv.PktRcvBuf,
+		ByteRcvBuf:           recv.ByteRcvBuf,
+		MsRcvBuf:             recv.MsRcvBuf,
 		MsRcvTsbPdDelay:      uint64(c.config.ReceiverLatency),
 		PktReorderTolerance:  0,
 		PktRcvAvgBelatedTime: 0,

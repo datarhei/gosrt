@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/datarhei/gosrt/internal/packet"
 )
 
 type PubSubConfig struct {
@@ -20,17 +22,17 @@ type PubSub interface {
 }
 
 type pubSub struct {
-	incoming  chan packet
+	incoming  chan packet.Packet
 	abort     chan struct{}
 	lock      sync.Mutex
-	listeners map[uint32]chan packet
+	listeners map[uint32]chan packet.Packet
 	logger    Logger
 }
 
 func NewPubSub(config PubSubConfig) PubSub {
 	pb := &pubSub{
-		incoming:  make(chan packet, 1024),
-		listeners: make(map[uint32]chan packet),
+		incoming:  make(chan packet.Packet, 1024),
+		listeners: make(map[uint32]chan packet.Packet),
 		abort:     make(chan struct{}),
 		logger:    config.Logger,
 	}
@@ -75,7 +77,7 @@ func (pb *pubSub) broadcast() {
 }
 
 func (pb *pubSub) Publish(c Conn) error {
-	var p packet
+	var p packet.Packet
 	var err error
 	conn, ok := c.(*srtConn)
 	if !ok {
@@ -106,7 +108,7 @@ func (pb *pubSub) Publish(c Conn) error {
 }
 
 func (pb *pubSub) Subscribe(c Conn) error {
-	l := make(chan packet, 1024)
+	l := make(chan packet.Packet, 1024)
 	socketId := c.SocketId()
 	conn, ok := c.(*srtConn)
 	if !ok {

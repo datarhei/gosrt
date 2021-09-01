@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package srt
+package circular
 
 import (
 	"fmt"
@@ -11,8 +11,8 @@ import (
 
 const max uint32 = 0b11111111_11111111_11111111_11111111
 
-func Examplecircular_Inc() {
-	a := newCircular(42, max)
+func ExampleNumber_Inc() {
+	a := New(42, max)
 	b := a.Inc()
 
 	fmt.Println(b.Val())
@@ -20,7 +20,7 @@ func Examplecircular_Inc() {
 }
 
 func TestIncNoWrap(t *testing.T) {
-	a := newCircular(42, max)
+	a := New(42, max)
 
 	if a.Val() != 42 {
 		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 42)
@@ -34,7 +34,7 @@ func TestIncNoWrap(t *testing.T) {
 }
 
 func TestIncWrap(t *testing.T) {
-	a := newCircular(max-1, max)
+	a := New(max-1, max)
 
 	if a.Val() != max-1 {
 		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), max-1)
@@ -54,7 +54,7 @@ func TestIncWrap(t *testing.T) {
 }
 
 func TestDecNoWrap(t *testing.T) {
-	a := newCircular(42, max)
+	a := New(42, max)
 
 	if a.Val() != 42 {
 		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 42)
@@ -68,7 +68,7 @@ func TestDecNoWrap(t *testing.T) {
 }
 
 func TestDecWrap(t *testing.T) {
-	a := newCircular(0, max)
+	a := New(0, max)
 
 	if a.Val() != 0 {
 		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 0)
@@ -88,8 +88,8 @@ func TestDecWrap(t *testing.T) {
 }
 
 func TestDistanceNoWrap(t *testing.T) {
-	a := newCircular(42, max)
-	b := newCircular(50, max)
+	a := New(42, max)
+	b := New(50, max)
 
 	d := a.Distance(b)
 
@@ -105,8 +105,8 @@ func TestDistanceNoWrap(t *testing.T) {
 }
 
 func TestDistanceWrap(t *testing.T) {
-	a := newCircular(2, max)
-	b := newCircular(max-2, max)
+	a := New(2, max)
+	b := New(max-2, max)
 
 	d := a.Distance(b)
 
@@ -122,9 +122,9 @@ func TestDistanceWrap(t *testing.T) {
 }
 
 func TestLt(t *testing.T) {
-	a := newCircular(42, max)
-	b := newCircular(50, max)
-	c := newCircular(max-10, max)
+	a := New(42, max)
+	b := New(50, max)
+	c := New(max-10, max)
 
 	x := a.Lt(b)
 
@@ -152,9 +152,9 @@ func TestLt(t *testing.T) {
 }
 
 func TestGt(t *testing.T) {
-	a := newCircular(42, max)
-	b := newCircular(50, max)
-	c := newCircular(max-10, max)
+	a := New(42, max)
+	b := New(50, max)
+	c := New(max-10, max)
 
 	x := a.Gt(b)
 
@@ -182,7 +182,7 @@ func TestGt(t *testing.T) {
 }
 
 func TestAdd(t *testing.T) {
-	a := newCircular(max-42, max)
+	a := New(max-42, max)
 
 	a = a.Add(42)
 
@@ -198,7 +198,7 @@ func TestAdd(t *testing.T) {
 }
 
 func TestSub(t *testing.T) {
-	a := newCircular(42, max)
+	a := New(42, max)
 
 	a = a.Sub(42)
 

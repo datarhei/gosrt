@@ -1,4 +1,4 @@
-package srt
+package packet
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ func BenchmarkNewPacket(b *testing.B) {
 	data := make([]byte, 1316)
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := newPacket(addr, nil)
+	p := NewPacket(addr, nil)
 	p.SetData(data)
 
 	var buf bytes.Buffer
@@ -23,7 +23,7 @@ func BenchmarkNewPacket(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		pkt := newPacket(addr, data)
+		pkt := NewPacket(addr, data)
 
 		pkt.Decommission()
 	}

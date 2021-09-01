@@ -2,28 +2,28 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package srt
+package circular
 
-// circular represents a "circular number". This is a number that can be
+// Number represents a "circular number". This is a number that can be
 // increased (or decreased) indefinitely while only using up a limited amount of
 // memory. This feature comes with the limitiation in how distant two such
-// number can be. Circular numbers have a maximum. The maximum distance is
+// number can be. Number numbers have a maximum. The maximum distance is
 // half the maximum value. If a number that has the maximum value is
 // increased by 1, it becomes 0. If a number that has the value of 0 is
-// decreased by 1, it becomes the maximum value. By comparing two circular
+// decreased by 1, it becomes the maximum value. By comparing two Number
 // numbers it is not possible to tell how often they wrapped. Therefore these
 // two numbers must come from the same domain in order to make sense of the
 // camparison.
-type circular struct {
+type Number struct {
 	max       uint32
 	threshold uint32
 	value     uint32
 }
 
-// newCircular returns a new circular number with the value of x and
+// New returns a new circular number with the value of x and
 // the maximum of max.
-func newCircular(x, max uint32) circular {
-	c := circular{
+func New(x, max uint32) Number {
+	c := Number{
 		value:     0,
 		max:       max,
 		threshold: max / 2,
@@ -39,17 +39,17 @@ func newCircular(x, max uint32) circular {
 }
 
 // Val returns the current value of the number
-func (a circular) Val() uint32 {
+func (a Number) Val() uint32 {
 	return a.value
 }
 
 // Equals returns whether to circular numbers have the same value
-func (a circular) Equals(b circular) bool {
+func (a Number) Equals(b Number) bool {
 	return a.value == b.value
 }
 
 // Distance returns the distance of to circular numbers
-func (a circular) Distance(b circular) uint32 {
+func (a Number) Distance(b Number) uint32 {
 	if a.Equals(b) {
 		return 0
 	}
@@ -70,7 +70,7 @@ func (a circular) Distance(b circular) uint32 {
 }
 
 // Lt returns whether the circular number is lower than the circular number b
-func (a circular) Lt(b circular) bool {
+func (a Number) Lt(b Number) bool {
 	if a.Equals(b) {
 		return false
 	}
@@ -93,7 +93,7 @@ func (a circular) Lt(b circular) bool {
 }
 
 // Lte returns whether the circular number is lower than or equal to the circular number b
-func (a circular) Lte(b circular) bool {
+func (a Number) Lte(b Number) bool {
 	if a.Equals(b) {
 		return true
 	}
@@ -102,7 +102,7 @@ func (a circular) Lte(b circular) bool {
 }
 
 // Gt returns whether the circular number is greather than the circular number b
-func (a circular) Gt(b circular) bool {
+func (a Number) Gt(b Number) bool {
 	if a.Equals(b) {
 		return false
 	}
@@ -125,7 +125,7 @@ func (a circular) Gt(b circular) bool {
 }
 
 // Gte returns whether the circular number is greather than or equal to the circular number b
-func (a circular) Gte(b circular) bool {
+func (a Number) Gte(b Number) bool {
 	if a.Equals(b) {
 		return true
 	}
@@ -134,7 +134,7 @@ func (a circular) Gte(b circular) bool {
 }
 
 // Inc returns a new circular number with a value that is increased by 1
-func (a circular) Inc() circular {
+func (a Number) Inc() Number {
 	b := a
 
 	if b.value == b.max {
@@ -147,7 +147,7 @@ func (a circular) Inc() circular {
 }
 
 // Add returns a new circular number with a value that is increased by b
-func (a circular) Add(b uint32) circular {
+func (a Number) Add(b uint32) Number {
 	c := a
 	x := c.max - c.value
 
@@ -161,7 +161,7 @@ func (a circular) Add(b uint32) circular {
 }
 
 // Dec returns a new circular number with a value that is decreased by 1
-func (a circular) Dec() circular {
+func (a Number) Dec() Number {
 	b := a
 
 	if b.value == 0 {
@@ -174,7 +174,7 @@ func (a circular) Dec() circular {
 }
 
 // Sub returns a new circular number with a value that is decreased by b
-func (a circular) Sub(b uint32) circular {
+func (a Number) Sub(b uint32) Number {
 	c := a
 
 	if b <= c.value {

@@ -1,4 +1,4 @@
-package srt
+package net
 
 import (
 	"encoding/binary"
@@ -47,7 +47,7 @@ func (i *IP) FromNetAddr(addr net.Addr) {
 	}
 }
 
-// Unmarshal converts 16 bytes in network byte order to IP
+// Unmarshal converts 16 bytes in host byte order to IP
 func (i *IP) Unmarshal(data []byte) error {
 	if len(data) != 4 && len(data) != 16 {
 		return fmt.Errorf("invalid number of bytes")
@@ -84,7 +84,7 @@ func (i *IP) Unmarshal(data []byte) error {
 	return nil
 }
 
-// Marshal converts an IP to 16 byte network byte order
+// Marshal converts an IP to 16 byte host byte order
 func (i *IP) Marshal(data []byte) {
 	if len(data) < 16 {
 		return

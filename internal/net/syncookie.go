@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package srt
+package net
 
 import (
 	"crypto/md5"
@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-type synCookie struct {
+type SYNCookie struct {
 	secret1 string
 	secret2 string
 	daddr   string
 }
 
-func newSYNCookie(daddr string, seed int64) synCookie {
-	s := synCookie{
+func NewSYNCookie(daddr string, seed int64) SYNCookie {
+	s := SYNCookie{
 		daddr: daddr,
 	}
 
@@ -41,11 +41,11 @@ func newSYNCookie(daddr string, seed int64) synCookie {
 	return s
 }
 
-func (s *synCookie) Get(saddr string) uint32 {
+func (s *SYNCookie) Get(saddr string) uint32 {
 	return s.calculate(s.counter(), saddr)
 }
 
-func (s *synCookie) Verify(cookie uint32, saddr string) bool {
+func (s *SYNCookie) Verify(cookie uint32, saddr string) bool {
 	counter := s.counter()
 
 	if s.calculate(counter, saddr) == cookie {
@@ -59,7 +59,7 @@ func (s *synCookie) Verify(cookie uint32, saddr string) bool {
 	return false
 }
 
-func (s *synCookie) calculate(counter int64, saddr string) uint32 {
+func (s *SYNCookie) calculate(counter int64, saddr string) uint32 {
 	data := s.secret1 + s.daddr + saddr + s.secret2 + strconv.FormatInt(counter, 10)
 
 	md5sum := md5.Sum([]byte(data))
@@ -67,6 +67,6 @@ func (s *synCookie) calculate(counter int64, saddr string) uint32 {
 	return binary.BigEndian.Uint32(md5sum[0:])
 }
 
-func (s *synCookie) counter() int64 {
+func (s *SYNCookie) counter() int64 {
 	return time.Now().Unix() >> 6
 }

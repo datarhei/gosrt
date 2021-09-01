@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package srt
+package crypto
 
 import (
 	"crypto/aes"
@@ -12,9 +12,18 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/datarhei/gosrt/internal/packet"
+
 	"github.com/benburkert/openpgp/aes/keywrap"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+type Crypto interface {
+	GenerateSEK(key packet.PacketEncryption) error
+	UnmarshalKM(km *packet.CIFKM, passphrase string) error
+	MarshalKM(km *packet.CIFKM, passphrase string, key packet.PacketEncryption) error
+	EncryptOrDecryptPayload(data []byte, key packet.PacketEncryption, packetSequenceNumber uint32) error
+}
 
 type crypto struct {
 	salt      []byte
@@ -24,7 +33,7 @@ type crypto struct {
 	oddSEK  []byte
 }
 
-func newCrypto(keyLength int) (*crypto, error) {
+func New(keyLength int) (Crypto, error) {
 	// 3.2.2.  Key Material
 	switch keyLength {
 	case 16:
@@ -45,28 +54,28 @@ func newCrypto(keyLength int) (*crypto, error) {
 	}
 
 	c.evenSEK = make([]byte, c.keyLength)
-	if err := c.GenerateSEK(evenKeyEncrypted); err != nil {
+	if err := c.GenerateSEK(packet.EvenKeyEncrypted); err != nil {
 		return nil, err
 	}
 
 	c.oddSEK = make([]byte, c.keyLength)
-	if err := c.GenerateSEK(oddKeyEncrypted); err != nil {
+	if err := c.GenerateSEK(packet.OddKeyEncrypted); err != nil {
 		return nil, err
 	}
 
 	return c, nil
 }
 
-func (c *crypto) GenerateSEK(key packetEncryption) error {
+func (c *crypto) GenerateSEK(key packet.PacketEncryption) error {
 	if !key.IsValid() {
 		return fmt.Errorf("crypto: unknown key type")
 	}
 
-	if key == evenKeyEncrypted {
+	if key == packet.EvenKeyEncrypted {
 		if err := c.prng(c.evenSEK); err != nil {
 			return fmt.Errorf("crypto: can't generate even key: %w", err)
 		}
-	} else if key == oddKeyEncrypted {
+	} else if key == packet.OddKeyEncrypted {
 		if err := c.prng(c.oddSEK); err != nil {
 			return fmt.Errorf("crypto: can't generate odd key: %w", err)
 		}
@@ -75,20 +84,20 @@ func (c *crypto) GenerateSEK(key packetEncryption) error {
 	return nil
 }
 
-func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
-	if len(km.salt) != 0 {
-		copy(c.salt, km.salt)
+func (c *crypto) UnmarshalKM(km *packet.CIFKM, passphrase string) error {
+	if len(km.Salt) != 0 {
+		copy(c.salt, km.Salt)
 	}
 
 	kek := c.calculateKEK(passphrase)
 
-	unwrap, err := keywrap.Unwrap(kek, km.wrap)
+	unwrap, err := keywrap.Unwrap(kek, km.Wrap)
 	if err != nil {
 		return err
 	}
 
 	n := 1
-	if km.keyBasedEncryption == evenAndOddKey {
+	if km.KeyBasedEncryption == packet.EvenAndOddKey {
 		n = 2
 	}
 
@@ -96,9 +105,9 @@ func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
 		return fmt.Errorf("crypto: the unwrapped key has the wrong length")
 	}
 
-	if km.keyBasedEncryption == evenKeyEncrypted {
+	if km.KeyBasedEncryption == packet.EvenKeyEncrypted {
 		copy(c.evenSEK, unwrap)
-	} else if km.keyBasedEncryption == oddKeyEncrypted {
+	} else if km.KeyBasedEncryption == packet.OddKeyEncrypted {
 		copy(c.oddSEK, unwrap)
 	} else {
 		copy(c.evenSEK, unwrap[:c.keyLength])
@@ -108,38 +117,38 @@ func (c *crypto) UnmarshalKM(km *cifKM, passphrase string) error {
 	return nil
 }
 
-func (c *crypto) MarshalKM(km *cifKM, passphrase string, key packetEncryption) error {
-	if key == unencryptedPacket || !key.IsValid() {
+func (c *crypto) MarshalKM(km *packet.CIFKM, passphrase string, key packet.PacketEncryption) error {
+	if key == packet.UnencryptedPacket || !key.IsValid() {
 		return fmt.Errorf("crypto: invalid key for encryption. Must be even or odd or both")
 	}
 
-	km.s = 0
-	km.version = 1
-	km.packetType = 2
-	km.sign = 0x2029
-	km.keyBasedEncryption = key // even or odd key
-	km.keyEncryptionKeyIndex = 0
-	km.cipher = 2
-	km.authentication = 0
-	km.streamEncapsulation = 2
-	km.sLen = 16
-	km.kLen = uint16(c.keyLength)
+	km.S = 0
+	km.Version = 1
+	km.PacketType = 2
+	km.Sign = 0x2029
+	km.KeyBasedEncryption = key // even or odd key
+	km.KeyEncryptionKeyIndex = 0
+	km.Cipher = 2
+	km.Authentication = 0
+	km.StreamEncapsulation = 2
+	km.SLen = 16
+	km.KLen = uint16(c.keyLength)
 
-	if len(km.salt) != 16 {
-		km.salt = make([]byte, 16)
+	if len(km.Salt) != 16 {
+		km.Salt = make([]byte, 16)
 	}
-	copy(km.salt, c.salt)
+	copy(km.Salt, c.salt)
 
 	n := 1
-	if key == evenAndOddKey {
+	if key == packet.EvenAndOddKey {
 		n = 2
 	}
 
 	w := make([]byte, n*c.keyLength)
 
-	if key == evenKeyEncrypted {
+	if key == packet.EvenKeyEncrypted {
 		copy(w, c.evenSEK)
-	} else if key == oddKeyEncrypted {
+	} else if key == packet.OddKeyEncrypted {
 		copy(w, c.oddSEK)
 	} else {
 		copy(w[:c.keyLength], c.evenSEK)
@@ -153,16 +162,16 @@ func (c *crypto) MarshalKM(km *cifKM, passphrase string, key packetEncryption) e
 		return err
 	}
 
-	if len(km.wrap) != len(wrap) {
-		km.wrap = make([]byte, len(wrap))
+	if len(km.Wrap) != len(wrap) {
+		km.Wrap = make([]byte, len(wrap))
 	}
 
-	copy(km.wrap, wrap)
+	copy(km.Wrap, wrap)
 
 	return nil
 }
 
-func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, packetSequenceNumber uint32) error {
+func (c *crypto) EncryptOrDecryptPayload(data []byte, key packet.PacketEncryption, packetSequenceNumber uint32) error {
 	// 6.1.2.  AES Counter
 	//    0   1   2   3   4   5  6   7   8   9   10  11  12  13  14  15
 	// +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
@@ -188,9 +197,9 @@ func (c *crypto) EncryptOrDecryptPayload(data []byte, key packetEncryption, pack
 	}
 
 	var sek []byte
-	if key == evenKeyEncrypted {
+	if key == packet.EvenKeyEncrypted {
 		sek = c.evenSEK
-	} else if key == oddKeyEncrypted {
+	} else if key == packet.OddKeyEncrypted {
 		sek = c.oddSEK
 	} else {
 		return fmt.Errorf("crypto: invalid SEK selected. Must be either even or odd")

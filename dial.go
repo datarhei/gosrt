@@ -15,7 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/datarhei/gosrt/sync"
+	"github.com/datarhei/gosrt/internal/circular"
+	"github.com/datarhei/gosrt/internal/crypto"
+	"github.com/datarhei/gosrt/internal/packet"
+	"github.com/datarhei/gosrt/internal/sync"
 )
 
 var ErrClientClosed = errors.New("srt: client closed")
@@ -30,17 +33,17 @@ type dialer struct {
 	config Config
 
 	socketId                    uint32
-	initialPacketSequenceNumber circular
+	initialPacketSequenceNumber circular.Number
 
-	crypto *crypto
+	crypto crypto.Crypto
 
 	conn     *srtConn
 	connChan chan connResponse
 
 	start time.Time
 
-	rcvQueue chan packet
-	sndQueue chan packet
+	rcvQueue chan packet.Packet
+	sndQueue chan packet.Packet
 
 	isShutdown bool
 
@@ -57,8 +60,12 @@ type connResponse struct {
 
 // Dial connects to the address using the SRT protocol
 func Dial(protocol, address string, config Config) (Conn, error) {
+	if protocol != "srt" {
+		return nil, fmt.Errorf("the protocol must be 'srt'")
+	}
+
 	if err := config.Validate(); err != nil {
-		return nil, fmt.Errorf("dial: invalid config: %w", err)
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	if config.Logger == nil {
@@ -71,12 +78,12 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 
 	raddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		return nil, fmt.Errorf("dial: unable to resolve address: %w", err)
+		return nil, fmt.Errorf("unable to resolve address: %w", err)
 	}
 
 	pc, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
-		return nil, fmt.Errorf("dial: failed dialing: %w", err)
+		return nil, fmt.Errorf("failed dialing: %w", err)
 	}
 
 	file, err := pc.File()
@@ -88,7 +95,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	if config.IPTOS > 0 {
 		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
 		if err != nil {
-			return nil, fmt.Errorf("dial: failed setting socket option TOS: %w", err)
+			return nil, fmt.Errorf("failed setting socket option TOS: %w", err)
 		}
 	}
 
@@ -96,7 +103,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	if config.IPTTL > 0 {
 		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
 		if err != nil {
-			return nil, fmt.Errorf("dial: failed setting socket option TTL: %w", err)
+			return nil, fmt.Errorf("failed setting socket option TTL: %w", err)
 		}
 	}
 
@@ -108,8 +115,8 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	dl.conn = nil
 	dl.connChan = make(chan connResponse)
 
-	dl.rcvQueue = make(chan packet, 2048)
-	dl.sndQueue = make(chan packet, 2048)
+	dl.rcvQueue = make(chan packet.Packet, 2048)
+	dl.sndQueue = make(chan packet.Packet, 2048)
 
 	dl.stopReader = sync.NewStopper()
 	dl.stopWriter = sync.NewStopper()
@@ -121,7 +128,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	// create a new socket ID
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	dl.socketId = r.Uint32()
-	dl.initialPacketSequenceNumber = newCircular(r.Uint32()&MAX_SEQUENCENUMBER, MAX_SEQUENCENUMBER)
+	dl.initialPacketSequenceNumber = circular.New(r.Uint32()&packet.MAX_SEQUENCENUMBER, packet.MAX_SEQUENCENUMBER)
 
 	go func() {
 		buffer := make([]byte, MAX_MSS_SIZE) // MTU size
@@ -149,7 +156,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 				return
 			}
 
-			p := newPacket(dl.remoteAddr, buffer[:n])
+			p := packet.NewPacket(dl.remoteAddr, buffer[:n])
 			if p == nil {
 				continue
 			}
@@ -171,7 +178,7 @@ func Dial(protocol, address string, config Config) (Conn, error) {
 	timer := time.AfterFunc(dl.config.ConnectionTimeout, func() {
 		dl.connChan <- connResponse{
 			conn: nil,
-			err:  fmt.Errorf("dial: connection timeout. server didn't respond"),
+			err:  fmt.Errorf("connection timeout. server didn't respond"),
 		}
 	})
 
@@ -217,11 +224,11 @@ func (dl *dialer) reader() {
 
 			dl.log("packet:recv:dump", func() string { return p.Dump() })
 
-			if p.Header().destinationSocketId != dl.socketId {
+			if p.Header().DestinationSocketId != dl.socketId {
 				break
 			}
 
-			if p.Header().isControlPacket && p.Header().controlType == CTRLTYPE_HANDSHAKE {
+			if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
 				dl.handleHandshake(p)
 				break
 			}
@@ -231,7 +238,7 @@ func (dl *dialer) reader() {
 	}
 }
 
-func (dl *dialer) send(p packet) {
+func (dl *dialer) send(p packet.Packet) {
 	// non-blocking
 	select {
 	case dl.sndQueue <- p:
@@ -265,7 +272,7 @@ func (dl *dialer) writer() {
 			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
 
-			if p.Header().isControlPacket {
+			if p.Header().IsControlPacket {
 				// Control packets can be decommissioned because they will be sent again
 				p.Decommission()
 			}
@@ -273,8 +280,8 @@ func (dl *dialer) writer() {
 	}
 }
 
-func (dl *dialer) handleHandshake(p packet) {
-	cif := &cifHandshake{}
+func (dl *dialer) handleHandshake(p packet.Packet) {
+	cif := &packet.CIFHandshake{}
 
 	err := p.UnmarshalCIF(cif)
 
@@ -288,28 +295,28 @@ func (dl *dialer) handleHandshake(p packet) {
 
 	// assemble the response (4.3.1.  Caller-Listener Handshake)
 
-	p.Header().controlType = CTRLTYPE_HANDSHAKE
-	p.Header().subType = 0
-	p.Header().typeSpecific = 0
-	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
-	p.Header().destinationSocketId = cif.srtSocketId
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().DestinationSocketId = cif.SRTSocketId
 
-	if cif.handshakeType == HSTYPE_INDUCTION {
+	if cif.HandshakeType == packet.HSTYPE_INDUCTION {
 		// Verify version
-		if cif.version != 5 {
+		if cif.Version != 5 {
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer doesn't support handshake v5"),
+				err:  fmt.Errorf("peer doesn't support handshake v5"),
 			}
 
 			return
 		}
 
 		// Verify magic number
-		if cif.extensionField != 0x4A17 {
+		if cif.ExtensionField != 0x4A17 {
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer sent the wrong magic number"),
+				err:  fmt.Errorf("peer sent the wrong magic number"),
 			}
 
 			return
@@ -321,8 +328,8 @@ func (dl *dialer) handleHandshake(p packet) {
 
 			// If the server advertises a specific block cipher family and key size,
 			// use this one, otherwise, use the configured one
-			if cif.encryptionField != 0 {
-				switch cif.encryptionField {
+			if cif.EncryptionField != 0 {
+				switch cif.EncryptionField {
 				case 2:
 					keylen = 16
 				case 3:
@@ -332,46 +339,46 @@ func (dl *dialer) handleHandshake(p packet) {
 				}
 			}
 
-			cr, err := newCrypto(keylen)
+			cr, err := crypto.New(keylen)
 			if err != nil {
 				dl.connChan <- connResponse{
 					conn: nil,
-					err:  fmt.Errorf("dial: failed creating crypto context: %w", err),
+					err:  fmt.Errorf("failed creating crypto context: %w", err),
 				}
 			}
 
 			dl.crypto = cr
 		}
 
-		cif.isRequest = true
-		cif.handshakeType = HSTYPE_CONCLUSION
-		cif.initialPacketSequenceNumber = dl.initialPacketSequenceNumber
-		cif.maxTransmissionUnitSize = dl.config.MSS // MTU size
-		cif.maxFlowWindowSize = dl.config.FC
-		cif.srtSocketId = dl.socketId
-		cif.peerIP.FromNetAddr(dl.localAddr)
+		cif.IsRequest = true
+		cif.HandshakeType = packet.HSTYPE_CONCLUSION
+		cif.InitialPacketSequenceNumber = dl.initialPacketSequenceNumber
+		cif.MaxTransmissionUnitSize = dl.config.MSS // MTU size
+		cif.MaxFlowWindowSize = dl.config.FC
+		cif.SRTSocketId = dl.socketId
+		cif.PeerIP.FromNetAddr(dl.localAddr)
 
-		cif.hasHS = true
-		cif.srtVersion = SRT_VERSION
-		cif.srtFlags.TSBPDSND = true
-		cif.srtFlags.TSBPDRCV = true
-		cif.srtFlags.CRYPT = true // must always set to true
-		cif.srtFlags.TLPKTDROP = true
-		cif.srtFlags.PERIODICNAK = true
-		cif.srtFlags.REXMITFLG = true
-		cif.srtFlags.STREAM = false
-		cif.srtFlags.PACKET_FILTER = false
-		cif.recvTSBPDDelay = uint16(dl.config.ReceiverLatency.Milliseconds())
-		cif.sendTSBPDDelay = uint16(dl.config.PeerLatency.Milliseconds())
+		cif.HasHS = true
+		cif.SRTVersion = SRT_VERSION
+		cif.SRTFlags.TSBPDSND = true
+		cif.SRTFlags.TSBPDRCV = true
+		cif.SRTFlags.CRYPT = true // must always set to true
+		cif.SRTFlags.TLPKTDROP = true
+		cif.SRTFlags.PERIODICNAK = true
+		cif.SRTFlags.REXMITFLG = true
+		cif.SRTFlags.STREAM = false
+		cif.SRTFlags.PACKET_FILTER = false
+		cif.RecvTSBPDDelay = uint16(dl.config.ReceiverLatency.Milliseconds())
+		cif.SendTSBPDDelay = uint16(dl.config.PeerLatency.Milliseconds())
 
-		cif.hasSID = true
-		cif.streamId = dl.config.StreamId
+		cif.HasSID = true
+		cif.StreamId = dl.config.StreamId
 
 		if dl.crypto != nil {
-			cif.hasKM = true
-			cif.srtKM = &cifKM{}
+			cif.HasKM = true
+			cif.SRTKM = &packet.CIFKM{}
 
-			if err := dl.crypto.MarshalKM(cif.srtKM, dl.config.Passphrase, evenKeyEncrypted); err != nil {
+			if err := dl.crypto.MarshalKM(cif.SRTKM, dl.config.Passphrase, packet.EvenKeyEncrypted); err != nil {
 				dl.connChan <- connResponse{
 					conn: nil,
 					err:  err,
@@ -387,50 +394,50 @@ func (dl *dialer) handleHandshake(p packet) {
 		dl.log("handshake:send:cif", func() string { return cif.String() })
 
 		dl.send(p)
-	} else if cif.handshakeType == HSTYPE_CONCLUSION {
+	} else if cif.HandshakeType == packet.HSTYPE_CONCLUSION {
 		// We only support HSv5
-		if cif.version != 5 {
-			dl.sendShutdown(cif.srtSocketId)
+		if cif.Version != 5 {
+			dl.sendShutdown(cif.SRTSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer doesn't support handshake v5"),
+				err:  fmt.Errorf("peer doesn't support handshake v5"),
 			}
 
 			return
 		}
 
 		// Check if the peer version is sufficient
-		if cif.srtVersion < dl.config.MinVersion {
-			dl.sendShutdown(cif.srtSocketId)
+		if cif.SRTVersion < dl.config.MinVersion {
+			dl.sendShutdown(cif.SRTSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer SRT version is not sufficient"),
+				err:  fmt.Errorf("peer SRT version is not sufficient"),
 			}
 
 			return
 		}
 
 		// Check the required SRT flags
-		if !cif.srtFlags.TSBPDSND || !cif.srtFlags.TSBPDRCV || !cif.srtFlags.TLPKTDROP || !cif.srtFlags.PERIODICNAK || !cif.srtFlags.REXMITFLG {
-			dl.sendShutdown(cif.srtSocketId)
+		if !cif.SRTFlags.TSBPDSND || !cif.SRTFlags.TSBPDRCV || !cif.SRTFlags.TLPKTDROP || !cif.SRTFlags.PERIODICNAK || !cif.SRTFlags.REXMITFLG {
+			dl.sendShutdown(cif.SRTSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer doesn't agree on SRT flags"),
+				err:  fmt.Errorf("peer doesn't agree on SRT flags"),
 			}
 
 			return
 		}
 
 		// We only support live streaming
-		if cif.srtFlags.STREAM {
-			dl.sendShutdown(cif.srtSocketId)
+		if cif.SRTFlags.STREAM {
+			dl.sendShutdown(cif.SRTSocketId)
 
 			dl.connChan <- connResponse{
 				conn: nil,
-				err:  fmt.Errorf("dial: peer doesn't support live streaming"),
+				err:  fmt.Errorf("peer doesn't support live streaming"),
 			}
 
 			return
@@ -439,25 +446,25 @@ func (dl *dialer) handleHandshake(p packet) {
 		// Use the largest TSBPD delay as advertised by the listener, but
 		// at least 120ms
 		tsbpdDelay := uint16(120)
-		if cif.recvTSBPDDelay > tsbpdDelay {
-			tsbpdDelay = cif.recvTSBPDDelay
+		if cif.RecvTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = cif.RecvTSBPDDelay
 		}
 
-		if cif.sendTSBPDDelay > tsbpdDelay {
-			tsbpdDelay = cif.sendTSBPDDelay
+		if cif.SendTSBPDDelay > tsbpdDelay {
+			tsbpdDelay = cif.SendTSBPDDelay
 		}
 
 		// If the peer has a smaller MTU size, adjust to it
-		if cif.maxTransmissionUnitSize < dl.config.MSS {
-			dl.config.MSS = cif.maxTransmissionUnitSize
+		if cif.MaxTransmissionUnitSize < dl.config.MSS {
+			dl.config.MSS = cif.MaxTransmissionUnitSize
 			dl.config.PayloadSize = dl.config.MSS - SRT_HEADER_SIZE - UDP_HEADER_SIZE
 
 			if dl.config.PayloadSize < MIN_PAYLOAD_SIZE {
-				dl.sendShutdown(cif.srtSocketId)
+				dl.sendShutdown(cif.SRTSocketId)
 
 				dl.connChan <- connResponse{
 					conn: nil,
-					err:  fmt.Errorf("dial: effective MSS too small (%d bytes) to fit the minimal payload size (%d bytes)", dl.config.MSS, MIN_PAYLOAD_SIZE),
+					err:  fmt.Errorf("effective MSS too small (%d bytes) to fit the minimal payload size (%d bytes)", dl.config.MSS, MIN_PAYLOAD_SIZE),
 				}
 
 				return
@@ -471,12 +478,12 @@ func (dl *dialer) handleHandshake(p packet) {
 			config:                      dl.config,
 			start:                       dl.start,
 			socketId:                    dl.socketId,
-			peerSocketId:                cif.srtSocketId,
+			peerSocketId:                cif.SRTSocketId,
 			tsbpdTimeBase:               uint64(time.Since(dl.start).Microseconds()),
 			tsbpdDelay:                  uint64(tsbpdDelay) * 1000,
-			initialPacketSequenceNumber: cif.initialPacketSequenceNumber,
+			initialPacketSequenceNumber: cif.InitialPacketSequenceNumber,
 			crypto:                      dl.crypto,
-			keyBaseEncryption:           evenKeyEncrypted,
+			keyBaseEncryption:           packet.EvenKeyEncrypted,
 			onSend:                      dl.send,
 			onShutdown:                  func(socketId uint32) { dl.Close() },
 			logger:                      dl.config.Logger,
@@ -491,10 +498,10 @@ func (dl *dialer) handleHandshake(p packet) {
 	} else {
 		var err error
 
-		if cif.handshakeType.IsRejection() {
-			err = fmt.Errorf("dial: connection rejected: %s", cif.handshakeType.String())
+		if cif.HandshakeType.IsRejection() {
+			err = fmt.Errorf("connection rejected: %s", cif.HandshakeType.String())
 		} else {
-			err = fmt.Errorf("dial: unsupported handshake: %s", cif.handshakeType.String())
+			err = fmt.Errorf("unsupported handshake: %s", cif.HandshakeType.String())
 		}
 
 		dl.connChan <- connResponse{
@@ -505,31 +512,31 @@ func (dl *dialer) handleHandshake(p packet) {
 }
 
 func (dl *dialer) sendInduction() {
-	p := newPacket(dl.remoteAddr, nil)
+	p := packet.NewPacket(dl.remoteAddr, nil)
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_HANDSHAKE
-	p.Header().subType = 0
-	p.Header().typeSpecific = 0
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
 
-	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
-	p.Header().destinationSocketId = 0
+	p.Header().Timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().DestinationSocketId = 0
 
-	cif := &cifHandshake{
-		isRequest:                   true,
-		version:                     4,
-		encryptionField:             0,
-		extensionField:              2,
-		initialPacketSequenceNumber: newCircular(0, MAX_SEQUENCENUMBER),
-		maxTransmissionUnitSize:     dl.config.MSS, // MTU size
-		maxFlowWindowSize:           dl.config.FC,
-		handshakeType:               HSTYPE_INDUCTION,
-		srtSocketId:                 dl.socketId,
-		synCookie:                   0,
+	cif := &packet.CIFHandshake{
+		IsRequest:                   true,
+		Version:                     4,
+		EncryptionField:             0,
+		ExtensionField:              2,
+		InitialPacketSequenceNumber: circular.New(0, packet.MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     dl.config.MSS, // MTU size
+		MaxFlowWindowSize:           dl.config.FC,
+		HandshakeType:               packet.HSTYPE_INDUCTION,
+		SRTSocketId:                 dl.socketId,
+		SynCookie:                   0,
 	}
 
-	cif.peerIP.FromNetAddr(dl.localAddr)
+	cif.PeerIP.FromNetAddr(dl.localAddr)
 
 	p.MarshalCIF(cif)
 
@@ -540,20 +547,20 @@ func (dl *dialer) sendInduction() {
 }
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
-	p := newPacket(dl.remoteAddr, nil)
+	p := packet.NewPacket(dl.remoteAddr, nil)
 
 	data := [4]byte{}
 	binary.BigEndian.PutUint32(data[0:], 0)
 
 	p.SetData(data[0:4])
 
-	p.Header().isControlPacket = true
+	p.Header().IsControlPacket = true
 
-	p.Header().controlType = CTRLTYPE_SHUTDOWN
-	p.Header().typeSpecific = 0
+	p.Header().ControlType = packet.CTRLTYPE_SHUTDOWN
+	p.Header().TypeSpecific = 0
 
-	p.Header().timestamp = uint32(time.Since(dl.start).Microseconds())
-	p.Header().destinationSocketId = peerSocketId
+	p.Header().Timestamp = uint32(time.Since(dl.start).Microseconds())
+	p.Header().DestinationSocketId = peerSocketId
 
 	dl.log("control:send:shutdown:dump", func() string { return p.Dump() })
 
