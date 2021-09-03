@@ -16,11 +16,21 @@ type SYNCookie struct {
 	secret1 string
 	secret2 string
 	daddr   string
+	counter func() int64
 }
 
-func NewSYNCookie(daddr string, seed int64) SYNCookie {
+func defaultCounter() int64 {
+	return time.Now().Unix() >> 6
+}
+
+func NewSYNCookie(daddr string, seed int64, counter func() int64) SYNCookie {
 	s := SYNCookie{
-		daddr: daddr,
+		daddr:   daddr,
+		counter: counter,
+	}
+
+	if s.counter == nil {
+		s.counter = defaultCounter
 	}
 
 	// https://www.calhoun.io/creating-random-strings-in-go/
@@ -65,8 +75,4 @@ func (s *SYNCookie) calculate(counter int64, saddr string) uint32 {
 	md5sum := md5.Sum([]byte(data))
 
 	return binary.BigEndian.Uint32(md5sum[0:])
-}
-
-func (s *SYNCookie) counter() int64 {
-	return time.Now().Unix() >> 6
 }

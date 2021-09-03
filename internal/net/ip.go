@@ -15,6 +15,14 @@ func (i *IP) setDefault() {
 	i.ip = net.ParseIP("127.0.0.1")
 }
 
+func (i *IP) isValid() bool {
+	if i.ip.String() == "<nil>" || i.ip.IsUnspecified() {
+		return false
+	}
+
+	return true
+}
+
 func (i IP) String() string {
 	return i.ip.String()
 }
@@ -22,7 +30,7 @@ func (i IP) String() string {
 func (i *IP) Parse(ip string) {
 	i.ip = net.ParseIP(ip)
 
-	if i.ip == nil || i.ip.IsUnspecified() {
+	if !i.isValid() {
 		i.setDefault()
 	}
 }
@@ -30,19 +38,19 @@ func (i *IP) Parse(ip string) {
 func (i *IP) FromNetIP(ip net.IP) {
 	i.ip = net.ParseIP(ip.String())
 
-	if i.ip == nil || i.ip.IsUnspecified() {
+	if !i.isValid() {
 		i.setDefault()
 	}
 }
 
 func (i *IP) FromNetAddr(addr net.Addr) {
-	if a, err := net.ResolveUDPAddr("udp", addr.String()); err == nil {
-		i.ip = a.IP
-	} else {
+	if addr.Network() != "udp" {
 		i.setDefault()
 	}
 
-	if i.ip.IsUnspecified() {
+	if a, err := net.ResolveUDPAddr("udp", addr.String()); err == nil {
+		i.ip = a.IP
+	} else {
 		i.setDefault()
 	}
 }
@@ -68,17 +76,21 @@ func (i *IP) Unmarshal(data []byte) error {
 		} else {
 			var b strings.Builder
 
-			fmt.Fprintf(&b, "%#04x:", (ip0&0xffff0000)>>16)
-			fmt.Fprintf(&b, "%#04x:", ip0&0x0000ffff)
-			fmt.Fprintf(&b, "%#04x:", (ip1&0xffff0000)>>16)
-			fmt.Fprintf(&b, "%#04x:", ip1&0x0000ffff)
-			fmt.Fprintf(&b, "%#04x:", (ip2&0xffff0000)>>16)
-			fmt.Fprintf(&b, "%#04x:", ip2&0x0000ffff)
-			fmt.Fprintf(&b, "%#04x:", (ip3&0xffff0000)>>16)
-			fmt.Fprintf(&b, "%#04x", ip3&0x0000ffff)
+			fmt.Fprintf(&b, "%04x:", (ip0&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%04x:", ip0&0x0000ffff)
+			fmt.Fprintf(&b, "%04x:", (ip1&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%04x:", ip1&0x0000ffff)
+			fmt.Fprintf(&b, "%04x:", (ip2&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%04x:", ip2&0x0000ffff)
+			fmt.Fprintf(&b, "%04x:", (ip3&0xffff0000)>>16)
+			fmt.Fprintf(&b, "%04x", ip3&0x0000ffff)
 
 			i.ip = net.ParseIP(b.String())
 		}
+	}
+
+	if !i.isValid() {
+		i.setDefault()
 	}
 
 	return nil
@@ -124,6 +136,6 @@ func (i *IP) Marshal(data []byte) {
 		data[12] = i.ip[3]
 		data[13] = i.ip[2]
 		data[14] = i.ip[1]
-		data[16] = i.ip[0]
+		data[15] = i.ip[0]
 	}
 }

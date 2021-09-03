@@ -187,6 +187,8 @@ type Packet interface {
 	Decommission()
 }
 
+//  3. Packet Structure
+
 type PacketHeader struct {
 	Addr            net.Addr
 	IsControlPacket bool

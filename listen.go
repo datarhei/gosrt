@@ -173,7 +173,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	ln.rcvQueue = make(chan packet.Packet, 2048)
 	ln.sndQueue = make(chan packet.Packet, 2048)
 
-	ln.syncookie = srtnet.NewSYNCookie(ln.addr.String(), time.Now().UnixNano())
+	ln.syncookie = srtnet.NewSYNCookie(ln.addr.String(), time.Now().UnixNano(), nil)
 
 	ln.stopReader = srtsync.NewStopper()
 	ln.stopWriter = srtsync.NewStopper()
