@@ -1,11 +1,11 @@
-ARG BUILD_IMAGE=golang:1.16.7-alpine3.14
+ARG BUILD_IMAGE=golang:1.18.3-alpine3.16
 
 FROM $BUILD_IMAGE as builder
 
 COPY . /build
 
-RUN cd /build/client && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o client .
-RUN cd /build/server && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o server .
+RUN cd /build/client && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -o client .
+RUN cd /build/server && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -o server .
 
 FROM scratch
 
