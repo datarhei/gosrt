@@ -59,6 +59,15 @@ func TestUnmarshalPacket(t *testing.T) {
 	require.Equal(t, "hello world!", string(p.Data()))
 }
 
+func TestPacketString(t *testing.T) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
+
+	p := NewPacket(addr, nil)
+	p.SetData([]byte("hello world!"))
+
+	require.Greater(t, len(p.String()), 0)
+}
+
 func TestHandshake(t *testing.T) {
 	ip := srtnet.IP{}
 	ip.Parse("127.0.0.1")
@@ -120,6 +129,54 @@ func TestHandshake(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestHandshakeString(t *testing.T) {
+	ip := srtnet.IP{}
+	ip.Parse("127.0.0.1")
+
+	cif := &CIFHandshake{
+		IsRequest:                   false,
+		Version:                     5,
+		EncryptionField:             0,
+		ExtensionField:              0,
+		InitialPacketSequenceNumber: circular.New(42, MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     1500,
+		MaxFlowWindowSize:           100,
+		HandshakeType:               HSTYPE_CONCLUSION,
+		SRTSocketId:                 0x274921,
+		SynCookie:                   0x123456,
+		PeerIP:                      ip,
+		HasHS:                       true,
+		HasKM:                       false,
+		HasSID:                      true,
+		SRTVersion:                  0x010402,
+		SRTFlags: struct {
+			TSBPDSND      bool
+			TSBPDRCV      bool
+			CRYPT         bool
+			TLPKTDROP     bool
+			PERIODICNAK   bool
+			REXMITFLG     bool
+			STREAM        bool
+			PACKET_FILTER bool
+		}{
+			TSBPDSND:      true,
+			TSBPDRCV:      true,
+			CRYPT:         true,
+			TLPKTDROP:     true,
+			PERIODICNAK:   true,
+			REXMITFLG:     true,
+			STREAM:        false,
+			PACKET_FILTER: false,
+		},
+		RecvTSBPDDelay: 100,
+		SendTSBPDDelay: 100,
+		SRTKM:          nil,
+		StreamId:       "/live/stream.foobar",
+	}
+
+	require.Greater(t, len(cif.String()), 0)
+}
+
 func TestKM(t *testing.T) {
 	cif := &CIFKM{
 		S:                     0,
@@ -156,6 +213,29 @@ func TestKM(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestKMString(t *testing.T) {
+	cif := &CIFKM{
+		S:                     0,
+		Version:               1,
+		PacketType:            2,
+		Sign:                  0x2029,
+		Resv1:                 0,
+		KeyBasedEncryption:    EvenKeyEncrypted,
+		KeyEncryptionKeyIndex: 0,
+		Cipher:                2,
+		Authentication:        0,
+		StreamEncapsulation:   2,
+		Resv2:                 0,
+		Resv3:                 0,
+		SLen:                  16,
+		KLen:                  16,
+		Salt:                  []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+		Wrap:                  []byte{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
+	}
+
+	require.Greater(t, len(cif.String()), 0)
+}
+
 func TestFullACK(t *testing.T) {
 	cif := &CIFACK{
 		IsLite:                      false,
@@ -183,6 +263,22 @@ func TestFullACK(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, cif, cif2)
+}
+
+func TestFullACKString(t *testing.T) {
+	cif := &CIFACK{
+		IsLite:                      false,
+		IsSmall:                     false,
+		LastACKPacketSequenceNumber: circular.New(42, MAX_SEQUENCENUMBER),
+		RTT:                         38473,
+		RTTVar:                      9084,
+		AvailableBufferSize:         48533,
+		PacketsReceivingRate:        20,
+		EstimatedLinkCapacity:       0,
+		ReceivingRate:               73637,
+	}
+
+	require.Greater(t, len(cif.String()), 0)
 }
 
 func TestSmallACK(t *testing.T) {
@@ -214,6 +310,22 @@ func TestSmallACK(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestSmallACKString(t *testing.T) {
+	cif := &CIFACK{
+		IsLite:                      false,
+		IsSmall:                     true,
+		LastACKPacketSequenceNumber: circular.New(42, MAX_SEQUENCENUMBER),
+		RTT:                         38473,
+		RTTVar:                      9084,
+		AvailableBufferSize:         48533,
+		PacketsReceivingRate:        0,
+		EstimatedLinkCapacity:       0,
+		ReceivingRate:               0,
+	}
+
+	require.Greater(t, len(cif.String()), 0)
+}
+
 func TestLiteACK(t *testing.T) {
 	cif := &CIFACK{
 		IsLite:                      true,
@@ -243,6 +355,22 @@ func TestLiteACK(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestLiteACKString(t *testing.T) {
+	cif := &CIFACK{
+		IsLite:                      true,
+		IsSmall:                     false,
+		LastACKPacketSequenceNumber: circular.New(42, MAX_SEQUENCENUMBER),
+		RTT:                         0,
+		RTTVar:                      0,
+		AvailableBufferSize:         0,
+		PacketsReceivingRate:        0,
+		EstimatedLinkCapacity:       0,
+		ReceivingRate:               0,
+	}
+
+	require.Greater(t, len(cif.String()), 0)
+}
+
 func TestNAK(t *testing.T) {
 	cif := &CIFNAK{
 		LostPacketSequenceNumber: []circular.Number{
@@ -269,6 +397,19 @@ func TestNAK(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestNAKString(t *testing.T) {
+	cif := &CIFNAK{
+		LostPacketSequenceNumber: []circular.Number{
+			circular.New(42, MAX_SEQUENCENUMBER),
+			circular.New(42, MAX_SEQUENCENUMBER),
+			circular.New(45, MAX_SEQUENCENUMBER),
+			circular.New(49, MAX_SEQUENCENUMBER),
+		},
+	}
+
+	require.Greater(t, len(cif.String()), 0)
+}
+
 func TestShutdown(t *testing.T) {
 	cif := &CIFShutdown{}
 
@@ -286,6 +427,12 @@ func TestShutdown(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, cif, cif2)
+}
+
+func TestShutdownString(t *testing.T) {
+	cif := &CIFShutdown{}
+
+	require.Greater(t, len(cif.String()), 0)
 }
 
 func BenchmarkNewPacket(b *testing.B) {
