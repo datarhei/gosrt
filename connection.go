@@ -37,10 +37,10 @@ type Conn interface {
 	// Any blocked Read or Write operations will be unblocked and return errors.
 	Close() error
 
-	// LocalAddr returns the local network address.
+	// LocalAddr returns the local network address. The returned net.Addr is not shared by other invocations of LocalAddr.
 	LocalAddr() net.Addr
 
-	// RemoteAddr returns the remote network address.
+	// RemoteAddr returns the remote network address. The returned net.Addr is not shared by other invocations of RemoteAddr.
 	RemoteAddr() net.Addr
 
 	SetDeadline(t time.Time) error
@@ -270,13 +270,11 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	return c
 }
 
-// LocalAddr returns the local network address. The Addr returned is not shared by other invocations of LocalAddr.
 func (c *srtConn) LocalAddr() net.Addr {
 	addr, _ := net.ResolveUDPAddr("udp", c.localAddr.String())
 	return addr
 }
 
-// RemoteAddr returns the remote network address. The Addr returned is not shared by other invocations of RemoteAddr.
 func (c *srtConn) RemoteAddr() net.Addr {
 	addr, _ := net.ResolveUDPAddr("udp", c.remoteAddr.String())
 	return addr

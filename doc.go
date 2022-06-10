@@ -3,11 +3,9 @@
 // license that can be found in the LICENSE file.
 
 /*
-Package srt provides an interface for network I/O using the
-SRT protocol (https://github.com/Haivision/srt).
+Package srt provides an interface for network I/O using the SRT protocol (https://github.com/Haivision/srt).
 
-The package gives access to the basic interface provided
-by the Dial, Listen, and Accept functions and the associated
+The package gives access to the basic interface provided by the Dial, Listen, and Accept functions and the associated
 Conn and Listener interfaces.
 
 The Dial function connects to a server:
@@ -27,7 +25,7 @@ The Dial function connects to a server:
 			// handle error
 		}
 
-		// ...
+		// handle received data
 	}
 
 	conn.Close()

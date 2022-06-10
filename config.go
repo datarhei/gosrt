@@ -170,6 +170,7 @@ type Config struct {
 	// SRTO_TSBPDMODE
 	TSBPDMode bool
 
+	// An implementation of the Logger interface
 	Logger Logger
 }
 

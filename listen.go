@@ -20,8 +20,11 @@ import (
 	srtsync "github.com/datarhei/gosrt/internal/sync"
 )
 
+// ConnType represents the kind of connection as returned
+// from the AcceptFunc. It is one of REJECT, PUBLISH, or SUBSCRIBE.
 type ConnType int
 
+// String returns a string representation of the ConnType.
 func (c ConnType) String() string {
 	switch c {
 	case REJECT:
@@ -36,18 +39,32 @@ func (c ConnType) String() string {
 }
 
 const (
-	REJECT ConnType = ConnType(1 << iota)
-	PUBLISH
-	SUBSCRIBE
+	REJECT    ConnType = ConnType(1 << iota) // Reject a connection
+	PUBLISH                                  // This connection is meant to write data to the server
+	SUBSCRIBE                                // This connection is meant to read data from a PUBLISHed stream
 )
 
+// ConnRequest is an incoming connection request
 type ConnRequest interface {
+	// RemoteAddr returns the address of the peer. The returned net.Addr
+	// is a copy and can be used at will.
 	RemoteAddr() net.Addr
+
+	// StreamId returns the streamid of the requesting connection. Use this
+	// to decide what to do with the connection.
 	StreamId() string
+
+	// IsEncrypted returns whether the connection is encrypted. If it is
+	// encrypted, use SetPassphrase to set the passphrase for decrypting.
 	IsEncrypted() bool
+
+	// SetPassphrase sets the passphrase in order to decrypt the incoming
+	// data. Returns an error if the passphrase did not work or the connection
+	// is not encrypted.
 	SetPassphrase(p string) error
 }
 
+// connRequest implements the ConnRequest interface
 type connRequest struct {
 	addr      net.Addr
 	start     time.Time
@@ -86,14 +103,31 @@ func (req *connRequest) SetPassphrase(passphrase string) error {
 	return nil
 }
 
-var ErrServerClosed = errors.New("srt: server closed")
+// ErrListenerClosed is returned when the listener is about to shutdown.
+var ErrListenerClosed = errors.New("srt: listener closed")
 
+// AcceptFunc receives a connection request and returns the type of connection
+// and is required by the Listener for each Accept of a new connection.
+type AcceptFunc func(req ConnRequest) ConnType
+
+// Listener waits for new connections
 type Listener interface {
-	Accept(func(req ConnRequest) ConnType) (Conn, ConnType, error)
+	// Accept waits for new connections. For each new connection the AcceptFunc
+	// gets called. Conn is a new connection if AcceptFunc is PUBLISH or SUBSCRIBE.
+	// If AcceptFunc returns REJECT, Conn is nil. In case of failure error is not
+	// nil, Conn is nil and ConnType is REJECT. On closing the listener err will
+	// be ErrListenerClosed and ConnType is REJECT.
+	Accept(AcceptFunc) (Conn, ConnType, error)
+
+	// Close closes the listener. It will stop accepting new connections and
+	// close all currently established connections.
 	Close()
+
+	// Addr returns the address of the listener.
 	Addr() net.Addr
 }
 
+// listener implements the Listener interface.
 type listener struct {
 	pc   *net.UDPConn
 	addr net.Addr
@@ -119,7 +153,20 @@ type listener struct {
 	doneChan chan error
 }
 
-func Listen(protocol, address string, config Config) (Listener, error) {
+// Listen returns a new listener on the SRT protocol on the address with
+// the provided config. The network parameter needs to be "srt".
+//
+// The address has the form "host:port".
+//
+// Examples:
+//  Listen("srt", "127.0.0.1:3000", DefaultConfig)
+//
+// In case of an error, the returned Listener is nil and the error is non-nil.
+func Listen(network, address string, config Config) (Listener, error) {
+	if network != "srt" {
+		return nil, fmt.Errorf("listen: the network must be 'srt'")
+	}
+
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("listen: invalid config: %w", err)
 	}
@@ -190,7 +237,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 
 		for {
 			if ln.isShutdown {
-				ln.doneChan <- ErrServerClosed
+				ln.doneChan <- ErrListenerClosed
 				return
 			}
 
@@ -202,7 +249,7 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 				}
 
 				if ln.isShutdown {
-					ln.doneChan <- ErrServerClosed
+					ln.doneChan <- ErrListenerClosed
 					return
 				}
 
@@ -222,9 +269,9 @@ func Listen(protocol, address string, config Config) (Listener, error) {
 	return ln, nil
 }
 
-func (ln *listener) Accept(acceptFn func(req ConnRequest) ConnType) (Conn, ConnType, error) {
+func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 	if ln.isShutdown {
-		return nil, REJECT, ErrServerClosed
+		return nil, REJECT, ErrListenerClosed
 	}
 
 	select {
@@ -380,7 +427,8 @@ func (ln *listener) Close() {
 }
 
 func (ln *listener) Addr() net.Addr {
-	return ln.addr
+	addr, _ := net.ResolveUDPAddr("udp", ln.addr.String())
+	return addr
 }
 
 func (ln *listener) reader() {

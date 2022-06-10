@@ -21,6 +21,8 @@ import (
 	"github.com/datarhei/gosrt/internal/sync"
 )
 
+// ErrClientClosed is returned when the client connection has
+// been voluntarly closed.
 var ErrClientClosed = errors.New("srt: client closed")
 
 // dialer will implement the Conn interface
@@ -58,10 +60,18 @@ type connResponse struct {
 	err  error
 }
 
-// Dial connects to the address using the SRT protocol
-func Dial(protocol, address string, config Config) (Conn, error) {
-	if protocol != "srt" {
-		return nil, fmt.Errorf("the protocol must be 'srt'")
+// Dial connects to the address using the SRT protocol with the given config
+// and returns a Conn interface.
+//
+// The address is of the form "host:port".
+//
+// Example:
+//  Dial("srt", "127.0.0.1:3000", DefaultConfig)
+//
+// In case of an error the returned Conn is nil and the error is non-nil.
+func Dial(network, address string, config Config) (Conn, error) {
+	if network != "srt" {
+		return nil, fmt.Errorf("the network must be 'srt'")
 	}
 
 	if err := config.Validate(); err != nil {
@@ -238,6 +248,7 @@ func (dl *dialer) reader() {
 	}
 }
 
+// send adds a packet to the send queue
 func (dl *dialer) send(p packet.Packet) {
 	// non-blocking
 	select {
@@ -247,7 +258,7 @@ func (dl *dialer) send(p packet.Packet) {
 	}
 }
 
-// send packets to the wire
+// writer writes packets to the wire
 func (dl *dialer) writer() {
 	defer func() {
 		dl.log("dial", func() string { return "left writer loop" })
@@ -567,7 +578,6 @@ func (dl *dialer) sendShutdown(peerSocketId uint32) {
 	dl.send(p)
 }
 
-// Implementation of the Conn interface
 func (dl *dialer) LocalAddr() net.Addr {
 	return dl.conn.LocalAddr()
 }

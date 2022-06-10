@@ -4,24 +4,38 @@
 
 package srt
 
-// server is an implementation of the Server interface
+import "errors"
+
+// Server is a framework for a SRT server
 type Server struct {
-	// The address the SRT server should listen on, e.g. ":6001"
+	// The address the SRT server should listen on, e.g. ":6001".
 	Addr string
 
+	// Config is the configuration for a SRT listener.
 	Config *Config
 
-	HandleConnect   func(cr ConnRequest) ConnType
-	HandlePublish   func(conn Conn)
-	HandleSubscribe func(conn Conn)
+	// HandleConnect will be called for each incoming connection. This
+	// allows you to implement your own interpretation of the streamid
+	// and authorization. If this is nil, all connections will be
+	// rejected.
+	HandleConnect AcceptFunc
 
-	Debug bool
+	// HandlePublish will be called for a publishing connection.
+	HandlePublish func(conn Conn)
+
+	// HandlePublish will be called for a subscribing connection.
+	HandleSubscribe func(conn Conn)
 
 	ln Listener
 }
 
-// ListenAndServe starts the SRT server
+// ErrServerClosed is returned when the server is about to shutdown.
+var ErrServerClosed = errors.New("srt: server closed")
+
+// ListenAndServe starts the SRT server. It blocks until an error happens.
+// If the error is ErrListenerClosed the server has shutdown normally.
 func (s *Server) ListenAndServe() error {
+	// Set some defaults if required.
 	if s.HandlePublish == nil {
 		s.HandlePublish = s.defaultHandler
 	}
@@ -34,7 +48,7 @@ func (s *Server) ListenAndServe() error {
 		s.Config = &DefaultConfig
 	}
 
-	// Listen creates a server
+	// Start listening for incoming connections.
 	ln, err := Listen("udp", s.Addr, *s.Config)
 	if err != nil {
 		return err
@@ -45,8 +59,13 @@ func (s *Server) ListenAndServe() error {
 	s.ln = ln
 
 	for {
+		// Wait for connections.
 		conn, mode, err := ln.Accept(s.HandleConnect)
 		if err != nil {
+			if err == ErrListenerClosed {
+				return ErrServerClosed
+			}
+
 			return err
 		}
 
@@ -63,10 +82,13 @@ func (s *Server) ListenAndServe() error {
 	}
 }
 
+// Shutdown will shutdown the server. ListenAndServe will return a ErrServerClosed
 func (s *Server) Shutdown() {
+	// Close the listener.
 	s.ln.Close()
 }
 
 func (s *Server) defaultHandler(conn Conn) {
+	// Close the incoming connection.
 	conn.Close()
 }

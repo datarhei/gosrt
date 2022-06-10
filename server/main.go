@@ -18,7 +18,7 @@ import (
 	"github.com/pkg/profile"
 )
 
-// server is an implementation of the Server interface
+// server is an implementation of the Server framework
 type server struct {
 	// Configuration parameter taken from the Config
 	addr       string
@@ -85,7 +85,6 @@ func main() {
 		HandleConnect:   s.handleConnect,
 		HandlePublish:   s.handlePublish,
 		HandleSubscribe: s.handleSubscribe,
-		Debug:           false,
 		Config:          &config,
 	}
 
@@ -102,7 +101,7 @@ func main() {
 	}()
 
 	go func() {
-		if err := s.ListenAndServe(); err != nil && err != srt.ErrServerClosed {
+		if err := s.ListenAndServe(); err != nil && err != srt.ErrListenerClosed {
 			fmt.Fprintf(os.Stderr, "SRT Server: %s\n", err)
 			os.Exit(2)
 		}
