@@ -574,13 +574,13 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 			}
 		}
 	} else {
-		/*
-			if p.packetSequenceNumber.Gt(c.debug.expectedRcvPacketSequenceNumber) == true {
-				log("recv lost packets. got: %d, expected: %d (%d)\n", p.packetSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Distance(p.packetSequenceNumber))
-			}
+		if header.PacketSequenceNumber.Gt(c.debug.expectedRcvPacketSequenceNumber) == true {
+			c.log("connection:error", func() string {
+				return fmt.Sprintf("recv lost packets. got: %d, expected: %d (%d)\n", header.PacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Distance(header.PacketSequenceNumber))
+			})
+		}
 
-			c.debug.expectedRcvPacketSequenceNumber = p.packetSequenceNumber.Inc()
-		*/
+		c.debug.expectedRcvPacketSequenceNumber = header.PacketSequenceNumber.Inc()
 
 		// Ignore FEC filter control packets
 		// https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md
@@ -776,13 +776,15 @@ func (c *srtConn) handleKMRequest(p packet.Packet) {
 	}
 
 	c.log("control:recv:KM:cif", func() string { return cif.String() })
-	/*
-		if cif.keyBasedEncryption == c.keyBaseEncryption {
-			c.statistics.receive.invalid++
-			log("invalid KM. wants to reset the key that is already in use\n")
-			return
-		}
-	*/
+
+	if cif.KeyBasedEncryption == c.keyBaseEncryption {
+		c.statistics.pktRecvInvalid++
+		c.log("control:recv:KM:error", func() string {
+			return "invalid KM. wants to reset the key that is already in use"
+		})
+		return
+	}
+
 	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
 		c.statistics.pktRecvInvalid++
 		c.log("control:recv:KM:error", func() string { return fmt.Sprintf("invalid KM: %s", err) })

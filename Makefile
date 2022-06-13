@@ -55,7 +55,11 @@ commit: vet fmt lint test
 docker:
 	docker build -t gosrt:$(SHORTCOMMIT) .
 
-.PHONY: help test vet fmt vendor commit coverage lint client server update
+## logtopics: Extract all logging topics
+logtopics:
+	grep -ERho 'log\("([^"]+)' *.go | sed -E -e 's/log\("//' | sort -u
+
+.PHONY: help test vet fmt vendor commit coverage lint client server update logtopics
 
 ## help: Show all commands
 help: Makefile

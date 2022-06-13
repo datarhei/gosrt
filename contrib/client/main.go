@@ -167,7 +167,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
-			ln, err := srt.Listen("udp", u.Host, config)
+			ln, err := srt.Listen("srt", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -191,7 +191,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else if mode == "caller" {
-			conn, err := srt.Dial("udp", u.Host, config)
+			conn, err := srt.Dial("srt", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -242,7 +242,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 		mode := u.Query().Get("mode")
 
 		if mode == "listener" {
-			ln, err := srt.Listen("udp", u.Host, config)
+			ln, err := srt.Listen("srt", u.Host, config)
 			if err != nil {
 				return nil, err
 			}
@@ -266,7 +266,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 
 			return conn, nil
 		} else if mode == "caller" {
-			conn, err := srt.Dial("udp", u.Host, config)
+			conn, err := srt.Dial("srt", u.Host, config)
 			if err != nil {
 				return nil, err
 			}

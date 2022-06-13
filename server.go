@@ -49,7 +49,7 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	// Start listening for incoming connections.
-	ln, err := Listen("udp", s.Addr, *s.Config)
+	ln, err := Listen("srt", s.Addr, *s.Config)
 	if err != nil {
 		return err
 	}

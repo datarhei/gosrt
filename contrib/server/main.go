@@ -53,7 +53,7 @@ func main() {
 		channels: make(map[string]srt.PubSub),
 	}
 
-	flag.StringVar(&s.addr, "addr", "", "Address to listen on")
+	flag.StringVar(&s.addr, "addr", "", "address to listen on")
 	flag.StringVar(&s.app, "app", "", "path prefix for streamid")
 	flag.StringVar(&s.token, "token", "", "token query param for streamid")
 	flag.StringVar(&s.passphrase, "passphrase", "", "passphrase for de- and enrcypting the data")
