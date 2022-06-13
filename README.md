@@ -7,18 +7,17 @@ Implementation of the SRT protocol in pure go with minimal dependencies.
 This implementation of the SRT protocol has live streaming of video/audio in mind. Because of this, the buffer mode and File Transfer
 Congestion Control (FileCC) are not implemented.
 
-|     |                                           |
 | --- | ----------------------------------------- |
-| ✅  | Message mode                              |
-| ✅  | Caller-Listener Handshake                 |
-| ✅  | Timestamp-Based Packet Delivery (TSBPD)   |
-| ✅  | Too-Late Packet Drop (TLPKTDROP)          |
-| ✅  | Live Congestion Control (LiveCC)          |
-| ✅  | NAK and Peridoc NAK                       |
-| ✅  | Encryption                                |
-| ❌  | Buffer mode                               |
-| ❌  | Rendezvous Handshake                      |
-| ❌  | File Transfer Congestion Control (FileCC) |
+| ✅ | Message mode |
+| ✅ | Caller-Listener Handshake |
+| ✅ | Timestamp-Based Packet Delivery (TSBPD) |
+| ✅ | Too-Late Packet Drop (TLPKTDROP) |
+| ✅ | Live Congestion Control (LiveCC) |
+| ✅ | NAK and Peridoc NAK |
+| ✅ | Encryption |
+| ❌ | Buffer mode |
+| ❌ | Rendezvous Handshake |
+| ❌ | File Transfer Congestion Control (FileCC) |
 
 The parts that are implemented are based on what has been published in the SRT RFC.
 
@@ -263,7 +262,7 @@ ffplay -f mpegts -transtype live -i "srt://127.0.0.1:6001?streamid=/live/stream"
 ```
 
 You will most likely first see some error messages from `ffplay` because it tries to make sense of the received data until a keyframe arrives. If you
-get more error during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
+get more errors during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
 
 ## Encryption
 
@@ -286,11 +285,11 @@ ffplay -f mpegts -transtype live -i "srt://127.0.0.1:6001?streamid=/live/stream&
 ```
 
 You will most likely first see some error messages from `ffplay` because it tries to make sense of the received data until a keyframe arrives. If you
-get more error during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
+get more errors during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
 
 # Logging
 
-This SRT module has a built-in loggin facility for debugging purposes. Check the `Logger` interface and the `NewLogger(topics []string)` function. Because logging everything would be too much output if you wonly want to debug something specific, you have the possibility to limit the logging to specific areas like everything regarding a connection or only the handshake. That's why there are various topics.
+This SRT module has a built-in logging facility for debugging purposes. Check the `Logger` interface and the `NewLogger(topics []string)` function. Because logging everything would be too much output if you wonly want to debug something specific, you have the possibility to limit the logging to specific areas like everything regarding a connection or only the handshake. That's why there are various topics.
 
 In the contributed server you see an example of how logging is used. Here's the essence:
 
@@ -300,7 +299,7 @@ logger := srt.NewLogger([]string{"connection", "handshake"})
 config := srt.DefaultConfig
 config.Logger = logger
 
-ln, err := srt.Listen("udp", ":6000", srt.Config{...})
+ln, err := srt.Listen("udp", ":6000", config)
 if err != nil {
     // handle error
 }
@@ -363,7 +362,7 @@ packet:recv:dump
 packet:send:dump
 ```
 
-You run `make logtopics` in order to extract the list of topics.
+You can run `make logtopics` in order to extract the list of topics.
 
 # Docker
 
