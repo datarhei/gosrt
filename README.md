@@ -7,17 +7,18 @@ Implementation of the SRT protocol in pure go with minimal dependencies.
 This implementation of the SRT protocol has live streaming of video/audio in mind. Because of this, the buffer mode and File Transfer
 Congestion Control (FileCC) are not implemented.
 
+|     |                                           |
 | --- | ----------------------------------------- |
-| ✅ | Message mode |
-| ✅ | Caller-Listener Handshake |
-| ✅ | Timestamp-Based Packet Delivery (TSBPD) |
-| ✅ | Too-Late Packet Drop (TLPKTDROP) |
-| ✅ | Live Congestion Control (LiveCC) |
-| ✅ | NAK and Peridoc NAK |
-| ✅ | Encryption |
-| ❌ | Buffer mode |
-| ❌ | Rendezvous Handshake |
-| ❌ | File Transfer Congestion Control (FileCC) |
+| ✅  | Message mode                              |
+| ✅  | Caller-Listener Handshake                 |
+| ✅  | Timestamp-Based Packet Delivery (TSBPD)   |
+| ✅  | Too-Late Packet Drop (TLPKTDROP)          |
+| ✅  | Live Congestion Control (LiveCC)          |
+| ✅  | NAK and Peridoc NAK                       |
+| ✅  | Encryption                                |
+| ❌  | Buffer mode                               |
+| ❌  | Rendezvous Handshake                      |
+| ❌  | File Transfer Congestion Control (FileCC) |
 
 The parts that are implemented are based on what has been published in the SRT RFC.
 
