@@ -16,7 +16,6 @@ import (
 	"time"
 
 	srt "github.com/datarhei/gosrt"
-	srtio "github.com/datarhei/gosrt/io"
 )
 
 type stats struct {
@@ -96,7 +95,7 @@ func main() {
 	doneChan := make(chan error)
 
 	go func() {
-		wr := srtio.NewNonblockingWriter(w, 2048)
+		wr := NewNonblockingWriter(w, 2048)
 		defer wr.Close()
 
 		buffer := make([]byte, 2048)
