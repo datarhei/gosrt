@@ -1,6 +1,5 @@
-/contrib/client
-/server/server*
-/client/client*
+/contrib/server/server*
+/contrib/client/client*
 *.prof
 *.out
 *.ts

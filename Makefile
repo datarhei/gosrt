@@ -35,11 +35,11 @@ lint:
 
 ## client: Build import binary
 client:
-	cd client && CGO_ENABLED=0 go build -o client -ldflags="-s -w" -a
+	cd contrib/client && CGO_ENABLED=0 go build -o client -ldflags="-s -w" -a
 
 ## server: Build import binary
 server:
-	cd server && CGO_ENABLED=0 go build -o server -ldflags="-s -w" -a
+	cd contrib/server && CGO_ENABLED=0 go build -o server -ldflags="-s -w" -a
 
 ## coverage: Generate code coverage analysis
 coverage:
