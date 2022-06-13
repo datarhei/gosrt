@@ -7,6 +7,8 @@ package circular
 import (
 	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const max uint32 = 0b11111111_11111111_11111111_11111111
@@ -22,69 +24,49 @@ func ExampleNumber_Inc() {
 func TestIncNoWrap(t *testing.T) {
 	a := New(42, max)
 
-	if a.Val() != 42 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 42)
-	}
+	require.Equal(t, uint32(42), a.Val())
 
 	a = a.Inc()
 
-	if a.Val() != 43 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 43)
-	}
+	require.Equal(t, uint32(43), a.Val())
 }
 
 func TestIncWrap(t *testing.T) {
 	a := New(max-1, max)
 
-	if a.Val() != max-1 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), max-1)
-	}
+	require.Equal(t, max-1, a.Val())
 
 	a = a.Inc()
 
-	if a.Val() != max {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), max)
-	}
+	require.Equal(t, max, a.Val())
 
 	a = a.Inc()
 
-	if a.Val() != 0 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 0)
-	}
+	require.Equal(t, uint32(0), a.Val())
 }
 
 func TestDecNoWrap(t *testing.T) {
 	a := New(42, max)
 
-	if a.Val() != 42 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 42)
-	}
+	require.Equal(t, uint32(42), a.Val())
 
 	a = a.Dec()
 
-	if a.Val() != 41 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 41)
-	}
+	require.Equal(t, uint32(41), a.Val())
 }
 
 func TestDecWrap(t *testing.T) {
 	a := New(0, max)
 
-	if a.Val() != 0 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), 0)
-	}
+	require.Equal(t, uint32(0), a.Val())
 
 	a = a.Dec()
 
-	if a.Val() != max {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), max)
-	}
+	require.Equal(t, max, a.Val())
 
 	a = a.Dec()
 
-	if a.Val() != max-1 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", a.Val(), max-1)
-	}
+	require.Equal(t, max-1, a.Val())
 }
 
 func TestDistanceNoWrap(t *testing.T) {
@@ -93,15 +75,11 @@ func TestDistanceNoWrap(t *testing.T) {
 
 	d := a.Distance(b)
 
-	if d != 8 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", d, 8)
-	}
+	require.Equal(t, uint32(8), d)
 
 	d = b.Distance(a)
 
-	if d != 8 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", d, 8)
-	}
+	require.Equal(t, uint32(8), d)
 }
 
 func TestDistanceWrap(t *testing.T) {
@@ -110,15 +88,11 @@ func TestDistanceWrap(t *testing.T) {
 
 	d := a.Distance(b)
 
-	if d != 5 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", d, 5)
-	}
+	require.Equal(t, uint32(5), d)
 
 	d = b.Distance(a)
 
-	if d != 5 {
-		t.Fatalf("Unexpected value: %d (wanted: %d)", d, 5)
-	}
+	require.Equal(t, uint32(5), d)
 }
 
 func TestLt(t *testing.T) {
@@ -128,27 +102,19 @@ func TestLt(t *testing.T) {
 
 	x := a.Lt(b)
 
-	if x != true {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, true)
-	}
+	require.Equal(t, true, x)
 
 	x = b.Lt(a)
 
-	if x != false {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, false)
-	}
+	require.Equal(t, false, x)
 
 	x = a.Lt(c)
 
-	if x != false {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, false)
-	}
+	require.Equal(t, false, x)
 
 	x = c.Lt(a)
 
-	if x != true {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, true)
-	}
+	require.Equal(t, true, x)
 }
 
 func TestGt(t *testing.T) {
@@ -158,27 +124,19 @@ func TestGt(t *testing.T) {
 
 	x := a.Gt(b)
 
-	if x != false {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, false)
-	}
+	require.Equal(t, false, x)
 
 	x = b.Gt(a)
 
-	if x != true {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, true)
-	}
+	require.Equal(t, true, x)
 
 	x = a.Gt(c)
 
-	if x != true {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, true)
-	}
+	require.Equal(t, true, x)
 
 	x = c.Gt(a)
 
-	if x != false {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", x, false)
-	}
+	require.Equal(t, false, x)
 }
 
 func TestAdd(t *testing.T) {
@@ -186,15 +144,11 @@ func TestAdd(t *testing.T) {
 
 	a = a.Add(42)
 
-	if a.Val() != max {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", a.Val(), max)
-	}
+	require.Equal(t, max, a.Val())
 
 	a = a.Add(1)
 
-	if a.Val() != 0 {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", a.Val(), 0)
-	}
+	require.Equal(t, uint32(0), a.Val())
 }
 
 func TestSub(t *testing.T) {
@@ -202,13 +156,9 @@ func TestSub(t *testing.T) {
 
 	a = a.Sub(42)
 
-	if a.Val() != 0 {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", a.Val(), 0)
-	}
+	require.Equal(t, uint32(0), a.Val())
 
 	a = a.Sub(1)
 
-	if a.Val() != max {
-		t.Fatalf("Unexpected value: %v (wanted: %v)", a.Val(), max)
-	}
+	require.Equal(t, max, a.Val())
 }

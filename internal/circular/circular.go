@@ -2,26 +2,27 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package circular
-
-// Number represents a "circular number". This is a number that can be
+// Package circular implements "circular numbers". This is a number that can be
 // increased (or decreased) indefinitely while only using up a limited amount of
 // memory. This feature comes with the limitiation in how distant two such
-// number can be. Number numbers have a maximum. The maximum distance is
+// numbers can be. Circular numbers have a maximum. The maximum distance is
 // half the maximum value. If a number that has the maximum value is
 // increased by 1, it becomes 0. If a number that has the value of 0 is
-// decreased by 1, it becomes the maximum value. By comparing two Number
+// decreased by 1, it becomes the maximum value. By comparing two circular
 // numbers it is not possible to tell how often they wrapped. Therefore these
 // two numbers must come from the same domain in order to make sense of the
 // camparison.
+package circular
+
+// Number represents a "circular number". A Number is immutable. All modification
+// to a Number will result in a new instance of a Number.
 type Number struct {
 	max       uint32
 	threshold uint32
 	value     uint32
 }
 
-// New returns a new circular number with the value of x and
-// the maximum of max.
+// New returns a new circular number with the value of x and the maximum of max.
 func New(x, max uint32) Number {
 	c := Number{
 		value:     0,
@@ -38,17 +39,17 @@ func New(x, max uint32) Number {
 	return c
 }
 
-// Val returns the current value of the number
+// Val returns the current value of the number.
 func (a Number) Val() uint32 {
 	return a.value
 }
 
-// Equals returns whether to circular numbers have the same value
+// Equals returns whether two circular numbers have the same value.
 func (a Number) Equals(b Number) bool {
 	return a.value == b.value
 }
 
-// Distance returns the distance of to circular numbers
+// Distance returns the distance of two circular numbers.
 func (a Number) Distance(b Number) uint32 {
 	if a.Equals(b) {
 		return 0
@@ -69,7 +70,7 @@ func (a Number) Distance(b Number) uint32 {
 	return d
 }
 
-// Lt returns whether the circular number is lower than the circular number b
+// Lt returns whether the circular number is lower than the circular number b.
 func (a Number) Lt(b Number) bool {
 	if a.Equals(b) {
 		return false
@@ -92,7 +93,7 @@ func (a Number) Lt(b Number) bool {
 	return !altb
 }
 
-// Lte returns whether the circular number is lower than or equal to the circular number b
+// Lte returns whether the circular number is lower than or equal to the circular number b.
 func (a Number) Lte(b Number) bool {
 	if a.Equals(b) {
 		return true
@@ -101,7 +102,7 @@ func (a Number) Lte(b Number) bool {
 	return a.Lt(b)
 }
 
-// Gt returns whether the circular number is greather than the circular number b
+// Gt returns whether the circular number is greather than the circular number b.
 func (a Number) Gt(b Number) bool {
 	if a.Equals(b) {
 		return false
@@ -124,7 +125,7 @@ func (a Number) Gt(b Number) bool {
 	return !agtb
 }
 
-// Gte returns whether the circular number is greather than or equal to the circular number b
+// Gte returns whether the circular number is greather than or equal to the circular number b.
 func (a Number) Gte(b Number) bool {
 	if a.Equals(b) {
 		return true
@@ -133,7 +134,7 @@ func (a Number) Gte(b Number) bool {
 	return a.Gt(b)
 }
 
-// Inc returns a new circular number with a value that is increased by 1
+// Inc returns a new circular number with a value that is increased by 1.
 func (a Number) Inc() Number {
 	b := a
 
@@ -146,7 +147,7 @@ func (a Number) Inc() Number {
 	return b
 }
 
-// Add returns a new circular number with a value that is increased by b
+// Add returns a new circular number with a value that is increased by b.
 func (a Number) Add(b uint32) Number {
 	c := a
 	x := c.max - c.value
@@ -160,7 +161,7 @@ func (a Number) Add(b uint32) Number {
 	return c
 }
 
-// Dec returns a new circular number with a value that is decreased by 1
+// Dec returns a new circular number with a value that is decreased by 1.
 func (a Number) Dec() Number {
 	b := a
 
@@ -173,7 +174,7 @@ func (a Number) Dec() Number {
 	return b
 }
 
-// Sub returns a new circular number with a value that is decreased by b
+// Sub returns a new circular number with a value that is decreased by b.
 func (a Number) Sub(b uint32) Number {
 	c := a
 

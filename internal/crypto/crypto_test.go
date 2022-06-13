@@ -10,20 +10,18 @@ import (
 	"testing"
 
 	"github.com/datarhei/gosrt/internal/packet"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInvalidKeylength(t *testing.T) {
 	_, err := New(42)
-	if err == nil {
-		t.Fatal("succeeded to create crypto with invalid keylength")
-	}
+	require.Error(t, err, "succeeded to create crypto with invalid keylength")
 }
 
 func TestInvalidKM(t *testing.T) {
 	c, err := New(16)
-	if err != nil {
-		t.Fatal("failed to create crypto context:", err)
-	}
+	require.NoError(t, err)
 
 	km := &packet.CIFKM{}
 
@@ -32,9 +30,7 @@ func TestInvalidKM(t *testing.T) {
 	km.Wrap, _ = hex.DecodeString("699ab4eac6b7c66c3a9fa0d6836326c2b294a10764233356")
 
 	err = c.UnmarshalKM(km, "foobarfoobar")
-	if err != ErrInvalidKey {
-		t.Fatalf("got wrong error returned")
-	}
+	require.ErrorIs(t, err, ErrInvalidKey)
 
 	km = &packet.CIFKM{}
 
@@ -43,9 +39,7 @@ func TestInvalidKM(t *testing.T) {
 	km.Wrap, _ = hex.DecodeString("5b901889bd106609ca8a83264b12ed1bfab3f02812bad65784ac396b1f57eb16c53e1020d3a3250b")
 
 	err = c.UnmarshalKM(km, "foobarfoobar")
-	if err != ErrInvalidWrap {
-		t.Fatalf("got wrong error returned")
-	}
+	require.ErrorIs(t, err, ErrInvalidWrap)
 }
 
 func TestUnmarshal(t *testing.T) {
@@ -85,9 +79,7 @@ func TestUnmarshal(t *testing.T) {
 
 	for _, test := range tests {
 		c, err := New(test.keylength)
-		if err != nil {
-			t.Fatal("failed to create crypto context:", err)
-		}
+		require.NoError(t, err)
 
 		km := &packet.CIFKM{}
 
@@ -95,25 +87,22 @@ func TestUnmarshal(t *testing.T) {
 		km.Salt, _ = hex.DecodeString(test.salt)
 		km.Wrap, _ = hex.DecodeString(test.evenWrap)
 
-		if err := c.UnmarshalKM(km, test.passphrase); err != nil {
-			t.Fatalf("failed to unmarshal: %s", err)
-		}
+		err = c.UnmarshalKM(km, test.passphrase)
+		require.NoError(t, err)
 
 		km.KeyBasedEncryption = packet.OddKeyEncrypted
 		km.Salt, _ = hex.DecodeString(test.salt)
 		km.Wrap, _ = hex.DecodeString(test.oddWrap)
 
-		if err := c.UnmarshalKM(km, test.passphrase); err != nil {
-			t.Fatalf("failed to unmarshal: %s", err)
-		}
+		err = c.UnmarshalKM(km, test.passphrase)
+		require.NoError(t, err)
 
 		km.KeyBasedEncryption = packet.EvenAndOddKey
 		km.Salt, _ = hex.DecodeString(test.salt)
 		km.Wrap, _ = hex.DecodeString(test.evenOddWrap)
 
-		if err := c.UnmarshalKM(km, test.passphrase); err != nil {
-			t.Fatalf("failed to unmarshal: %s", err)
-		}
+		err = c.UnmarshalKM(km, test.passphrase)
+		require.NoError(t, err)
 	}
 }
 
@@ -162,9 +151,7 @@ func TestMarshal(t *testing.T) {
 
 	for _, test := range tests {
 		c, err := New(test.keylength)
-		if err != nil {
-			t.Fatal("failed to create crypto context:", err)
-		}
+		require.NoError(t, err)
 
 		cr := c.(*crypto)
 
@@ -174,39 +161,33 @@ func TestMarshal(t *testing.T) {
 
 		km := &packet.CIFKM{}
 
-		if err := c.MarshalKM(km, test.passphrase, packet.EvenKeyEncrypted); err != nil {
-			t.Fatal("failed to wrap: ", err)
-		}
+		err = c.MarshalKM(km, test.passphrase, packet.EvenKeyEncrypted)
+		require.NoError(t, err, "keylength: %d", test.keylength)
 
 		wrap, _ := hex.DecodeString(test.evenWrap)
 
-		if x := bytes.Compare(km.Wrap, wrap); x != 0 {
-			t.Fatalf("unexpected even wrap (keylength %d)", test.keylength)
-		}
+		x := bytes.Compare(km.Wrap, wrap)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
 		km = &packet.CIFKM{}
 
-		if err := c.MarshalKM(km, test.passphrase, packet.OddKeyEncrypted); err != nil {
-			t.Fatal("failed to wrap: ", err)
-		}
+		err = c.MarshalKM(km, test.passphrase, packet.OddKeyEncrypted)
+		require.NoError(t, err, "keylength: %d", test.keylength)
 
 		wrap, _ = hex.DecodeString(test.oddWrap)
 
-		if x := bytes.Compare(km.Wrap, wrap); x != 0 {
-			t.Fatalf("unexpected odd wrap (keylength %d)", test.keylength)
-		}
+		x = bytes.Compare(km.Wrap, wrap)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
 		km = &packet.CIFKM{}
 
-		if err := c.MarshalKM(km, test.passphrase, packet.EvenAndOddKey); err != nil {
-			t.Fatal("failed to wrap: ", err)
-		}
+		err = c.MarshalKM(km, test.passphrase, packet.EvenAndOddKey)
+		require.NoError(t, err, "keylength: %d", test.keylength)
 
 		wrap, _ = hex.DecodeString(test.evenOddWrap)
 
-		if x := bytes.Compare(km.Wrap, wrap); x != 0 {
-			t.Fatalf("unexpected even and odd wrap (keylength %d)", test.keylength)
-		}
+		x = bytes.Compare(km.Wrap, wrap)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 	}
 }
 
@@ -253,9 +234,7 @@ func TestDecode(t *testing.T) {
 
 	for _, test := range tests {
 		c, err := New(test.keylength)
-		if err != nil {
-			t.Fatal("failed to create crypto context:", err)
-		}
+		require.NoError(t, err)
 
 		cr := c.(*crypto)
 
@@ -265,23 +244,19 @@ func TestDecode(t *testing.T) {
 
 		encrypted, _ := hex.DecodeString(test.evenEncrypted)
 
-		if err = c.EncryptOrDecryptPayload(encrypted, packet.EvenKeyEncrypted, packetSequenceNumber); err != nil {
-			t.Fatal("failed to decrypt:", err)
-		}
+		err = c.EncryptOrDecryptPayload(encrypted, packet.EvenKeyEncrypted, packetSequenceNumber)
+		require.NoError(t, err, "keylength: %d", test.keylength)
 
-		if x := bytes.Compare(data, encrypted); x != 0 {
-			t.Fatalf("unexpected decrypted data (even, keylength: %d)", test.keylength)
-		}
+		x := bytes.Compare(data, encrypted)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
 		encrypted, _ = hex.DecodeString(test.oddEncrypted)
 
-		if err = c.EncryptOrDecryptPayload(encrypted, packet.OddKeyEncrypted, packetSequenceNumber); err != nil {
-			t.Fatal("failed to decrypt:", err)
-		}
+		err = c.EncryptOrDecryptPayload(encrypted, packet.OddKeyEncrypted, packetSequenceNumber)
+		require.NoError(t, err, "keylength: %d", test.keylength)
 
-		if x := bytes.Compare(data, encrypted); x != 0 {
-			t.Fatalf("unexpected decrypted data (odd, keylength: %d", test.keylength)
-		}
+		x = bytes.Compare(data, encrypted)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 	}
 }
 
@@ -328,9 +303,7 @@ func TestEncode(t *testing.T) {
 
 	for _, test := range tests {
 		c, err := New(test.keylength)
-		if err != nil {
-			t.Fatal("failed to create crypto context:", err)
-		}
+		require.NoError(t, err)
 
 		cr := c.(*crypto)
 
@@ -344,9 +317,8 @@ func TestEncode(t *testing.T) {
 
 		encrypted, _ := hex.DecodeString(test.evenEncrypted)
 
-		if x := bytes.Compare(data, encrypted); x != 0 {
-			t.Fatalf("unexpected even encrypted data (keylength %d)", test.keylength)
-		}
+		x := bytes.Compare(data, encrypted)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
 		data, _ = hex.DecodeString(originalData)
 
@@ -354,8 +326,7 @@ func TestEncode(t *testing.T) {
 
 		encrypted, _ = hex.DecodeString(test.oddEncrypted)
 
-		if x := bytes.Compare(data, encrypted); x != 0 {
-			t.Fatalf("unexpected odd encrypted data (keylength %d)", test.keylength)
-		}
+		x = bytes.Compare(data, encrypted)
+		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/datarhei/gosrt/internal/circular"
 	srtnet "github.com/datarhei/gosrt/internal/net"
+
 	"github.com/stretchr/testify/require"
 )
 

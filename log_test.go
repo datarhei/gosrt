@@ -2,6 +2,8 @@ package srt
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestHasTopic(t *testing.T) {
@@ -9,21 +11,17 @@ func TestHasTopic(t *testing.T) {
 		"packet:recv:dump",
 	})
 
-	if ok := l.HasTopic("foobar"); ok {
-		t.Fatalf("expecting: false")
-	}
+	ok := l.HasTopic("foobar")
+	require.False(t, ok)
 
-	if ok := l.HasTopic("packet:recv:dump"); !ok {
-		t.Fatalf("expecting: true")
-	}
+	ok = l.HasTopic("packet:recv:dump")
+	require.True(t, ok)
 
-	if ok := l.HasTopic("packet:recv"); ok {
-		t.Fatalf("expecting: false")
-	}
+	ok = l.HasTopic("packet:recv")
+	require.False(t, ok)
 
-	if ok := l.HasTopic("packet"); ok {
-		t.Fatalf("expecting: false")
-	}
+	ok = l.HasTopic("packet")
+	require.False(t, ok)
 }
 
 var result bool
