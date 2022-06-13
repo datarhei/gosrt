@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/datarhei/gosrt/internal/packet"
@@ -18,13 +19,24 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
+// Crypto implements the SRT data encryption and decryption.
 type Crypto interface {
+	// Generate generates an even or odd SEK.
 	GenerateSEK(key packet.PacketEncryption) error
+
+	// UnmarshalMK unwraps the key with the passphrase in a Key Material Extension Message. If the passphrase
+	// is wrong an error is returned.
 	UnmarshalKM(km *packet.CIFKM, passphrase string) error
+
+	// MarshalKM wraps the key with the passphrase and the odd/even SEK for a Key Material Extension Message.
 	MarshalKM(km *packet.CIFKM, passphrase string, key packet.PacketEncryption) error
+
+	// EncryptOrDecryptPayload encrypts or decrypts the data of a packet with an even or odd SEK and
+	// the sequence number.
 	EncryptOrDecryptPayload(data []byte, key packet.PacketEncryption, packetSequenceNumber uint32) error
 }
 
+// crypto implements the Crypto interface
 type crypto struct {
 	salt      []byte
 	keyLength int
@@ -33,6 +45,8 @@ type crypto struct {
 	oddSEK  []byte
 }
 
+// New returns a new SRT data encryption and decryption for the keyLength. On failure
+// error is non-nil.
 func New(keyLength int) (Crypto, error) {
 	// 3.2.2.  Key Material
 	switch keyLength {
@@ -84,7 +98,17 @@ func (c *crypto) GenerateSEK(key packet.PacketEncryption) error {
 	return nil
 }
 
+// ErrInvalidKey is returned when the packet encryption is invalid
+var ErrInvalidKey = errors.New("crypto: invalid key for encryption. Must be even, odd, or both")
+
+// ErrInvalidWrap is returned when the packet encryption indicates a different length of the wrapped key
+var ErrInvalidWrap = errors.New("crypto: the unwrapped key has the wrong length")
+
 func (c *crypto) UnmarshalKM(km *packet.CIFKM, passphrase string) error {
+	if km.KeyBasedEncryption == packet.UnencryptedPacket || !km.KeyBasedEncryption.IsValid() {
+		return ErrInvalidKey
+	}
+
 	if len(km.Salt) != 0 {
 		copy(c.salt, km.Salt)
 	}
@@ -102,7 +126,7 @@ func (c *crypto) UnmarshalKM(km *packet.CIFKM, passphrase string) error {
 	}
 
 	if len(unwrap) != n*c.keyLength {
-		return fmt.Errorf("crypto: the unwrapped key has the wrong length")
+		return ErrInvalidWrap
 	}
 
 	if km.KeyBasedEncryption == packet.EvenKeyEncrypted {
@@ -119,7 +143,7 @@ func (c *crypto) UnmarshalKM(km *packet.CIFKM, passphrase string) error {
 
 func (c *crypto) MarshalKM(km *packet.CIFKM, passphrase string, key packet.PacketEncryption) error {
 	if key == packet.UnencryptedPacket || !key.IsValid() {
-		return fmt.Errorf("crypto: invalid key for encryption. Must be even or odd or both")
+		return ErrInvalidKey
 	}
 
 	km.S = 0
@@ -218,11 +242,13 @@ func (c *crypto) EncryptOrDecryptPayload(data []byte, key packet.PacketEncryptio
 	return nil
 }
 
+// calculateKEK calculates a KEK based on the passphrase.
 func (c *crypto) calculateKEK(passphrase string) []byte {
 	// 6.1.4.  Key Encrypting Key (KEK)
 	return pbkdf2.Key([]byte(passphrase), c.salt[8:], 2048, c.keyLength, sha1.New)
 }
 
+// prng generates a random sequence of byte into the given slice p.
 func (c *crypto) prng(p []byte) error {
 	n, err := rand.Read(p)
 	if err != nil {
