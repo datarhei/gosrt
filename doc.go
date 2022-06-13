@@ -1,7 +1,3 @@
-// Copyright 2020 FOSS GmbH. All rights reserved.
-// Use of this source code is governed by a MIT
-// license that can be found in the LICENSE file.
-
 /*
 Package srt provides an interface for network I/O using the SRT protocol (https://github.com/Haivision/srt).
 

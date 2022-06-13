@@ -1,7 +1,3 @@
-// Copyright 2020 FOSS GmbH. All rights reserved.
-// Use of this source code is governed by a MIT
-// license that can be found in the LICENSE file.
-
 package srt
 
 import (
@@ -143,8 +139,8 @@ type srtConn struct {
 	tick time.Duration
 
 	// Congestion control
-	recv congestion.Receive
-	snd  congestion.Send
+	recv congestion.Receiver
+	snd  congestion.Sender
 
 	statistics connStats
 

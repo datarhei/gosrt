@@ -1,7 +1,3 @@
-// Copyright 2020 FOSS GmbH. All rights reserved.
-// Use of this source code is governed by a MIT
-// license that can be found in the LICENSE file.
-
 // Package circular implements "circular numbers". This is a number that can be
 // increased (or decreased) indefinitely while only using up a limited amount of
 // memory. This feature comes with the limitiation in how distant two such

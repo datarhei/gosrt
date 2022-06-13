@@ -1,7 +1,4 @@
-// Copyright 2020 FOSS GmbH. All rights reserved.
-// Use of this source code is governed by a MIT
-// license that can be found in the LICENSE file.
-
+// Package packet provides types and implementations for the different SRT packet types
 package packet
 
 import (

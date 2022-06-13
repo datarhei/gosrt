@@ -1,3 +1,4 @@
+// Package congestions provides congestion control implementations for SRT
 package congestion
 
 import (
@@ -5,6 +6,7 @@ import (
 	"github.com/datarhei/gosrt/internal/packet"
 )
 
+// SendConfig is the configuration for the liveSend congestion control
 type SendConfig struct {
 	InitialSequenceNumber circular.Number
 	DropInterval          uint64
@@ -15,7 +17,8 @@ type SendConfig struct {
 	OnDeliver             func(p packet.Packet)
 }
 
-type Send interface {
+// Sender is the sending part of the congestion control
+type Sender interface {
 	Stats() SendStats
 	Flush()
 	Push(p packet.Packet)
@@ -24,6 +27,7 @@ type Send interface {
 	NAK(sequenceNumbers []circular.Number)
 }
 
+// ReceiveConfig is the configuration for the liveResv congestion control
 type ReceiveConfig struct {
 	InitialSequenceNumber circular.Number
 	PeriodicACKInterval   uint64 // microseconds
@@ -33,7 +37,8 @@ type ReceiveConfig struct {
 	OnDeliver             func(p packet.Packet)
 }
 
-type Receive interface {
+// Receiver is the receiving part of the congestion control
+type Receiver interface {
 	Stats() ReceiveStats
 	PacketRate() (pps, bps uint32)
 	Flush()
@@ -42,6 +47,7 @@ type Receive interface {
 	SetNAKInterval(nakInterval uint64)
 }
 
+// SendStats are collected statistics from liveSend
 type SendStats struct {
 	PktSent  uint64
 	ByteSent uint64
@@ -71,6 +77,7 @@ type SendStats struct {
 	BytePayload    uint64
 }
 
+// ReceiveStats are collected statistics from liveRecv
 type ReceiveStats struct {
 	PktRecv  uint64
 	ByteRecv uint64

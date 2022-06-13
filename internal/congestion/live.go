@@ -1,7 +1,3 @@
-// Copyright 2020 FOSS GmbH. All rights reserved.
-// Use of this source code is governed by a MIT
-// license that can be found in the LICENSE file.
-
 package congestion
 
 import (
@@ -15,6 +11,7 @@ import (
 	"github.com/datarhei/gosrt/internal/packet"
 )
 
+// liveSend implements the Sender interface
 type liveSend struct {
 	nextSequenceNumber circular.Number
 
@@ -45,7 +42,8 @@ type liveSend struct {
 	deliver func(p packet.Packet)
 }
 
-func NewLiveSend(config SendConfig) Send {
+// NewLiveSend takes a SendConfig and returns a new Sender
+func NewLiveSend(config SendConfig) Sender {
 	s := &liveSend{
 		nextSequenceNumber: config.InitialSequenceNumber,
 		packetList:         list.New(),
@@ -257,6 +255,7 @@ func (s *liveSend) NAK(sequenceNumbers []circular.Number) {
 	}
 }
 
+// liveReceive implements the Receiver interface
 type liveReceive struct {
 	maxSeenSequenceNumber       circular.Number
 	lastACKSequenceNumber       circular.Number
@@ -294,7 +293,8 @@ type liveReceive struct {
 	deliver func(p packet.Packet)
 }
 
-func NewLiveReceive(config ReceiveConfig) Receive {
+// NewLiveReceive takes a ReceiveConfig and returns a new Receiver
+func NewLiveReceive(config ReceiveConfig) Receiver {
 	r := &liveReceive{
 		maxSeenSequenceNumber:       config.InitialSequenceNumber.Dec(),
 		lastACKSequenceNumber:       config.InitialSequenceNumber.Dec(),
