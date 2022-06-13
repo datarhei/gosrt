@@ -19,6 +19,7 @@ Congestion Control (FileCC) are not implemented.
 | ❌  | Buffer mode                               |
 | ❌  | Rendezvous Handshake                      |
 | ❌  | File Transfer Congestion Control (FileCC) |
+| ❌  | Connection Bonding                        |
 
 The parts that are implemented are based on what has been published in the SRT RFC.
 
