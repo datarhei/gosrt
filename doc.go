@@ -30,8 +30,6 @@ The Dial function connects to a server:
 
 	conn.Close()
 
-	// ...
-
 The Listen function creates servers:
 
 	ln, err := srt.Listen("udp", ":6000", srt.Config{...})

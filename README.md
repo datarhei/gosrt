@@ -125,7 +125,7 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `mode`               | `listener` or `caller` | Enforce listener or caller mode.                                        |
 | `congestion`         | `live`                 | Congestion control. Currently on `live` is supported.                   |
 | `conntimeo`          | `ms`                   | Connection timeout.                                                     |
-| `drifttracer`        | `bool`                 | Enable drift tracer.                                                    |
+| `drifttracer`        | `bool`                 | Enable drift tracer. Not implemented.                                   |
 | `enforcedencryption` | `bool`                 | Accept connection only if both parties have encryption enabled.         |
 | `fc`                 | `bytes`                | Flow control window size.                                               |
 | `inputbw`            | `bytes`                | Input bandwidth.                                                        |
@@ -135,10 +135,10 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `kmpreannounce`      | `packets`              | Duration of Stream Encryption key switchover.                           |
 | `kmrefreshrate`      | `packets`              | Stream encryption key refresh rate.                                     |
 | `latency`            | `ms`                   | Maximum accepted transmission latency.                                  |
-| `lossmaxttl`         | `ms`                   | Packet reorder tolerance.                                               |
+| `lossmaxttl`         | `ms`                   | Packet reorder tolerance. Not implemented.                              |
 | `maxbw`              | `bytes`                | Bandwidth limit.                                                        |
 | `mininputbw`         | `bytes`                | Minimum allowed estimate of `inputbw`.                                  |
-| `messageapi`         | `bool`                 | Enable SRT message mode.                                                |
+| `messageapi`         | `bool`                 | Enable SRT message mode. Must be `false`.                               |
 | `mss`                | 76...                  | MTU size.                                                               |
 | `nakreport`          | `bool`                 | Enable periodic NAK reports.                                            |
 | `oheadbw`            | 10...100               | Limits bandwidth overhead. Percents.                                    |
@@ -154,7 +154,7 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `snddropdelay`       | `ms`                   | Sender's delay before dropping packets.                                 |
 | `streamid`           | `string`               | Stream ID (settable in caller mode only, visible on the listener peer). |
 | `tlpktdrop`          | `bool`                 | Drop too late packets.                                                  |
-| `transtype`          | `live`                 | Transmission type.                                                      |
+| `transtype`          | `live`                 | Transmission type. Must be `live`.                                      |
 | `tsbpdmode`          | `bool`                 | Enable timestamp-based packet delivery mode.                            |
 
 ## Usage

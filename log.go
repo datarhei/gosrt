@@ -20,7 +20,7 @@ type Logger interface {
 	// executed if HasTopic returns true on the given topic.
 	Print(topic string, socketId uint32, skip int, message func() string)
 
-	// Listen returns a read channel of Log messages.
+	// Listen returns a read channel for Log messages.
 	Listen() <-chan Log
 
 	// Close closes the logger. No more messages will be logged.
