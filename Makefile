@@ -43,6 +43,7 @@ server:
 
 ## coverage: Generate code coverage analysis
 coverage:
+	mkdir -p test
 	go test -coverprofile test/cover.out ./...
 	go tool cover -html=test/cover.out -o test/cover.html
 

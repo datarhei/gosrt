@@ -2,5 +2,6 @@
 /contrib/client/client*
 *.prof
 *.out
+*.html
 *.ts
 *.mp4
