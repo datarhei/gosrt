@@ -570,7 +570,7 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 			}
 		}
 	} else {
-		if header.PacketSequenceNumber.Gt(c.debug.expectedRcvPacketSequenceNumber) == true {
+		if header.PacketSequenceNumber.Gt(c.debug.expectedRcvPacketSequenceNumber) {
 			c.log("connection:error", func() string {
 				return fmt.Sprintf("recv lost packets. got: %d, expected: %d (%d)\n", header.PacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Distance(header.PacketSequenceNumber))
 			})
