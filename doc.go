@@ -6,7 +6,7 @@ Conn and Listener interfaces.
 
 The Dial function connects to a server:
 
-	conn, err := srt.Dial("udp", "golang.org:6000", srt.Config{
+	conn, err := srt.Dial("srt", "golang.org:6000", srt.Config{
 		StreamId: "...",
 	})
 	if err != nil {
@@ -28,7 +28,7 @@ The Dial function connects to a server:
 
 The Listen function creates servers:
 
-	ln, err := srt.Listen("udp", ":6000", srt.Config{...})
+	ln, err := srt.Listen("srt", ":6000", srt.Config{...})
 	if err != nil {
 		// handle error
 	}
