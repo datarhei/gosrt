@@ -38,7 +38,13 @@ func TestStopper(t *testing.T) {
 
 	require.Equal(t, 0, result)
 
+	start := time.Now()
+
 	s.Stop()
+
+	d := time.Since(start)
+
+	require.GreaterOrEqual(t, d.Seconds(), float64(3))
 
 	require.Equal(t, 42, result)
 }
