@@ -67,7 +67,7 @@ func main() {
 		defer profile.Start(profile.NoShutdownHook).Stop()
 	}
 
-	config := srt.DefaultConfig
+	config := srt.DefaultConfig()
 
 	if len(s.logtopics) != 0 {
 		config.Logger = srt.NewLogger(strings.Split(s.logtopics, ","))

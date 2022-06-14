@@ -41,7 +41,8 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	if s.Config == nil {
-		s.Config = &DefaultConfig
+		config := DefaultConfig()
+		s.Config = &config
 	}
 
 	// Start listening for incoming connections.

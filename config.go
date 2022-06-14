@@ -20,6 +20,7 @@ const (
 	SRT_VERSION         = 0x010402
 )
 
+// Config is the configuration for a SRT connection
 type Config struct {
 	// Type of congestion control. 'live' or 'file'
 	// SRTO_CONGESTION
@@ -170,7 +171,9 @@ type Config struct {
 	Logger Logger
 }
 
-var DefaultConfig Config = Config{
+// DefaultConfig is the default configuration for a SRT connection
+// if no individual configuration has been provided.
+var defaultConfig Config = Config{
 	Congestion:            "live",
 	ConnectionTimeout:     3 * time.Second,
 	DriftTracer:           true,
@@ -181,7 +184,7 @@ var DefaultConfig Config = Config{
 	InputBW:               0,
 	IPTOS:                 0,
 	IPTTL:                 0,
-	IPv6Only:              0,
+	IPv6Only:              -1,
 	KMPreAnnounce:         1 << 12,
 	KMRefreshRate:         1 << 24,
 	Latency:               -1,
@@ -208,6 +211,12 @@ var DefaultConfig Config = Config{
 	TSBPDMode:             true,
 }
 
+func DefaultConfig() Config {
+	return defaultConfig
+}
+
+// UnmarshalURL takes a SRT URL and parses out the configuration. A SRT URL is
+// srt://[host]:[port]?[key1]=[value1]&[key2]=[value2]...
 func (c *Config) UnmarshalURL(addr string) error {
 	u, err := url.Parse(addr)
 	if err != nil {
@@ -221,6 +230,10 @@ func (c *Config) UnmarshalURL(addr string) error {
 	return c.UnmarshalQuery(u.RawQuery)
 }
 
+// UnmarshalQuery parses a query string and interprets it as a configuration
+// for a SRT connection. The key in each key/value pair corresponds to the
+// respective field in the Config type, but with only lower case letters. Bool
+// values can be represented as "true"/"false", "on"/"off", "yes"/"no", or "0"/"1".
 func (c *Config) UnmarshalQuery(query string) error {
 	v, err := url.ParseQuery(query)
 	if err != nil {
@@ -253,7 +266,7 @@ func (c *Config) UnmarshalQuery(query string) error {
 		case "yes", "on", "true", "1":
 			c.EnforcedEncryption = true
 		case "no", "off", "false", "0":
-			c.EnforcedEncryption = true
+			c.EnforcedEncryption = false
 		}
 	}
 
@@ -457,6 +470,162 @@ func (c *Config) UnmarshalQuery(query string) error {
 	return nil
 }
 
+// MarshalURL returns the SRT URL for this config and the given host and port.
+func (c *Config) MarshalURL(host string, port uint) string {
+	return "srt://" + host + ":" + strconv.FormatUint(uint64(port), 10) + "?" + c.MarshalQuery()
+}
+
+// MarshalQuery returns the corresponding query string for a configuration.
+func (c *Config) MarshalQuery() string {
+	q := url.Values{}
+
+	if c.Congestion != defaultConfig.Congestion {
+		q.Set("congestion", c.Congestion)
+	}
+
+	if c.ConnectionTimeout != defaultConfig.ConnectionTimeout {
+		q.Set("conntimeo", strconv.FormatInt(c.ConnectionTimeout.Milliseconds(), 10))
+	}
+
+	if c.DriftTracer != defaultConfig.DriftTracer {
+		q.Set("drifttracer", strconv.FormatBool(c.DriftTracer))
+	}
+
+	if c.EnforcedEncryption != defaultConfig.EnforcedEncryption {
+		q.Set("enforcedencryption", strconv.FormatBool(c.EnforcedEncryption))
+	}
+
+	if c.FC != defaultConfig.FC {
+		q.Set("fc", strconv.FormatUint(uint64(c.FC), 10))
+	}
+
+	if c.GroupConnect != defaultConfig.GroupConnect {
+		q.Set("groupconnect", strconv.FormatBool(c.GroupConnect))
+	}
+
+	if c.GroupStabilityTimeout != defaultConfig.GroupStabilityTimeout {
+		q.Set("groupstabtimeo", strconv.FormatInt(c.GroupStabilityTimeout.Milliseconds(), 10))
+	}
+
+	if c.InputBW != defaultConfig.InputBW {
+		q.Set("inputbw", strconv.FormatInt(c.InputBW, 10))
+	}
+
+	if c.IPTOS != defaultConfig.IPTOS {
+		q.Set("iptos", strconv.FormatInt(int64(c.IPTOS), 10))
+	}
+
+	if c.IPTTL != defaultConfig.IPTTL {
+		q.Set("ipttl", strconv.FormatInt(int64(c.IPTTL), 10))
+	}
+
+	if c.IPv6Only != defaultConfig.IPv6Only {
+		q.Set("ipv6only", strconv.FormatInt(int64(c.IPv6Only), 10))
+	}
+
+	if len(c.Passphrase) != 0 {
+		if c.KMPreAnnounce != defaultConfig.KMPreAnnounce {
+			q.Set("kmpreannounce", strconv.FormatUint(c.KMPreAnnounce, 10))
+		}
+
+		if c.KMRefreshRate != defaultConfig.KMRefreshRate {
+			q.Set("kmrefreshrate", strconv.FormatUint(c.KMRefreshRate, 10))
+		}
+	}
+
+	if c.Latency != defaultConfig.Latency {
+		q.Set("latency", strconv.FormatInt(c.Latency.Milliseconds(), 10))
+	}
+
+	if c.LossMaxTTL != defaultConfig.LossMaxTTL {
+		q.Set("lossmaxttl", strconv.FormatInt(int64(c.LossMaxTTL), 10))
+	}
+
+	if c.MaxBW != defaultConfig.MaxBW {
+		q.Set("maxbw", strconv.FormatInt(c.MaxBW, 10))
+	}
+
+	if c.MinInputBW != defaultConfig.InputBW {
+		q.Set("mininputbw", strconv.FormatInt(c.MinInputBW, 10))
+	}
+
+	if c.MessageAPI != defaultConfig.MessageAPI {
+		q.Set("messageapi", strconv.FormatBool(c.MessageAPI))
+	}
+
+	if c.MSS != defaultConfig.MSS {
+		q.Set("mss", strconv.FormatUint(uint64(c.MSS), 10))
+	}
+
+	if c.NAKReport != defaultConfig.NAKReport {
+		q.Set("nakreport", strconv.FormatBool(c.NAKReport))
+	}
+
+	if c.OverheadBW != defaultConfig.OverheadBW {
+		q.Set("oheadbw", strconv.FormatInt(c.OverheadBW, 10))
+	}
+
+	if c.PacketFilter != defaultConfig.PacketFilter {
+		q.Set("packetfilter", c.PacketFilter)
+	}
+
+	if len(c.Passphrase) != 0 {
+		q.Set("passphrase", c.Passphrase)
+	}
+
+	if c.PayloadSize != defaultConfig.PayloadSize {
+		q.Set("payloadsize", strconv.FormatUint(uint64(c.PayloadSize), 10))
+	}
+
+	if c.PBKeylen != defaultConfig.PBKeylen {
+		q.Set("pbkeylen", strconv.FormatInt(int64(c.PBKeylen), 10))
+	}
+
+	if c.PeerIdleTimeout != defaultConfig.PeerIdleTimeout {
+		q.Set("peeridletimeo", strconv.FormatInt(c.PeerIdleTimeout.Milliseconds(), 10))
+	}
+
+	if c.PeerLatency != defaultConfig.PeerLatency {
+		q.Set("peerlatency", strconv.FormatInt(c.PeerLatency.Milliseconds(), 10))
+	}
+
+	if c.ReceiverBufferSize != defaultConfig.ReceiverBufferSize {
+		q.Set("rcvbuf", strconv.FormatInt(int64(c.ReceiverBufferSize), 10))
+	}
+
+	if c.ReceiverLatency != defaultConfig.ReceiverLatency {
+		q.Set("rcvlatency", strconv.FormatInt(c.ReceiverLatency.Milliseconds(), 10))
+	}
+
+	if c.SendBufferSize != defaultConfig.SendBufferSize {
+		q.Set("sndbuf", strconv.FormatInt(int64(c.SendBufferSize), 10))
+	}
+
+	if c.SendDropDelay != defaultConfig.SendDropDelay {
+		q.Set("snddropdelay", strconv.FormatInt(c.SendDropDelay.Milliseconds(), 10))
+	}
+
+	if len(c.StreamId) != 0 {
+		q.Set("streamid", c.StreamId)
+	}
+
+	if c.TooLatePacketDrop != defaultConfig.TooLatePacketDrop {
+		q.Set("tlpktdrop", strconv.FormatBool(c.TooLatePacketDrop))
+	}
+
+	if c.TransmissionType != defaultConfig.TransmissionType {
+		q.Set("transtype", c.TransmissionType)
+	}
+
+	if c.TSBPDMode != defaultConfig.TSBPDMode {
+		q.Set("tsbpdmode", strconv.FormatBool(c.TSBPDMode))
+	}
+
+	return q.Encode()
+}
+
+// Validate validates a configuration or returns an error if a field
+// has an invalid value.
 func (c Config) Validate() error {
 	if c.TransmissionType != "live" {
 		return fmt.Errorf("config: TransmissionType must be 'live'")

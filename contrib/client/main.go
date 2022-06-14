@@ -155,7 +155,7 @@ func openReader(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
-		config := srt.DefaultConfig
+		config := srt.DefaultConfig()
 		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
 			return nil, err
 		}
@@ -230,7 +230,7 @@ func openWriter(addr string) (io.ReadWriteCloser, error) {
 	}
 
 	if u.Scheme == "srt" {
-		config := srt.DefaultConfig
+		config := srt.DefaultConfig()
 		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
 			return nil, err
 		}
