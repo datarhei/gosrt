@@ -15,6 +15,7 @@ type Stopper interface {
 	Done()
 }
 
+// stopper implements the Stopper interface
 type stopper struct {
 	channel chan struct{}
 	wait    sync.WaitGroup
@@ -22,8 +23,7 @@ type stopper struct {
 	done    sync.Once
 }
 
-// NewStopper returns a new Stopper. A Stopper can't be reused after
-// Stop() has been called.
+// NewStopper returns a new Stopper. A Stopper can't be reused after Stop() has been called.
 func NewStopper() Stopper {
 	s := &stopper{
 		channel: make(chan struct{}),
