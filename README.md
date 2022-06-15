@@ -124,12 +124,12 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | Option               | Values                 | Description                                                             |
 | -------------------- | ---------------------- | ----------------------------------------------------------------------- |
 | `mode`               | `listener` or `caller` | Enforce listener or caller mode.                                        |
-| `congestion`         | `live`                 | Congestion control. Currently on `live` is supported.                   |
+| `congestion`         | `live`                 | Congestion control. Currently only `live` is supported.                 |
 | `conntimeo`          | `ms`                   | Connection timeout.                                                     |
 | `drifttracer`        | `bool`                 | Enable drift tracer. Not implemented.                                   |
 | `enforcedencryption` | `bool`                 | Accept connection only if both parties have encryption enabled.         |
 | `fc`                 | `bytes`                | Flow control window size.                                               |
-| `inputbw`            | `bytes`                | Input bandwidth.                                                        |
+| `inputbw`            | `bytes`                | Input bandwidth. Ignored.                                               |
 | `iptos`              | 0...255                | IP socket type of service. Broken.                                      |
 | `ipttl`              | 1...255                | Defines IP socket "time to live" option. Broken.                        |
 | `ipv6only`           | `bool`                 | Use IPv6 only. Not implemented.                                         |
@@ -137,12 +137,12 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `kmrefreshrate`      | `packets`              | Stream encryption key refresh rate.                                     |
 | `latency`            | `ms`                   | Maximum accepted transmission latency.                                  |
 | `lossmaxttl`         | `ms`                   | Packet reorder tolerance. Not implemented.                              |
-| `maxbw`              | `bytes`                | Bandwidth limit.                                                        |
+| `maxbw`              | `bytes`                | Bandwidth limit. Ignored.                                               |
 | `mininputbw`         | `bytes`                | Minimum allowed estimate of `inputbw`.                                  |
 | `messageapi`         | `bool`                 | Enable SRT message mode. Must be `false`.                               |
 | `mss`                | 76...                  | MTU size.                                                               |
 | `nakreport`          | `bool`                 | Enable periodic NAK reports.                                            |
-| `oheadbw`            | 10...100               | Limits bandwidth overhead. Percents.                                    |
+| `oheadbw`            | 10...100               | Limits bandwidth overhead. Percents. Ignored.                           |
 | `packetfilter`       | `string`               | Set up the packet filter. Not implemented.                              |
 | `passphrase`         | `string`               | Password for the encrypted transmission.                                |
 | `payloadsize`        | `bytes`                | Maximum payload size.                                                   |
