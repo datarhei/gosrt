@@ -102,6 +102,10 @@ func (s *liveSend) Push(p packet.Packet) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	if p == nil {
+		return
+	}
+
 	// give to the packet a sequence number
 	p.Header().PacketSequenceNumber = s.nextSequenceNumber
 	s.nextSequenceNumber = s.nextSequenceNumber.Inc()
@@ -376,6 +380,10 @@ func (r *liveReceive) Flush() {
 func (r *liveReceive) Push(pkt packet.Packet) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
+
+	if pkt == nil {
+		return
+	}
 
 	r.nPackets++
 

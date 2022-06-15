@@ -142,7 +142,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 		return err
 	}
 
-	pb.logger.Print("pubsub:subscribe", conn.SocketId(), 1, func() string { return "new subscriber" })
+	pb.logger.Print("pubsub:subscribe", socketId, 1, func() string { return "new subscriber" })
 
 	pb.listenersLock.Lock()
 	pb.listeners[socketId] = l
@@ -162,7 +162,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 			err := conn.writePacket(p)
 			p.Decommission()
 			if err != nil {
-				pb.logger.Print("pubsub:error", conn.SocketId(), 1, func() string { return err.Error() })
+				pb.logger.Print("pubsub:error", socketId, 1, func() string { return err.Error() })
 				return err
 			}
 		}

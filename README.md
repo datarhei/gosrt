@@ -308,8 +308,8 @@ if err != nil {
 
 go func() {
     for m := range logger.Listen() {
-		fmt.Fprintf(os.Stderr, "%#08x %s (in %s:%d)\n%s \n", m.SocketId, m.Topic, m.File, m.Line, m.Message)
-	}
+        fmt.Fprintf(os.Stderr, "%#08x %s (in %s:%d)\n%s \n", m.SocketId, m.Topic, m.File, m.Line, m.Message)
+    }
 }()
 
 for {

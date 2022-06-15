@@ -1,7 +1,6 @@
 package srt
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -57,8 +56,6 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	url := wantConfig.MarshalURL("localhost", 6000)
-
-	fmt.Printf("%s\n", url)
 
 	config := Config{}
 	config.UnmarshalURL(url)

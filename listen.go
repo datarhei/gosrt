@@ -2,6 +2,7 @@ package srt
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -13,7 +14,6 @@ import (
 	"github.com/datarhei/gosrt/internal/crypto"
 	srtnet "github.com/datarhei/gosrt/internal/net"
 	"github.com/datarhei/gosrt/internal/packet"
-	srtsync "github.com/datarhei/gosrt/internal/sync"
 )
 
 // ConnType represents the kind of connection as returned
@@ -142,9 +142,10 @@ type listener struct {
 	syncookie srtnet.SYNCookie
 
 	isShutdown bool
+	shutdown   sync.Once
 
-	stopReader srtsync.Stopper
-	stopWriter srtsync.Stopper
+	stopReader context.CancelFunc
+	stopWriter context.CancelFunc
 
 	doneChan chan error
 }
@@ -155,7 +156,7 @@ type listener struct {
 // The address has the form "host:port".
 //
 // Examples:
-//  Listen("srt", "127.0.0.1:3000", DefaultConfig)
+//  Listen("srt", "127.0.0.1:3000", DefaultConfig())
 //
 // In case of an error, the returned Listener is nil and the error is non-nil.
 func Listen(network, address string, config Config) (Listener, error) {
@@ -218,15 +219,17 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 	ln.syncookie = srtnet.NewSYNCookie(ln.addr.String(), time.Now().UnixNano(), nil)
 
-	ln.stopReader = srtsync.NewStopper()
-	ln.stopWriter = srtsync.NewStopper()
-
 	ln.doneChan = make(chan error)
 
 	ln.start = time.Now()
 
-	go ln.reader()
-	go ln.writer()
+	var readerCtx context.Context
+	readerCtx, ln.stopReader = context.WithCancel(context.Background())
+	go ln.reader(readerCtx)
+
+	var writerCtx context.Context
+	writerCtx, ln.stopWriter = context.WithCancel(context.Background())
+	go ln.writer(writerCtx)
 
 	go func() {
 		buffer := make([]byte, config.MSS) // MTU size
@@ -402,24 +405,22 @@ func (ln *listener) accept(request connRequest) {
 }
 
 func (ln *listener) Close() {
-	if ln.isShutdown {
-		return
-	}
+	ln.shutdown.Do(func() {
+		ln.isShutdown = true
 
-	ln.isShutdown = true
+		ln.lock.RLock()
+		for _, conn := range ln.conns {
+			conn.close()
+		}
+		ln.lock.RUnlock()
 
-	ln.lock.RLock()
-	for _, conn := range ln.conns {
-		conn.close()
-	}
-	ln.lock.RUnlock()
+		ln.stopReader()
+		ln.stopWriter()
 
-	ln.stopReader.Stop()
-	ln.stopWriter.Stop()
+		ln.log("listen", func() string { return "closing socket" })
 
-	ln.log("listen", func() string { return "closing socket" })
-
-	ln.pc.Close()
+		ln.pc.Close()
+	})
 }
 
 func (ln *listener) Addr() net.Addr {
@@ -427,15 +428,16 @@ func (ln *listener) Addr() net.Addr {
 	return addr
 }
 
-func (ln *listener) reader() {
+func (ln *listener) reader(ctx context.Context) {
 	defer func() {
 		ln.log("listen", func() string { return "left reader loop" })
-		ln.stopReader.Done()
 	}()
+
+	ln.log("listen", func() string { return "reader loop started" })
 
 	for {
 		select {
-		case <-ln.stopReader.Check():
+		case <-ctx.Done():
 			return
 		case p := <-ln.rcvQueue:
 			if ln.isShutdown {
@@ -475,17 +477,18 @@ func (ln *listener) send(p packet.Packet) {
 	}
 }
 
-func (ln *listener) writer() {
+func (ln *listener) writer(ctx context.Context) {
 	defer func() {
 		ln.log("listen", func() string { return "left writer loop" })
-		ln.stopWriter.Done()
 	}()
+
+	ln.log("listen", func() string { return "writer loop started" })
 
 	var data bytes.Buffer
 
 	for {
 		select {
-		case <-ln.stopWriter.Check():
+		case <-ctx.Done():
 			return
 		case p := <-ln.sndQueue:
 			data.Reset()

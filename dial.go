@@ -2,26 +2,28 @@ package srt
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/datarhei/gosrt/internal/circular"
 	"github.com/datarhei/gosrt/internal/crypto"
 	"github.com/datarhei/gosrt/internal/packet"
-	"github.com/datarhei/gosrt/internal/sync"
 )
 
 // ErrClientClosed is returned when the client connection has
 // been voluntarly closed.
 var ErrClientClosed = errors.New("srt: client closed")
 
-// dialer will implement the Conn interface
+// dialer implements the Conn interface
 type dialer struct {
 	pc *net.UDPConn
 
@@ -40,13 +42,14 @@ type dialer struct {
 
 	start time.Time
 
-	rcvQueue chan packet.Packet
-	sndQueue chan packet.Packet
+	rcvQueue chan packet.Packet // for packets that come from the wire
+	sndQueue chan packet.Packet // for packets that go to the wire
 
 	isShutdown bool
+	shutdown   sync.Once
 
-	stopReader sync.Stopper
-	stopWriter sync.Stopper
+	stopReader context.CancelFunc
+	stopWriter context.CancelFunc
 
 	doneChan chan error
 }
@@ -62,7 +65,7 @@ type connResponse struct {
 // The address is of the form "host:port".
 //
 // Example:
-//  Dial("srt", "127.0.0.1:3000", DefaultConfig)
+//  Dial("srt", "127.0.0.1:3000", DefaultConfig())
 //
 // In case of an error the returned Conn is nil and the error is non-nil.
 func Dial(network, address string, config Config) (Conn, error) {
@@ -124,9 +127,6 @@ func Dial(network, address string, config Config) (Conn, error) {
 	dl.rcvQueue = make(chan packet.Packet, 2048)
 	dl.sndQueue = make(chan packet.Packet, 2048)
 
-	dl.stopReader = sync.NewStopper()
-	dl.stopWriter = sync.NewStopper()
-
 	dl.doneChan = make(chan error)
 
 	dl.start = time.Now()
@@ -138,7 +138,6 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	go func() {
 		buffer := make([]byte, MAX_MSS_SIZE) // MTU size
-		index := 0
 
 		for {
 			if dl.isShutdown {
@@ -168,13 +167,16 @@ func Dial(network, address string, config Config) (Conn, error) {
 			}
 
 			dl.rcvQueue <- p
-
-			index++
 		}
 	}()
 
-	go dl.reader()
-	go dl.writer()
+	var readerCtx context.Context
+	readerCtx, dl.stopReader = context.WithCancel(context.Background())
+	go dl.reader(readerCtx)
+
+	var writerCtx context.Context
+	writerCtx, dl.stopWriter = context.WithCancel(context.Background())
+	go dl.writer(writerCtx)
 
 	// Send the initial handshake request
 	dl.sendInduction()
@@ -213,15 +215,17 @@ func (dl *dialer) checkConnection() error {
 	return nil
 }
 
-func (dl *dialer) reader() {
+// reader reads packets from the receive queue and pushes them into the connection
+func (dl *dialer) reader(ctx context.Context) {
 	defer func() {
 		dl.log("dial", func() string { return "left reader loop" })
-		dl.stopReader.Done()
 	}()
+
+	dl.log("dial", func() string { return "reader loop started" })
 
 	for {
 		select {
-		case <-dl.stopReader.Check():
+		case <-ctx.Done():
 			return
 		case p := <-dl.rcvQueue:
 			if dl.isShutdown {
@@ -236,6 +240,10 @@ func (dl *dialer) reader() {
 
 			if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
 				dl.handleHandshake(p)
+				break
+			}
+
+			if dl.conn == nil {
 				break
 			}
 
@@ -254,18 +262,19 @@ func (dl *dialer) send(p packet.Packet) {
 	}
 }
 
-// writer writes packets to the wire
-func (dl *dialer) writer() {
+// writer reads packets from the send queue and writes them to the wire
+func (dl *dialer) writer(ctx context.Context) {
 	defer func() {
 		dl.log("dial", func() string { return "left writer loop" })
-		dl.stopWriter.Done()
 	}()
+
+	dl.log("dial", func() string { return "writer loop started" })
 
 	var data bytes.Buffer
 
 	for {
 		select {
-		case <-dl.stopWriter.Check():
+		case <-ctx.Done():
 			return
 		case p := <-dl.sndQueue:
 			data.Reset()
@@ -280,7 +289,7 @@ func (dl *dialer) writer() {
 			dl.pc.Write(buffer)
 
 			if p.Header().IsControlPacket {
-				// Control packets can be decommissioned because they will be sent again
+				// Control packets can be decommissioned because they will not be sent again
 				p.Decommission()
 			}
 		}
@@ -575,46 +584,66 @@ func (dl *dialer) sendShutdown(peerSocketId uint32) {
 }
 
 func (dl *dialer) LocalAddr() net.Addr {
+	if dl.conn == nil {
+		return nil
+	}
+
 	return dl.conn.LocalAddr()
 }
 
 func (dl *dialer) RemoteAddr() net.Addr {
+	if dl.conn == nil {
+		return nil
+	}
+
 	return dl.conn.RemoteAddr()
 }
 
 func (dl *dialer) SocketId() uint32 {
+	if dl.conn == nil {
+		return 0
+	}
+
 	return dl.conn.SocketId()
 }
 
 func (dl *dialer) PeerSocketId() uint32 {
+	if dl.conn == nil {
+		return 0
+	}
+
 	return dl.conn.PeerSocketId()
 }
 
 func (dl *dialer) StreamId() string {
+	if dl.conn == nil {
+		return ""
+	}
+
 	return dl.conn.StreamId()
 }
 
 func (dl *dialer) Close() error {
-	if dl.isShutdown {
-		return nil
-	}
+	dl.shutdown.Do(func() {
+		dl.isShutdown = true
 
-	dl.isShutdown = true
+		//dl.connLock.Lock()
+		if dl.conn != nil {
+			dl.conn.Close()
+		}
+		//dl.connLock.Unlock()
 
-	if dl.conn != nil {
-		dl.conn.Close()
-	}
+		dl.stopReader()
+		dl.stopWriter()
 
-	dl.stopReader.Stop()
-	dl.stopWriter.Stop()
+		dl.log("dial", func() string { return "closing socket" })
+		dl.pc.Close()
 
-	dl.log("dial", func() string { return "closing socket" })
-	dl.pc.Close()
-
-	select {
-	case <-dl.doneChan:
-	default:
-	}
+		select {
+		case <-dl.doneChan:
+		default:
+		}
+	})
 
 	return nil
 }
@@ -624,12 +653,20 @@ func (dl *dialer) Read(p []byte) (n int, err error) {
 		return 0, err
 	}
 
+	if dl.conn == nil {
+		return 0, io.EOF
+	}
+
 	return dl.conn.Read(p)
 }
 
 func (dl *dialer) Write(p []byte) (n int, err error) {
 	if err := dl.checkConnection(); err != nil {
 		return 0, err
+	}
+
+	if dl.conn == nil {
+		return 0, io.EOF
 	}
 
 	return dl.conn.Write(p)

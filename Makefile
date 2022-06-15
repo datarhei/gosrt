@@ -5,7 +5,7 @@ all: build
 
 ## test: Run all tests
 test:
-	go test -coverprofile=/dev/null ./...
+	go test -coverprofile=/dev/null -timeout 15s -v ./...
 
 ## vet: Analyze code for potential errors
 vet:
@@ -44,7 +44,7 @@ server:
 ## coverage: Generate code coverage analysis
 coverage:
 	mkdir -p test
-	go test -coverprofile test/cover.out ./...
+	go test -coverprofile=test/cover.out -timeout 15s -v ./...
 	go tool cover -html=test/cover.out -o test/cover.html
 
 ## commit: Prepare code for commit (vet, fmt, test)
