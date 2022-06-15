@@ -17,7 +17,7 @@ const (
 	MIN_PASSPHRASE_SIZE = 10
 	MAX_PASSPHRASE_SIZE = 79
 	MAX_STREAMID_SIZE   = 512
-	SRT_VERSION         = 0x010402
+	SRT_VERSION         = 0x010401
 )
 
 // Config is the configuration for a SRT connection
@@ -191,7 +191,7 @@ var defaultConfig Config = Config{
 	LossMaxTTL:            0,
 	MaxBW:                 -1,
 	MessageAPI:            false,
-	MinVersion:            0x010402,
+	MinVersion:            SRT_VERSION,
 	MSS:                   MAX_MSS_SIZE,
 	NAKReport:             true,
 	OverheadBW:            25,

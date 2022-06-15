@@ -578,7 +578,9 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 		// Check if the peer version is sufficient
 		if cif.SRTVersion < ln.config.MinVersion {
 			cif.HandshakeType = packet.REJ_VERSION
-			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("peer version insufficient (%#08x)", cif.SRTVersion) })
+			ln.log("handshake:recv:error", func() string {
+				return fmt.Sprintf("peer version insufficient (%#06x), expecting at least %#06x", cif.SRTVersion, ln.config.MinVersion)
+			})
 			p.MarshalCIF(cif)
 			ln.log("handshake:send:dump", func() string { return p.Dump() })
 			ln.log("handshake:send:cif", func() string { return cif.String() })
