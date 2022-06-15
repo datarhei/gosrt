@@ -17,7 +17,7 @@ fmt:
 
 ## update: Update dependencies
 update:
-	go get -u
+	go get -u -t
 	@-$(MAKE) tidy
 	@-$(MAKE) vendor
 
