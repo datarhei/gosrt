@@ -51,7 +51,7 @@ func (a Number) Distance(b Number) uint32 {
 		return 0
 	}
 
-	var d uint32
+	d := uint32(0)
 
 	if a.value > b.value {
 		d = a.value - b.value
@@ -72,8 +72,8 @@ func (a Number) Lt(b Number) bool {
 		return false
 	}
 
-	var d uint32 = 0
-	var altb bool = false
+	d := uint32(0)
+	altb := false
 
 	if a.value > b.value {
 		d = a.value - b.value
@@ -104,8 +104,8 @@ func (a Number) Gt(b Number) bool {
 		return false
 	}
 
-	var d uint32 = 0
-	var agtb bool = false
+	d := uint32(0)
+	agtb := false
 
 	if a.value > b.value {
 		d = a.value - b.value
