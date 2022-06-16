@@ -20,7 +20,7 @@ import (
 )
 
 // ErrClientClosed is returned when the client connection has
-// been voluntarly closed.
+// been voluntarily closed.
 var ErrClientClosed = errors.New("srt: client closed")
 
 // dialer implements the Conn interface

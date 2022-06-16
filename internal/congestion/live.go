@@ -451,7 +451,7 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 		return
 	} else {
 		// too far ahead, there are some missing sequence numbers, immediate NAK report
-		// here we can prevent a possibly unecessary NAK with SRTO_LOXXMAXTTL
+		// here we can prevent a possibly unnecessary NAK with SRTO_LOXXMAXTTL
 		r.sendNAK(r.maxSeenSequenceNumber.Inc(), pkt.Header().PacketSequenceNumber.Dec())
 
 		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber))

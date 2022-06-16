@@ -75,7 +75,7 @@ type connStats struct {
 	pktRecvShutdown   uint64
 }
 
-// Check if we implemenet the net.Conn interface
+// Check if we implement the net.Conn interface
 var _ net.Conn = &srtConn{}
 
 type srtConn struct {

@@ -114,7 +114,7 @@ func (h HandshakeType) String() string {
 }
 
 func (h HandshakeType) IsUnknown() bool {
-	return h.String() == "unkonwn"
+	return h.String() == "unknown"
 }
 
 func (h HandshakeType) IsHandshake() bool {
