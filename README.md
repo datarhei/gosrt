@@ -87,7 +87,7 @@ for {
 
     if mode == srt.PUBLISH {
         go handlePublish(conn)
-    } else {
+    } else { // srt.SUBSCRIBE
         go handleSubscribe(conn)
     }
 }
@@ -96,6 +96,14 @@ for {
 In the `contrib/server` directory you'll find a complete example of a SRT server. For your convenience
 this modules provides the `Server` type which is a light framework for creating your own SRT server. The
 example server is based on this type.
+
+## PUBLISH / SUBSCRIBE
+
+The `Accept` function from the `Listener` expects a function that handles the connection requests. It can
+return 3 different values: `srt.PUBLISH`, `srt.SUBSCRIBE`, and `srt.REJECT`. `srt.PUBLISH` means that the
+server expects the caller to send data, whereas `srt.SUBSCRIBE` means that the server will send data to
+the caller. This is opiniated towards a streaming server, however in your implementation of a listener
+you are free to handle connections requests to your liking.
 
 # Contributed client
 
