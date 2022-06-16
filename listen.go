@@ -141,8 +141,9 @@ type listener struct {
 
 	syncookie srtnet.SYNCookie
 
-	isShutdown bool
-	shutdown   sync.Once
+	shutdown     bool
+	shutdownLock sync.RWMutex
+	shutdownOnce sync.Once
 
 	stopReader context.CancelFunc
 	stopWriter context.CancelFunc
@@ -235,7 +236,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 		buffer := make([]byte, config.MSS) // MTU size
 
 		for {
-			if ln.isShutdown {
+			if ln.isShutdown() {
 				ln.doneChan <- ErrListenerClosed
 				return
 			}
@@ -247,7 +248,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 					continue
 				}
 
-				if ln.isShutdown {
+				if ln.isShutdown() {
 					ln.doneChan <- ErrListenerClosed
 					return
 				}
@@ -269,7 +270,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 }
 
 func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
-	if ln.isShutdown {
+	if ln.isShutdown() {
 		return nil, REJECT, ErrListenerClosed
 	}
 
@@ -404,9 +405,18 @@ func (ln *listener) accept(request connRequest) {
 	ln.send(p)
 }
 
+func (ln *listener) isShutdown() bool {
+	ln.shutdownLock.RLock()
+	defer ln.shutdownLock.RUnlock()
+
+	return ln.shutdown
+}
+
 func (ln *listener) Close() {
-	ln.shutdown.Do(func() {
-		ln.isShutdown = true
+	ln.shutdownOnce.Do(func() {
+		ln.shutdownLock.Lock()
+		ln.shutdown = true
+		ln.shutdownLock.Unlock()
 
 		ln.lock.RLock()
 		for _, conn := range ln.conns {
@@ -440,7 +450,7 @@ func (ln *listener) reader(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case p := <-ln.rcvQueue:
-			if ln.isShutdown {
+			if ln.isShutdown() {
 				break
 			}
 

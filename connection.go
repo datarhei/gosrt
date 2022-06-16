@@ -84,8 +84,9 @@ type srtConn struct {
 
 	start time.Time
 
-	isShutdown bool
-	closeOnce  sync.Once
+	shutdown     bool
+	shutdownLock sync.RWMutex
+	shutdownOnce sync.Once
 
 	socketId     uint32
 	peerSocketId uint32
@@ -317,7 +318,7 @@ func (c *srtConn) ticker(ctx context.Context) {
 // readPacket reads a packet from the queue of received packets. It blocks
 // if the queue is empty. Only data packets are returned.
 func (c *srtConn) readPacket() (packet.Packet, error) {
-	if c.isShutdown {
+	if c.isShutdown() {
 		return nil, io.EOF
 	}
 
@@ -365,7 +366,7 @@ func (c *srtConn) Read(b []byte) (int, error) {
 // writePacket writes a packet to the write queue. Packets on the write queue
 // will be sent to the peer of the connection. Only data packets will be sent.
 func (c *srtConn) writePacket(p packet.Packet) error {
-	if c.isShutdown {
+	if c.isShutdown() {
 		return io.EOF
 	}
 
@@ -399,7 +400,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 		// Give the packet a deliver timestamp
 		p.Header().PktTsbpdTime = c.getTimestamp()
 
-		if c.isShutdown {
+		if c.isShutdown() {
 			return 0, io.EOF
 		}
 
@@ -422,7 +423,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 
 // push puts a packet on the network queue. This is where packets go that came in from the network.
 func (c *srtConn) push(p packet.Packet) {
-	if c.isShutdown {
+	if c.isShutdown() {
 		return
 	}
 
@@ -526,7 +527,7 @@ func (c *srtConn) writeQueueReader(ctx context.Context) {
 
 // deliver writes the packets to the read queue in order to be consumed by the Read function.
 func (c *srtConn) deliver(p packet.Packet) {
-	if c.isShutdown {
+	if c.isShutdown() {
 		return
 	}
 
@@ -962,11 +963,20 @@ func (c *srtConn) Close() error {
 	return nil
 }
 
+func (c *srtConn) isShutdown() bool {
+	c.shutdownLock.RLock()
+	defer c.shutdownLock.RUnlock()
+
+	return c.shutdown
+}
+
 // close closes the connection.
 func (c *srtConn) close() {
-	c.isShutdown = true
+	c.shutdownLock.Lock()
+	c.shutdown = true
+	c.shutdownLock.Unlock()
 
-	c.closeOnce.Do(func() {
+	c.shutdownOnce.Do(func() {
 		c.log("connection:close", func() string { return "stopping peer idle timeout" })
 
 		c.peerIdleTimeout.Stop()

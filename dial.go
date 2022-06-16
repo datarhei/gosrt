@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -38,6 +37,7 @@ type dialer struct {
 	crypto crypto.Crypto
 
 	conn     *srtConn
+	connLock sync.RWMutex
 	connChan chan connResponse
 
 	start time.Time
@@ -45,8 +45,9 @@ type dialer struct {
 	rcvQueue chan packet.Packet // for packets that come from the wire
 	sndQueue chan packet.Packet // for packets that go to the wire
 
-	isShutdown bool
-	shutdown   sync.Once
+	shutdown     bool
+	shutdownLock sync.RWMutex
+	shutdownOnce sync.Once
 
 	stopReader context.CancelFunc
 	stopWriter context.CancelFunc
@@ -140,7 +141,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 		buffer := make([]byte, MAX_MSS_SIZE) // MTU size
 
 		for {
-			if dl.isShutdown {
+			if dl.isShutdown() {
 				dl.doneChan <- ErrClientClosed
 				return
 			}
@@ -152,7 +153,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 					continue
 				}
 
-				if dl.isShutdown {
+				if dl.isShutdown() {
 					dl.doneChan <- ErrClientClosed
 					return
 				}
@@ -199,7 +200,9 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	timer.Stop()
 
+	dl.connLock.Lock()
 	dl.conn = response.conn
+	dl.connLock.Unlock()
 
 	return dl, nil
 }
@@ -228,7 +231,7 @@ func (dl *dialer) reader(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case p := <-dl.rcvQueue:
-			if dl.isShutdown {
+			if dl.isShutdown() {
 				break
 			}
 
@@ -243,11 +246,14 @@ func (dl *dialer) reader(ctx context.Context) {
 				break
 			}
 
+			dl.connLock.RLock()
 			if dl.conn == nil {
+				dl.connLock.RUnlock()
 				break
 			}
 
 			dl.conn.push(p)
+			dl.connLock.RUnlock()
 		}
 	}
 }
@@ -584,54 +590,43 @@ func (dl *dialer) sendShutdown(peerSocketId uint32) {
 }
 
 func (dl *dialer) LocalAddr() net.Addr {
-	if dl.conn == nil {
-		return nil
-	}
-
 	return dl.conn.LocalAddr()
 }
 
 func (dl *dialer) RemoteAddr() net.Addr {
-	if dl.conn == nil {
-		return nil
-	}
-
 	return dl.conn.RemoteAddr()
 }
 
 func (dl *dialer) SocketId() uint32 {
-	if dl.conn == nil {
-		return 0
-	}
-
 	return dl.conn.SocketId()
 }
 
 func (dl *dialer) PeerSocketId() uint32 {
-	if dl.conn == nil {
-		return 0
-	}
-
 	return dl.conn.PeerSocketId()
 }
 
 func (dl *dialer) StreamId() string {
-	if dl.conn == nil {
-		return ""
-	}
-
 	return dl.conn.StreamId()
 }
 
-func (dl *dialer) Close() error {
-	dl.shutdown.Do(func() {
-		dl.isShutdown = true
+func (dl *dialer) isShutdown() bool {
+	dl.shutdownLock.RLock()
+	defer dl.shutdownLock.RUnlock()
 
-		//dl.connLock.Lock()
+	return dl.shutdown
+}
+
+func (dl *dialer) Close() error {
+	dl.shutdownOnce.Do(func() {
+		dl.shutdownLock.Lock()
+		dl.shutdown = true
+		dl.shutdownLock.Unlock()
+
+		dl.connLock.RLock()
 		if dl.conn != nil {
 			dl.conn.Close()
 		}
-		//dl.connLock.Unlock()
+		dl.connLock.RUnlock()
 
 		dl.stopReader()
 		dl.stopWriter()
@@ -653,9 +648,8 @@ func (dl *dialer) Read(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	if dl.conn == nil {
-		return 0, io.EOF
-	}
+	dl.connLock.RLock()
+	defer dl.connLock.RUnlock()
 
 	return dl.conn.Read(p)
 }
@@ -665,9 +659,8 @@ func (dl *dialer) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	if dl.conn == nil {
-		return 0, io.EOF
-	}
+	dl.connLock.RLock()
+	defer dl.connLock.RUnlock()
 
 	return dl.conn.Write(p)
 }
