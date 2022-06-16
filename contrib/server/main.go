@@ -22,7 +22,7 @@ type server struct {
 	token      string
 	passphrase string
 	logtopics  string
-	profile    bool
+	profile    string
 
 	server *srt.Server
 
@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&s.token, "token", "", "token query param for streamid")
 	flag.StringVar(&s.passphrase, "passphrase", "", "passphrase for de- and enrcypting the data")
 	flag.StringVar(&s.logtopics, "logtopics", "", "topics for the log output")
-	flag.BoolVar(&s.profile, "profile", false, "enable profiling")
+	flag.StringVar(&s.profile, "profile", "", "enable profiling (cpu, mem, allocs, heap, rate, mutex, block, thread, trace)")
 
 	flag.Parse()
 
@@ -63,8 +63,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	if s.profile {
-		defer profile.Start(profile.NoShutdownHook).Stop()
+	var p func(*profile.Profile)
+	switch s.profile {
+	case "cpu":
+		p = profile.CPUProfile
+	case "mem":
+		p = profile.MemProfile
+	case "allocs":
+		p = profile.MemProfileAllocs
+	case "heap":
+		p = profile.MemProfileHeap
+	case "rate":
+		p = profile.MemProfileRate(2048)
+	case "mutex":
+		p = profile.MutexProfile
+	case "block":
+		p = profile.BlockProfile
+	case "thread":
+		p = profile.ThreadcreationProfile
+	case "trace":
+		p = profile.TraceProfile
+	default:
+	}
+
+	if p != nil {
+		defer profile.Start(profile.ProfilePath("."), p).Stop()
 	}
 
 	config := srt.DefaultConfig()
