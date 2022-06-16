@@ -1,7 +1,6 @@
 Implementation of the SRT protocol in pure Go with minimal dependencies.
 
-[![License: MIT][license-badge]](./LICENSE)
-[![Latest release][release-badge]][github releases]
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/datarhei/gosrt)](https://goreportcard.com/report/github.com/datarhei/gosrt)
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/datarhei/gosrt)](https://pkg.go.dev/github.com/datarhei/gosrt)
 
