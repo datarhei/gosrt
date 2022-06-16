@@ -1,4 +1,4 @@
-Implementation of the SRT protocol in pure go with minimal dependencies.
+Implementation of the SRT protocol in pure Go with minimal dependencies.
 
 -   [SRT reference implementation](https://github.com/Haivision/srt)
 -   [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
@@ -25,7 +25,7 @@ The parts that are implemented are based on what has been published in the SRT R
 
 # Requirements
 
-A go version of 1.16+ is required.
+A Go version of 1.16+ is required.
 
 # Installation
 
