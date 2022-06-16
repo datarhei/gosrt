@@ -211,6 +211,7 @@ var defaultConfig Config = Config{
 	TSBPDMode:             true,
 }
 
+// DefaultConfig returns the default configuration for Dial and Listen.
 func DefaultConfig() Config {
 	return defaultConfig
 }
