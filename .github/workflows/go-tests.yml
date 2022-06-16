@@ -1,4 +1,4 @@
-name: Test and coverage
+name: tests
 
 on: [push, pull_request]
 
@@ -13,7 +13,7 @@ jobs:
         with:
           go-version: '1.18'
       - name: Run coverage
-        run: go test -race -coverprofile=coverage.out -covermode=atomic -timeout 15s -v ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic -timeout 15s -v ./...
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2
         with:
