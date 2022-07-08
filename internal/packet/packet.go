@@ -268,6 +268,10 @@ func NewPacket(addr net.Addr, rawdata []byte) Packet {
 }
 
 func (p *pkt) Decommission() {
+	if p.payload == nil {
+		return
+	}
+
 	payloadPool.Put(p.payload)
 	p.payload = nil
 }
