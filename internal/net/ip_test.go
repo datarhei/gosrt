@@ -38,14 +38,14 @@ func TestIPFrom(t *testing.T) {
 
 	require.Equal(t, "127.0.0.1", ip.String())
 
-	udpaddr, err := net.ResolveUDPAddr("udp", "example.com:12345")
+	udpaddr, err := net.ResolveUDPAddr("udp", "localhost:12345")
 
 	require.NoError(t, err)
 	ip.FromNetAddr(udpaddr)
 
-	require.Equal(t, "93.184.216.34", ip.String())
+	require.Equal(t, "127.0.0.1", ip.String())
 
-	ipaddr, err := net.ResolveIPAddr("ip", "example.com")
+	ipaddr, err := net.ResolveIPAddr("ip", "localhost")
 
 	require.NoError(t, err)
 	ip.FromNetAddr(ipaddr)
