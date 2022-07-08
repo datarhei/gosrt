@@ -87,7 +87,7 @@ func main() {
 	}
 
 	if p != nil {
-		defer profile.Start(profile.ProfilePath("."), p).Stop()
+		defer profile.Start(profile.ProfilePath("."), profile.NoShutdownHook, p).Stop()
 	}
 
 	config := srt.DefaultConfig()
@@ -120,7 +120,7 @@ func main() {
 	}()
 
 	go func() {
-		if err := s.ListenAndServe(); err != nil && err != srt.ErrListenerClosed {
+		if err := s.ListenAndServe(); err != nil && err != srt.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "SRT Server: %s\n", err)
 			os.Exit(2)
 		}
