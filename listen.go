@@ -508,7 +508,11 @@ func (ln *listener) writer(ctx context.Context) {
 		case p := <-ln.sndQueue:
 			data.Reset()
 
-			p.Marshal(&data)
+			if err := p.Marshal(&data); err != nil {
+				p.Decommission()
+				ln.log("packet:send:error", func() string { return "marshalling packet failed" })
+				continue
+			}
 
 			buffer := data.Bytes()
 

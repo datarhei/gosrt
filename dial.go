@@ -290,7 +290,11 @@ func (dl *dialer) writer(ctx context.Context) {
 		case p := <-dl.sndQueue:
 			data.Reset()
 
-			p.Marshal(&data)
+			if err := p.Marshal(&data); err != nil {
+				p.Decommission()
+				dl.log("packet:send:error", func() string { return "marshalling packet failed" })
+				continue
+			}
 
 			buffer := data.Bytes()
 
