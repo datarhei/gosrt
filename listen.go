@@ -262,7 +262,12 @@ func Listen(network, address string, config Config) (Listener, error) {
 				continue
 			}
 
-			ln.rcvQueue <- p
+			// non-blocking
+			select {
+			case ln.rcvQueue <- p:
+			default:
+				ln.log("listen", func() string { return "receive queue is full" })
+			}
 		}
 	}()
 
