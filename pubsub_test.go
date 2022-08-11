@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,7 +69,9 @@ func TestPubSub(t *testing.T) {
 		config.StreamId = "subscribe"
 
 		conn, err := Dial("srt", "127.0.0.1:6007", config)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			panic(err.Error())
+		}
 
 		buffer := make([]byte, 2048)
 
@@ -94,7 +97,9 @@ func TestPubSub(t *testing.T) {
 		config.StreamId = "subscribe"
 
 		conn, err := Dial("srt", "127.0.0.1:6007", config)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			panic(err.Error())
+		}
 
 		buffer := make([]byte, 2048)
 
@@ -125,7 +130,9 @@ func TestPubSub(t *testing.T) {
 		config.StreamId = "publish"
 
 		conn, err := Dial("srt", "127.0.0.1:6007", config)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			panic(err.Error())
+		}
 
 		n, err := conn.Write([]byte(message))
 		require.NoError(t, err)
