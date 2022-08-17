@@ -7,6 +7,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestListenReuse(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	ln.Close()
+
+	ln, err = Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	ln.Close()
+}
+
 func TestListen(t *testing.T) {
 	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
@@ -47,7 +59,7 @@ func TestListen(t *testing.T) {
 }
 
 func TestListenCrypt(t *testing.T) {
-	ln, err := Listen("srt", "127.0.0.1:6004", DefaultConfig())
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
 
 	listenWg := sync.WaitGroup{}
@@ -81,7 +93,7 @@ func TestListenCrypt(t *testing.T) {
 	config.StreamId = "foobar"
 	config.Passphrase = "zaboofzaboof"
 
-	conn, err := Dial("srt", "127.0.0.1:6004", config)
+	conn, err := Dial("srt", "127.0.0.1:6003", config)
 	require.NoError(t, err)
 
 	err = conn.Close()
@@ -89,7 +101,7 @@ func TestListenCrypt(t *testing.T) {
 
 	config.Passphrase = "raboofraboof"
 
-	_, err = Dial("srt", "127.0.0.1:6004", config)
+	_, err = Dial("srt", "127.0.0.1:6003", config)
 	require.Error(t, err)
 
 	ln.Close()

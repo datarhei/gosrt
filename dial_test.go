@@ -8,7 +8,7 @@ import (
 )
 
 func TestDialReject(t *testing.T) {
-	ln, err := Listen("srt", "127.0.0.1:6000", DefaultConfig())
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
 
 	listenWg := sync.WaitGroup{}
@@ -31,7 +31,7 @@ func TestDialReject(t *testing.T) {
 
 	listenWg.Wait()
 
-	conn, err := Dial("srt", "127.0.0.1:6000", DefaultConfig())
+	conn, err := Dial("srt", "127.0.0.1:6003", DefaultConfig())
 	require.Error(t, err)
 	require.Nil(t, conn)
 
@@ -39,7 +39,7 @@ func TestDialReject(t *testing.T) {
 }
 
 func TestDialOK(t *testing.T) {
-	ln, err := Listen("srt", "127.0.0.1:6001", DefaultConfig())
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
 
 	listenWg := sync.WaitGroup{}
@@ -62,7 +62,7 @@ func TestDialOK(t *testing.T) {
 
 	listenWg.Wait()
 
-	conn, err := Dial("srt", "127.0.0.1:6001", DefaultConfig())
+	conn, err := Dial("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
 
 	err = conn.Close()

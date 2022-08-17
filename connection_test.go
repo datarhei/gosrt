@@ -20,7 +20,7 @@ func TestEncryption(t *testing.T) {
 	config.EnforcedEncryption = true
 
 	server := Server{
-		Addr:   "127.0.0.1:6008",
+		Addr:   "127.0.0.1:6003",
 		Config: &config,
 		HandleConnect: func(req ConnRequest) ConnType {
 			if req.IsEncrypted() {
@@ -77,7 +77,7 @@ func TestEncryption(t *testing.T) {
 		config.StreamId = "subscribe"
 		config.Passphrase = "barfoobarfoo"
 
-		_, err := Dial("srt", "127.0.0.1:6008", config)
+		_, err := Dial("srt", "127.0.0.1:6003", config)
 		require.Error(t, err)
 	}
 	// Test transmitting an encrypted message
@@ -92,7 +92,7 @@ func TestEncryption(t *testing.T) {
 		config.StreamId = "subscribe"
 		config.Passphrase = "foobarfoobar"
 
-		conn, err := Dial("srt", "127.0.0.1:6008", config)
+		conn, err := Dial("srt", "127.0.0.1:6003", config)
 		if !assert.NoError(t, err) {
 			panic(err.Error())
 		}
@@ -128,7 +128,7 @@ func TestEncryption(t *testing.T) {
 		config.StreamId = "publish"
 		config.Passphrase = "foobarfoobar"
 
-		conn, err := Dial("srt", "127.0.0.1:6008", config)
+		conn, err := Dial("srt", "127.0.0.1:6003", config)
 		if !assert.NoError(t, err) {
 			panic(err.Error())
 		}
@@ -161,7 +161,7 @@ func TestEncryptionKeySwap(t *testing.T) {
 	config.EnforcedEncryption = true
 
 	server := Server{
-		Addr:   "127.0.0.1:6009",
+		Addr:   "127.0.0.1:6003",
 		Config: &config,
 		HandleConnect: func(req ConnRequest) ConnType {
 			if req.IsEncrypted() {
@@ -224,7 +224,7 @@ func TestEncryptionKeySwap(t *testing.T) {
 		config.StreamId = "subscribe"
 		config.Passphrase = "foobarfoobar"
 
-		conn, err := Dial("srt", "127.0.0.1:6009", config)
+		conn, err := Dial("srt", "127.0.0.1:6003", config)
 		if !assert.NoError(t, err) {
 			panic(err.Error())
 		}
@@ -263,7 +263,7 @@ func TestEncryptionKeySwap(t *testing.T) {
 		config.KMPreAnnounce = 10
 		config.KMRefreshRate = 30
 
-		conn, err := Dial("srt", "127.0.0.1:6009", config)
+		conn, err := Dial("srt", "127.0.0.1:6003", config)
 		if !assert.NoError(t, err) {
 			panic(err.Error())
 		}
