@@ -118,6 +118,8 @@ type srtConn struct {
 	tsbpdTimeBaseOffset uint64 // microseconds
 	tsbpdDelay          uint64 // microseconds
 	tsbpdDrift          uint64 // microseconds
+	peerTsbpdDelay      uint64 // microseconds
+	dropThreshold       uint64 // microseconds
 
 	// Queue for packets that are coming from the network
 	networkQueue     chan packet.Packet
@@ -162,7 +164,8 @@ type srtConnConfig struct {
 	socketId                    uint32
 	peerSocketId                uint32
 	tsbpdTimeBase               uint64 // microseconds
-	tsbpdDelay                  uint64
+	tsbpdDelay                  uint64 // microseconds
+	peerTsbpdDelay              uint64 // microseconds
 	initialPacketSequenceNumber circular.Number
 	crypto                      crypto.Crypto
 	keyBaseEncryption           packet.PacketEncryption
@@ -181,6 +184,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		peerSocketId:                config.peerSocketId,
 		tsbpdTimeBase:               config.tsbpdTimeBase,
 		tsbpdDelay:                  config.tsbpdDelay,
+		peerTsbpdDelay:              config.peerTsbpdDelay,
 		initialPacketSequenceNumber: config.initialPacketSequenceNumber,
 		crypto:                      config.crypto,
 		keyBaseEncryption:           config.keyBaseEncryption,
@@ -238,14 +242,14 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
 	// https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_SNDDROPDELAY
-	dropThreshold := uint64(float64(c.tsbpdDelay)*1.25) + uint64(c.config.SendDropDelay.Microseconds())
-	if dropThreshold < uint64(time.Second.Microseconds()) {
-		dropThreshold = uint64(time.Second.Microseconds())
+	c.dropThreshold = uint64(float64(c.peerTsbpdDelay)*1.25) + uint64(c.config.SendDropDelay.Microseconds())
+	if c.dropThreshold < uint64(time.Second.Microseconds()) {
+		c.dropThreshold = uint64(time.Second.Microseconds())
 	}
+	c.dropThreshold += 20_000
 
 	c.snd = congestion.NewLiveSend(congestion.SendConfig{
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
-		DropThreshold:         dropThreshold + 20_000,
 		MaxBW:                 c.config.MaxBW,
 		InputBW:               c.config.InputBW,
 		MinInputBW:            c.config.MinInputBW,
@@ -317,7 +321,7 @@ func (c *srtConn) ticker(ctx context.Context) {
 			tickTime := uint64(t.Sub(c.start).Microseconds())
 
 			c.recv.Tick(c.tsbpdTimeBase + tickTime)
-			c.snd.Tick(tickTime)
+			c.snd.Tick(tickTime, c.dropThreshold)
 		}
 	}
 }
@@ -1106,11 +1110,11 @@ func (c *srtConn) Stats() Statistics {
 		PktSndBuf:            send.PktBuf,
 		ByteSndBuf:           send.ByteBuf,
 		MsSndBuf:             send.MsBuf,
-		MsSndTsbPdDelay:      uint64(c.config.PeerLatency),
+		MsSndTsbPdDelay:      c.peerTsbpdDelay / 1000,
 		PktRcvBuf:            recv.PktBuf,
 		ByteRcvBuf:           recv.ByteBuf,
 		MsRcvBuf:             recv.MsBuf,
-		MsRcvTsbPdDelay:      uint64(c.config.ReceiverLatency),
+		MsRcvTsbPdDelay:      c.tsbpdDelay / 1000,
 		PktReorderTolerance:  0,
 		PktRcvAvgBelatedTime: 0,
 	}

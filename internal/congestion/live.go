@@ -19,8 +19,6 @@ type liveSend struct {
 	lossList   *list.List
 	lock       sync.RWMutex
 
-	dropThreshold uint64 // microseconds
-
 	avgPayloadSize float64 // bytes
 	pktSndPeriod   float64 // microseconds
 	maxBW          float64 // bytes/s
@@ -48,8 +46,6 @@ func NewLiveSend(config SendConfig) Sender {
 		nextSequenceNumber: config.InitialSequenceNumber,
 		packetList:         list.New(),
 		lossList:           list.New(),
-
-		dropThreshold: config.DropThreshold, // microseconds
 
 		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
 		maxBW:          float64(config.MaxBW),
@@ -135,7 +131,7 @@ func (s *liveSend) Push(p packet.Packet) {
 	s.statistics.PktFlightSize = uint64(s.packetList.Len())
 }
 
-func (s *liveSend) Tick(now uint64) {
+func (s *liveSend) Tick(now, dropThreshold uint64) {
 	// deliver packets whose PktTsbpdTime is ripe
 	s.lock.Lock()
 	removeList := make([]*list.Element, 0, s.packetList.Len())
@@ -171,7 +167,7 @@ func (s *liveSend) Tick(now uint64) {
 	for e := s.lossList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 
-		if p.Header().PktTsbpdTime+s.dropThreshold <= now {
+		if p.Header().PktTsbpdTime+dropThreshold <= now {
 			// dropped packet because too old
 			s.statistics.PktDrop++
 			s.statistics.PktLoss++

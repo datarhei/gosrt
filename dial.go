@@ -475,15 +475,16 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 			return
 		}
 
-		// Use the largest TSBPD delay as advertised by the listener, but
-		// at least 120ms
-		tsbpdDelay := uint16(120)
-		if cif.RecvTSBPDDelay > tsbpdDelay {
-			tsbpdDelay = cif.RecvTSBPDDelay
+		// Select the largest TSBPD delay advertised by the listener, but at least 120ms
+		recvTsbpdDelay := uint16(dl.config.ReceiverLatency.Milliseconds())
+		sendTsbpdDelay := uint16(dl.config.PeerLatency.Milliseconds())
+
+		if cif.SendTSBPDDelay > recvTsbpdDelay {
+			recvTsbpdDelay = cif.SendTSBPDDelay
 		}
 
-		if cif.SendTSBPDDelay > tsbpdDelay {
-			tsbpdDelay = cif.SendTSBPDDelay
+		if cif.RecvTSBPDDelay > sendTsbpdDelay {
+			sendTsbpdDelay = cif.RecvTSBPDDelay
 		}
 
 		// If the peer has a smaller MTU size, adjust to it
@@ -512,7 +513,8 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 			socketId:                    dl.socketId,
 			peerSocketId:                cif.SRTSocketId,
 			tsbpdTimeBase:               uint64(time.Since(dl.start).Microseconds()),
-			tsbpdDelay:                  uint64(tsbpdDelay) * 1000,
+			tsbpdDelay:                  uint64(recvTsbpdDelay) * 1000,
+			peerTsbpdDelay:              uint64(sendTsbpdDelay) * 1000,
 			initialPacketSequenceNumber: cif.InitialPacketSequenceNumber,
 			crypto:                      dl.crypto,
 			keyBaseEncryption:           packet.EvenKeyEncrypted,

@@ -9,7 +9,6 @@ import (
 // SendConfig is the configuration for the liveSend congestion control
 type SendConfig struct {
 	InitialSequenceNumber circular.Number
-	DropThreshold         uint64 // microseconds
 	MaxBW                 int64
 	InputBW               int64
 	MinInputBW            int64
@@ -22,7 +21,7 @@ type Sender interface {
 	Stats() SendStats
 	Flush()
 	Push(p packet.Packet)
-	Tick(now uint64)
+	Tick(now, dropThreshold uint64)
 	ACK(sequenceNumber circular.Number)
 	NAK(sequenceNumbers []circular.Number)
 }
