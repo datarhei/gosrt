@@ -361,8 +361,8 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 		request.handshake.SRTFlags.REXMITFLG = true
 		request.handshake.SRTFlags.STREAM = false
 		request.handshake.SRTFlags.PACKET_FILTER = false
-		request.handshake.RecvTSBPDDelay = sendTsbpdDelay
-		request.handshake.SendTSBPDDelay = recvTsbpdDelay
+		request.handshake.RecvTSBPDDelay = recvTsbpdDelay
+		request.handshake.SendTSBPDDelay = sendTsbpdDelay
 
 		ln.accept(request)
 
