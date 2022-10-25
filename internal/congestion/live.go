@@ -19,7 +19,7 @@ type liveSend struct {
 	lossList   *list.List
 	lock       sync.RWMutex
 
-	dropInterval uint64 // microseconds
+	dropThreshold uint64 // microseconds
 
 	avgPayloadSize float64 // bytes
 	pktSndPeriod   float64 // microseconds
@@ -49,7 +49,7 @@ func NewLiveSend(config SendConfig) Sender {
 		packetList:         list.New(),
 		lossList:           list.New(),
 
-		dropInterval: config.DropInterval, // microseconds
+		dropThreshold: config.DropThreshold, // microseconds
 
 		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
 		maxBW:          float64(config.MaxBW),
@@ -78,13 +78,13 @@ func (s *liveSend) Stats() SendStats {
 
 	s.statistics.UsPktSndPeriod = s.pktSndPeriod
 	s.statistics.BytePayload = uint64(s.avgPayloadSize)
-	s.statistics.MsSndBuf = 0
+	s.statistics.MsBuf = 0
 
 	max := s.lossList.Back()
 	min := s.lossList.Front()
 
 	if max != nil && min != nil {
-		s.statistics.MsSndBuf = (max.Value.(packet.Packet).Header().PktTsbpdTime - min.Value.(packet.Packet).Header().PktTsbpdTime) / 1_000
+		s.statistics.MsBuf = (max.Value.(packet.Packet).Header().PktTsbpdTime - min.Value.(packet.Packet).Header().PktTsbpdTime) / 1_000
 	}
 
 	return s.statistics
@@ -112,8 +112,8 @@ func (s *liveSend) Push(p packet.Packet) {
 
 	pktLen := p.Len()
 
-	s.statistics.PktSndBuf++
-	s.statistics.ByteSndBuf += pktLen
+	s.statistics.PktBuf++
+	s.statistics.ByteBuf += pktLen
 
 	// bandwidth calculation
 	s.rate.bytes += pktLen
@@ -142,11 +142,11 @@ func (s *liveSend) Tick(now uint64) {
 	for e := s.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 		if p.Header().PktTsbpdTime <= now {
-			s.statistics.PktSent++
-			s.statistics.PktSentUnique++
+			s.statistics.Pkt++
+			s.statistics.PktUnique++
 
-			s.statistics.ByteSent += p.Len()
-			s.statistics.ByteSentUnique += p.Len()
+			s.statistics.Byte += p.Len()
+			s.statistics.ByteUnique += p.Len()
 
 			s.statistics.UsSndDuration += uint64(s.pktSndPeriod)
 
@@ -171,12 +171,12 @@ func (s *liveSend) Tick(now uint64) {
 	for e := s.lossList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 
-		if p.Header().PktTsbpdTime+s.dropInterval <= now {
+		if p.Header().PktTsbpdTime+s.dropThreshold <= now {
 			// dropped packet because too old
-			s.statistics.PktSndDrop++
-			s.statistics.PktSndLoss++
-			s.statistics.ByteSndDrop += p.Len()
-			s.statistics.ByteSndLoss += p.Len()
+			s.statistics.PktDrop++
+			s.statistics.PktLoss++
+			s.statistics.ByteDrop += p.Len()
+			s.statistics.ByteLoss += p.Len()
 
 			removeList = append(removeList, e)
 		}
@@ -186,8 +186,8 @@ func (s *liveSend) Tick(now uint64) {
 	for _, e := range removeList {
 		p := e.Value.(packet.Packet)
 
-		s.statistics.PktSndBuf--
-		s.statistics.ByteSndBuf -= p.Len()
+		s.statistics.PktBuf--
+		s.statistics.ByteBuf -= p.Len()
 
 		s.lossList.Remove(e)
 
@@ -216,8 +216,8 @@ func (s *liveSend) ACK(sequenceNumber circular.Number) {
 	for _, e := range removeList {
 		p := e.Value.(packet.Packet)
 
-		s.statistics.PktSndBuf--
-		s.statistics.ByteSndBuf -= p.Len()
+		s.statistics.PktBuf--
+		s.statistics.ByteBuf -= p.Len()
 
 		s.lossList.Remove(e)
 
@@ -242,12 +242,12 @@ func (s *liveSend) NAK(sequenceNumbers []circular.Number) {
 		for i := 0; i < len(sequenceNumbers); i += 2 {
 			if p.Header().PacketSequenceNumber.Gte(sequenceNumbers[i]) && p.Header().PacketSequenceNumber.Lte(sequenceNumbers[i+1]) {
 				s.statistics.PktRetrans++
-				s.statistics.PktSent++
-				s.statistics.PktSndLoss++
+				s.statistics.Pkt++
+				s.statistics.PktLoss++
 
 				s.statistics.ByteRetrans += p.Len()
-				s.statistics.ByteSent += p.Len()
-				s.statistics.ByteSndLoss += p.Len()
+				s.statistics.Byte += p.Len()
+				s.statistics.ByteLoss += p.Len()
 
 				//  5.1.2. SRT's Default LiveCC Algorithm
 				s.avgPayloadSize = 0.875*s.avgPayloadSize + 0.125*float64(p.Len())
@@ -392,13 +392,13 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 	r.rate.packets++
 	r.rate.bytes += pktLen
 
-	r.statistics.PktRecv++
-	r.statistics.ByteRecv += pktLen
+	r.statistics.Pkt++
+	r.statistics.Byte += pktLen
 
 	//pkt.PktTsbpdTime = pkt.Timestamp + r.delay
 	if pkt.Header().RetransmittedPacketFlag {
-		r.statistics.PktRcvRetrans++
-		r.statistics.ByteRcvRetrans += pktLen
+		r.statistics.PktRetrans++
+		r.statistics.ByteRetrans += pktLen
 	}
 
 	//  5.1.2. SRT's Default LiveCC Algorithm
@@ -406,16 +406,19 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 
 	if pkt.Header().PacketSequenceNumber.Lte(r.lastDeliveredSequenceNumber) {
 		// too old, because up until r.lastDeliveredSequenceNumber, we already delivered
-		r.statistics.PktRcvDrop++
-		r.statistics.ByteRcvDrop += pktLen
+		r.statistics.PktBelated++
+		r.statistics.ByteBelated += pktLen
+
+		r.statistics.PktDrop++
+		r.statistics.ByteDrop += pktLen
 
 		return
 	}
 
 	if pkt.Header().PacketSequenceNumber.Lt(r.lastACKSequenceNumber) {
 		// already acknowledged, ignoring
-		r.statistics.PktRcvDrop++
-		r.statistics.ByteRcvDrop += pktLen
+		r.statistics.PktDrop++
+		r.statistics.ByteDrop += pktLen
 
 		return
 	}
@@ -430,17 +433,17 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 
 			if p.Header().PacketSequenceNumber == pkt.Header().PacketSequenceNumber {
 				// already received (has been sent more than once), ignoring
-				r.statistics.PktRcvDrop++
-				r.statistics.ByteRcvDrop += pktLen
+				r.statistics.PktDrop++
+				r.statistics.ByteDrop += pktLen
 
 				break
 			} else if p.Header().PacketSequenceNumber.Gt(pkt.Header().PacketSequenceNumber) {
 				// late arrival, this fills a gap
-				r.statistics.PktRcvBuf++
-				r.statistics.PktRecvUnique++
+				r.statistics.PktBuf++
+				r.statistics.PktUnique++
 
-				r.statistics.ByteRcvBuf += pktLen
-				r.statistics.ByteRecvUnique += pktLen
+				r.statistics.ByteBuf += pktLen
+				r.statistics.ByteUnique += pktLen
 
 				r.packetList.InsertBefore(pkt, e)
 
@@ -455,17 +458,17 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 		r.sendNAK(r.maxSeenSequenceNumber.Inc(), pkt.Header().PacketSequenceNumber.Dec())
 
 		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber))
-		r.statistics.PktRcvLoss += len
-		r.statistics.ByteRcvLoss += len * uint64(r.avgPayloadSize)
+		r.statistics.PktLoss += len
+		r.statistics.ByteLoss += len * uint64(r.avgPayloadSize)
 
 		r.maxSeenSequenceNumber = pkt.Header().PacketSequenceNumber
 	}
 
-	r.statistics.PktRcvBuf++
-	r.statistics.PktRecvUnique++
+	r.statistics.PktBuf++
+	r.statistics.PktUnique++
 
-	r.statistics.ByteRcvBuf += pktLen
-	r.statistics.ByteRecvUnique += pktLen
+	r.statistics.ByteBuf += pktLen
+	r.statistics.ByteUnique += pktLen
 
 	r.packetList.PushBack(pkt)
 }
@@ -521,7 +524,7 @@ func (r *liveReceive) periodicACK(now uint64) (ok bool, sequenceNumber circular.
 	r.lastPeriodicACK = now
 	r.nPackets = 0
 
-	r.statistics.MsRcvBuf = (maxPktTsbpdTime - minPktTsbpdTime) / 1_000
+	r.statistics.MsBuf = (maxPktTsbpdTime - minPktTsbpdTime) / 1_000
 
 	return
 }
@@ -579,8 +582,8 @@ func (r *liveReceive) Tick(now uint64) {
 		p := e.Value.(packet.Packet)
 
 		if p.Header().PacketSequenceNumber.Lte(r.lastACKSequenceNumber) && p.Header().PktTsbpdTime <= now {
-			r.statistics.PktRcvBuf--
-			r.statistics.ByteRcvBuf -= p.Len()
+			r.statistics.PktBuf--
+			r.statistics.ByteBuf -= p.Len()
 
 			r.lastDeliveredSequenceNumber = p.Header().PacketSequenceNumber
 
@@ -630,7 +633,6 @@ type fakeLiveReceive struct {
 	periodicNAKInterval uint64 // config
 
 	lastPeriodicACK uint64
-	lastPeriodicNAK uint64
 
 	avgPayloadSize float64 // bytes
 

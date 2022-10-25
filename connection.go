@@ -237,9 +237,15 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	})
 
 	// 4.6.  Too-Late Packet Drop -> 125% of SRT latency, at least 1 second
+	// https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_SNDDROPDELAY
+	dropThreshold := uint64(float64(c.tsbpdDelay)*1.25) + uint64(c.config.SendDropDelay.Microseconds())
+	if dropThreshold < uint64(time.Second.Microseconds()) {
+		dropThreshold = uint64(time.Second.Microseconds())
+	}
+
 	c.snd = congestion.NewLiveSend(congestion.SendConfig{
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
-		DropInterval:          uint64(c.config.SendDropDelay.Microseconds()),
+		DropThreshold:         dropThreshold + 20_000,
 		MaxBW:                 c.config.MaxBW,
 		InputBW:               c.config.InputBW,
 		MinInputBW:            c.config.MinInputBW,
@@ -1057,14 +1063,14 @@ func (c *srtConn) Stats() Statistics {
 		MsTimeStamp: uint64(time.Since(c.start).Milliseconds()),
 
 		// Accumulated
-		PktSent:          send.PktSent,
-		PktRecv:          recv.PktRecv,
-		PktSentUnique:    send.PktSentUnique,
-		PktRecvUnique:    recv.PktRecvUnique,
-		PktSndLoss:       send.PktSndLoss,
-		PktRcvLoss:       recv.PktRcvLoss,
+		PktSent:          send.Pkt,
+		PktRecv:          recv.Pkt,
+		PktSentUnique:    send.PktUnique,
+		PktRecvUnique:    recv.PktUnique,
+		PktSndLoss:       send.PktLoss,
+		PktRcvLoss:       recv.PktLoss,
 		PktRetrans:       send.PktRetrans,
-		PktRcvRetrans:    recv.PktRcvRetrans,
+		PktRcvRetrans:    recv.PktRetrans,
 		PktSentACK:       c.statistics.pktSentACK,
 		PktRecvACK:       c.statistics.pktRecvACK,
 		PktSentNAK:       c.statistics.pktSentNAK,
@@ -1072,17 +1078,18 @@ func (c *srtConn) Stats() Statistics {
 		PktSentKM:        c.statistics.pktSentKM,
 		PktRecvKM:        c.statistics.pktRecvKM,
 		UsSndDuration:    send.UsSndDuration,
-		PktSndDrop:       send.PktSndDrop,
-		PktRcvDrop:       recv.PktRcvDrop,
+		PktSndDrop:       send.PktDrop,
+		PktRcvDrop:       recv.PktDrop,
 		PktRcvUndecrypt:  c.statistics.pktRecvUndecrypt,
-		ByteSent:         send.ByteSent + (send.PktSent * c.statistics.headerSize),
-		ByteRecv:         recv.ByteRecv + (recv.PktRecv * c.statistics.headerSize),
-		ByteSentUnique:   send.ByteSentUnique + (send.PktSentUnique * c.statistics.headerSize),
-		ByteRecvUnique:   recv.ByteRecvUnique + (recv.PktRecvUnique * c.statistics.headerSize),
-		ByteRcvLoss:      recv.ByteRcvLoss + (recv.PktRcvLoss * c.statistics.headerSize),
+		ByteSent:         send.Byte + (send.Pkt * c.statistics.headerSize),
+		ByteRecv:         recv.Byte + (recv.Pkt * c.statistics.headerSize),
+		ByteSentUnique:   send.ByteUnique + (send.PktUnique * c.statistics.headerSize),
+		ByteRecvUnique:   recv.ByteUnique + (recv.PktUnique * c.statistics.headerSize),
+		ByteRcvLoss:      recv.ByteLoss + (recv.PktLoss * c.statistics.headerSize),
 		ByteRetrans:      send.ByteRetrans + (send.PktRetrans * c.statistics.headerSize),
-		ByteSndDrop:      send.ByteSndDrop + (send.PktSndDrop * c.statistics.headerSize),
-		ByteRcvDrop:      recv.ByteRcvDrop + (recv.PktRcvDrop * c.statistics.headerSize),
+		ByteRcvRetrans:   recv.ByteRetrans + (recv.PktRetrans * c.statistics.headerSize),
+		ByteSndDrop:      send.ByteDrop + (send.PktDrop * c.statistics.headerSize),
+		ByteRcvDrop:      recv.ByteDrop + (recv.PktDrop * c.statistics.headerSize),
 		ByteRcvUndecrypt: c.statistics.byteRecvUndecrypt + (c.statistics.pktRecvUndecrypt * c.statistics.headerSize),
 
 		// Instantaneous
@@ -1091,17 +1098,18 @@ func (c *srtConn) Stats() Statistics {
 		PktFlightSize:        send.PktFlightSize,
 		MsRTT:                c.rtt / 1_000,
 		MbpsBandwidth:        0,
+		MbpsLinkCapacity:     0,
 		ByteAvailSndBuf:      0,
 		ByteAvailRcvBuf:      0,
 		MbpsMaxBW:            float64(c.config.MaxBW / 1024 / 1024),
 		ByteMSS:              uint64(c.config.MSS),
-		PktSndBuf:            send.PktSndBuf,
-		ByteSndBuf:           send.ByteSndBuf,
-		MsSndBuf:             send.MsSndBuf,
+		PktSndBuf:            send.PktBuf,
+		ByteSndBuf:           send.ByteBuf,
+		MsSndBuf:             send.MsBuf,
 		MsSndTsbPdDelay:      uint64(c.config.PeerLatency),
-		PktRcvBuf:            recv.PktRcvBuf,
-		ByteRcvBuf:           recv.ByteRcvBuf,
-		MsRcvBuf:             recv.MsRcvBuf,
+		PktRcvBuf:            recv.PktBuf,
+		ByteRcvBuf:           recv.ByteBuf,
+		MsRcvBuf:             recv.MsBuf,
 		MsRcvTsbPdDelay:      uint64(c.config.ReceiverLatency),
 		PktReorderTolerance:  0,
 		PktRcvAvgBelatedTime: 0,

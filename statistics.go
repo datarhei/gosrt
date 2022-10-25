@@ -33,6 +33,7 @@ type Statistics struct {
 	ByteRecvUnique   uint64 // Same as pktRecvUnique, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRcvLoss      uint64 // Same as pktRcvLoss, but expressed in bytes, including payload and all the headers (IP, TCP, SRT), bytes for the presently missing (either reordered or lost) packets' payloads are estimated based on the average packet size
 	ByteRetrans      uint64 // Same as pktRetrans, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
+	ByteRcvRetrans   uint64 // Same as pktRcvRetrans, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteSndDrop      uint64 // Same as pktSndDrop, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRcvDrop      uint64 // Same as pktRcvDrop, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRcvUndecrypt uint64 // Same as pktRcvUndecrypt, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
@@ -43,7 +44,8 @@ type Statistics struct {
 	PktFlowWindow        uint64  // The maximum number of packets that can be "in flight"
 	PktFlightSize        uint64  // The number of packets in flight
 	MsRTT                float64 // Smoothed round-trip time (SRTT), an exponentially-weighted moving average (EWMA) of an endpoint's RTT samples, in milliseconds
-	MbpsBandwidth        float64 // Estimated bandwidth of the network link, in Mbps
+	MbpsBandwidth        float64 // Current transmission bandwidth, in Mbps
+	MbpsLinkCapacity     float64 // Estimated capacity of the network link, in Mbps
 	ByteAvailSndBuf      uint64  // The available space in the sender's buffer, in bytes
 	ByteAvailRcvBuf      uint64  // The available space in the receiver's buffer, in bytes
 	MbpsMaxBW            float64 // Transmission bandwidth limit, in Mbps

@@ -13,7 +13,7 @@ import (
 func mockLiveSend(onDeliver func(p packet.Packet)) *liveSend {
 	send := NewLiveSend(SendConfig{
 		InitialSequenceNumber: circular.New(0, packet.MAX_SEQUENCENUMBER),
-		DropInterval:          10,
+		DropThreshold:         10,
 		OnDeliver:             onDeliver,
 	})
 
@@ -480,7 +480,7 @@ func TestRecvDropTooLate(t *testing.T) {
 	require.Equal(t, uint32(9), recv.lastACKSequenceNumber.Val())
 	require.Equal(t, uint32(9), recv.lastDeliveredSequenceNumber.Val())
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
-	require.Equal(t, uint64(0), stats.PktRcvDrop)
+	require.Equal(t, uint64(0), stats.PktDrop)
 
 	p := packet.NewPacket(addr, nil)
 	p.Header().PacketSequenceNumber = circular.New(uint32(3), packet.MAX_SEQUENCENUMBER)
@@ -490,7 +490,7 @@ func TestRecvDropTooLate(t *testing.T) {
 
 	stats = recv.Stats()
 
-	require.Equal(t, uint64(1), stats.PktRcvDrop)
+	require.Equal(t, uint64(1), stats.PktDrop)
 }
 
 func TestRecvDropAlreadyACK(t *testing.T) {
@@ -525,7 +525,7 @@ func TestRecvDropAlreadyACK(t *testing.T) {
 	require.Equal(t, uint32(9), recv.lastACKSequenceNumber.Val())
 	require.Equal(t, uint32(4), recv.lastDeliveredSequenceNumber.Val())
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
-	require.Equal(t, uint64(0), stats.PktRcvDrop)
+	require.Equal(t, uint64(0), stats.PktDrop)
 
 	p := packet.NewPacket(addr, nil)
 	p.Header().PacketSequenceNumber = circular.New(uint32(6), packet.MAX_SEQUENCENUMBER)
@@ -535,7 +535,7 @@ func TestRecvDropAlreadyACK(t *testing.T) {
 
 	stats = recv.Stats()
 
-	require.Equal(t, uint64(1), stats.PktRcvDrop)
+	require.Equal(t, uint64(1), stats.PktDrop)
 }
 
 func TestRecvDropAlreadyRecvNoACK(t *testing.T) {
@@ -578,7 +578,7 @@ func TestRecvDropAlreadyRecvNoACK(t *testing.T) {
 	require.Equal(t, uint32(9), recv.lastACKSequenceNumber.Val())
 	require.Equal(t, uint32(4), recv.lastDeliveredSequenceNumber.Val())
 	require.Equal(t, uint32(19), recv.maxSeenSequenceNumber.Val())
-	require.Equal(t, uint64(0), stats.PktRcvDrop)
+	require.Equal(t, uint64(0), stats.PktDrop)
 
 	p := packet.NewPacket(addr, nil)
 	p.Header().PacketSequenceNumber = circular.New(uint32(15), packet.MAX_SEQUENCENUMBER)
@@ -588,7 +588,7 @@ func TestRecvDropAlreadyRecvNoACK(t *testing.T) {
 
 	stats = recv.Stats()
 
-	require.Equal(t, uint64(1), stats.PktRcvDrop)
+	require.Equal(t, uint64(1), stats.PktDrop)
 }
 func TestRecvFlush(t *testing.T) {
 	recv := mockLiveRecv(
