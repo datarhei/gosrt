@@ -9,6 +9,7 @@ import (
 // SendConfig is the configuration for the liveSend congestion control
 type SendConfig struct {
 	InitialSequenceNumber circular.Number
+	DropThreshold         uint64
 	MaxBW                 int64
 	InputBW               int64
 	MinInputBW            int64
@@ -21,9 +22,10 @@ type Sender interface {
 	Stats() SendStats
 	Flush()
 	Push(p packet.Packet)
-	Tick(now, dropThreshold uint64)
+	Tick(now uint64)
 	ACK(sequenceNumber circular.Number)
 	NAK(sequenceNumbers []circular.Number)
+	SetDropThreshold(threshold uint64)
 }
 
 // ReceiveConfig is the configuration for the liveResv congestion control
@@ -39,7 +41,7 @@ type ReceiveConfig struct {
 // Receiver is the receiving part of the congestion control
 type Receiver interface {
 	Stats() ReceiveStats
-	PacketRate() (pps, bps uint32)
+	PacketRate() (pps, bps float64)
 	Flush()
 	Push(pkt packet.Packet)
 	Tick(now uint64)
@@ -74,6 +76,11 @@ type SendStats struct {
 
 	UsPktSndPeriod float64 // microseconds
 	BytePayload    uint64
+
+	MbpsEstimatedInputBandwidth float64
+	MbpsEstimatedSentBandwidth  float64
+
+	PktLossRate float64
 }
 
 // ReceiveStats are collected statistics from liveRecv
@@ -102,4 +109,8 @@ type ReceiveStats struct {
 	MsBuf   uint64
 
 	BytePayload uint64
+
+	MbpsEstimatedRecvBandwidth float64
+
+	PktLossRate float64
 }

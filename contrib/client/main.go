@@ -132,7 +132,8 @@ func main() {
 	r.Close()
 
 	if srtconn, ok := r.(srt.Conn); ok {
-		stats := srtconn.Stats()
+		stats := &srt.Statistics{}
+		srtconn.Stats(stats)
 
 		fmt.Fprintf(os.Stderr, "%+v\n", stats)
 	}

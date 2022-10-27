@@ -702,7 +702,7 @@ func (dl *dialer) writePacket(p packet.Packet) error {
 func (dl *dialer) SetDeadline(t time.Time) error      { return dl.conn.SetDeadline(t) }
 func (dl *dialer) SetReadDeadline(t time.Time) error  { return dl.conn.SetReadDeadline(t) }
 func (dl *dialer) SetWriteDeadline(t time.Time) error { return dl.conn.SetWriteDeadline(t) }
-func (dl *dialer) Stats() Statistics                  { return dl.conn.Stats() }
+func (dl *dialer) Stats(s *Statistics)                { dl.conn.Stats(s) }
 
 func (dl *dialer) log(topic string, message func() string) {
 	dl.config.Logger.Print(topic, dl.socketId, 2, message)

@@ -53,7 +53,7 @@ type Conn interface {
 	StreamId() string
 
 	// Stats returns accumulated and instantaneous statistics of the connection.
-	Stats() Statistics
+	Stats(s *Statistics)
 }
 
 type connStats struct {
@@ -250,6 +250,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	c.snd = congestion.NewLiveSend(congestion.SendConfig{
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
+		DropThreshold:         c.dropThreshold,
 		MaxBW:                 c.config.MaxBW,
 		InputBW:               c.config.InputBW,
 		MinInputBW:            c.config.MinInputBW,
@@ -321,7 +322,7 @@ func (c *srtConn) ticker(ctx context.Context) {
 			tickTime := uint64(t.Sub(c.start).Microseconds())
 
 			c.recv.Tick(c.tsbpdTimeBase + tickTime)
-			c.snd.Tick(tickTime, c.dropThreshold)
+			c.snd.Tick(tickTime)
 		}
 	}
 }
@@ -915,10 +916,10 @@ func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 
 		cif.RTT = uint32(c.rtt)
 		cif.RTTVar = uint32(c.rttVar)
-		cif.AvailableBufferSize = c.config.FC // TODO: available buffer size (packets)
-		cif.PacketsReceivingRate = pps        // packets receiving rate (packets/s)
-		cif.EstimatedLinkCapacity = 0         // estimated link capacity (packets/s), not relevant for live mode
-		cif.ReceivingRate = 0                 // receiving rate (bytes/s), not relevant for live mode
+		cif.AvailableBufferSize = c.config.FC  // TODO: available buffer size (packets)
+		cif.PacketsReceivingRate = uint32(pps) // packets receiving rate (packets/s)
+		cif.EstimatedLinkCapacity = 0          // estimated link capacity (packets/s), not relevant for live mode
+		cif.ReceivingRate = 0                  // receiving rate (bytes/s), not relevant for live mode
 
 		p.Header().TypeSpecific = c.nextACKNumber.Val()
 
@@ -1059,65 +1060,113 @@ func (c *srtConn) SetDeadline(t time.Time) error      { return nil }
 func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }
 
-func (c *srtConn) Stats() Statistics {
+func (c *srtConn) Stats(s *Statistics) {
+	now := uint64(time.Since(c.start).Milliseconds())
+
 	send := c.snd.Stats()
 	recv := c.recv.Stats()
 
-	s := Statistics{
-		MsTimeStamp: uint64(time.Since(c.start).Milliseconds()),
+	previous := s.Accumulated
+	interval := now - s.MsTimeStamp
 
-		// Accumulated
-		PktSent:          send.Pkt,
-		PktRecv:          recv.Pkt,
-		PktSentUnique:    send.PktUnique,
-		PktRecvUnique:    recv.PktUnique,
-		PktSndLoss:       send.PktLoss,
-		PktRcvLoss:       recv.PktLoss,
-		PktRetrans:       send.PktRetrans,
-		PktRcvRetrans:    recv.PktRetrans,
-		PktSentACK:       c.statistics.pktSentACK,
-		PktRecvACK:       c.statistics.pktRecvACK,
-		PktSentNAK:       c.statistics.pktSentNAK,
-		PktRecvNAK:       c.statistics.pktRecvNAK,
-		PktSentKM:        c.statistics.pktSentKM,
-		PktRecvKM:        c.statistics.pktRecvKM,
-		UsSndDuration:    send.UsSndDuration,
-		PktSndDrop:       send.PktDrop,
-		PktRcvDrop:       recv.PktDrop,
-		PktRcvUndecrypt:  c.statistics.pktRecvUndecrypt,
-		ByteSent:         send.Byte + (send.Pkt * c.statistics.headerSize),
-		ByteRecv:         recv.Byte + (recv.Pkt * c.statistics.headerSize),
-		ByteSentUnique:   send.ByteUnique + (send.PktUnique * c.statistics.headerSize),
-		ByteRecvUnique:   recv.ByteUnique + (recv.PktUnique * c.statistics.headerSize),
-		ByteRcvLoss:      recv.ByteLoss + (recv.PktLoss * c.statistics.headerSize),
-		ByteRetrans:      send.ByteRetrans + (send.PktRetrans * c.statistics.headerSize),
-		ByteRcvRetrans:   recv.ByteRetrans + (recv.PktRetrans * c.statistics.headerSize),
-		ByteSndDrop:      send.ByteDrop + (send.PktDrop * c.statistics.headerSize),
-		ByteRcvDrop:      recv.ByteDrop + (recv.PktDrop * c.statistics.headerSize),
-		ByteRcvUndecrypt: c.statistics.byteRecvUndecrypt + (c.statistics.pktRecvUndecrypt * c.statistics.headerSize),
-
-		// Instantaneous
-		UsPktSndPeriod:       send.UsPktSndPeriod,
-		PktFlowWindow:        uint64(c.config.FC),
-		PktFlightSize:        send.PktFlightSize,
-		MsRTT:                c.rtt / 1_000,
-		MbpsBandwidth:        0,
-		MbpsLinkCapacity:     0,
-		ByteAvailSndBuf:      0,
-		ByteAvailRcvBuf:      0,
-		MbpsMaxBW:            float64(c.config.MaxBW / 1024 / 1024),
-		ByteMSS:              uint64(c.config.MSS),
-		PktSndBuf:            send.PktBuf,
-		ByteSndBuf:           send.ByteBuf,
-		MsSndBuf:             send.MsBuf,
-		MsSndTsbPdDelay:      c.peerTsbpdDelay / 1000,
-		PktRcvBuf:            recv.PktBuf,
-		ByteRcvBuf:           recv.ByteBuf,
-		MsRcvBuf:             recv.MsBuf,
-		MsRcvTsbPdDelay:      c.tsbpdDelay / 1000,
-		PktReorderTolerance:  0,
-		PktRcvAvgBelatedTime: 0,
+	// Accumulated
+	s.Accumulated = StatisticsAccumulated{
+		PktSent:           send.Pkt,
+		PktRecv:           recv.Pkt,
+		PktSentUnique:     send.PktUnique,
+		PktRecvUnique:     recv.PktUnique,
+		PktSendLoss:       send.PktLoss,
+		PktRecvLoss:       recv.PktLoss,
+		PktRetrans:        send.PktRetrans,
+		PktRecvRetrans:    recv.PktRetrans,
+		PktSentACK:        c.statistics.pktSentACK,
+		PktRecvACK:        c.statistics.pktRecvACK,
+		PktSentNAK:        c.statistics.pktSentNAK,
+		PktRecvNAK:        c.statistics.pktRecvNAK,
+		PktSentKM:         c.statistics.pktSentKM,
+		PktRecvKM:         c.statistics.pktRecvKM,
+		UsSndDuration:     send.UsSndDuration,
+		PktSendDrop:       send.PktDrop,
+		PktRecvDrop:       recv.PktDrop,
+		PktRecvUndecrypt:  c.statistics.pktRecvUndecrypt,
+		ByteSent:          send.Byte + (send.Pkt * c.statistics.headerSize),
+		ByteRecv:          recv.Byte + (recv.Pkt * c.statistics.headerSize),
+		ByteSentUnique:    send.ByteUnique + (send.PktUnique * c.statistics.headerSize),
+		ByteRecvUnique:    recv.ByteUnique + (recv.PktUnique * c.statistics.headerSize),
+		ByteRecvLoss:      recv.ByteLoss + (recv.PktLoss * c.statistics.headerSize),
+		ByteRetrans:       send.ByteRetrans + (send.PktRetrans * c.statistics.headerSize),
+		ByteRecvRetrans:   recv.ByteRetrans + (recv.PktRetrans * c.statistics.headerSize),
+		ByteSendDrop:      send.ByteDrop + (send.PktDrop * c.statistics.headerSize),
+		ByteRecvDrop:      recv.ByteDrop + (recv.PktDrop * c.statistics.headerSize),
+		ByteRecvUndecrypt: c.statistics.byteRecvUndecrypt + (c.statistics.pktRecvUndecrypt * c.statistics.headerSize),
 	}
 
-	return s
+	// Interval
+	s.Interval = StatisticsInterval{
+		MsInterval:         interval,
+		PktSent:            s.Accumulated.PktSent - previous.PktSent,
+		PktRecv:            s.Accumulated.PktRecv - previous.PktRecv,
+		PktSentUnique:      s.Accumulated.PktSentUnique - previous.PktSentUnique,
+		PktRecvUnique:      s.Accumulated.PktRecvUnique - previous.PktRecvUnique,
+		PktSendLoss:        s.Accumulated.PktSendLoss - previous.PktSendLoss,
+		PktRecvLoss:        s.Accumulated.PktRecvLoss - previous.PktRecvLoss,
+		PktRetrans:         s.Accumulated.PktRetrans - previous.PktRetrans,
+		PktRecvRetrans:     s.Accumulated.PktRecvRetrans - previous.PktRecvRetrans,
+		PktSentACK:         s.Accumulated.PktSentACK - previous.PktSentACK,
+		PktRecvACK:         s.Accumulated.PktRecvACK - previous.PktRecvACK,
+		PktSentNAK:         s.Accumulated.PktSentNAK - previous.PktSentNAK,
+		PktRecvNAK:         s.Accumulated.PktRecvNAK - previous.PktRecvNAK,
+		MbpsSendRate:       float64(s.Accumulated.ByteSent-previous.ByteSent) * 8 / 1024 / 1024 / (float64(interval) / 1000),
+		MbpsRecvRate:       float64(s.Accumulated.ByteRecv-previous.ByteRecv) * 8 / 1024 / 1024 / (float64(interval) / 1000),
+		UsSndDuration:      s.Accumulated.UsSndDuration - previous.UsSndDuration,
+		PktReorderDistance: 0,
+		PktRecvBelated:     s.Accumulated.PktRecvBelated - previous.PktRecvBelated,
+		PktSndDrop:         s.Accumulated.PktSendDrop - previous.PktSendDrop,
+		PktRecvDrop:        s.Accumulated.PktRecvDrop - previous.PktRecvDrop,
+		PktRecvUndecrypt:   s.Accumulated.PktRecvUndecrypt - previous.PktRecvUndecrypt,
+		ByteSent:           s.Accumulated.ByteSent - previous.ByteSent,
+		ByteRecv:           s.Accumulated.ByteRecv - previous.ByteRecv,
+		ByteSentUnique:     s.Accumulated.ByteSentUnique - previous.ByteSentUnique,
+		ByteRecvUnique:     s.Accumulated.ByteRecvUnique - previous.ByteRecvUnique,
+		ByteRecvLoss:       s.Accumulated.ByteRecvLoss - previous.ByteRecvLoss,
+		ByteRetrans:        s.Accumulated.ByteRetrans - previous.ByteRetrans,
+		ByteRecvRetrans:    s.Accumulated.ByteRecvRetrans - previous.ByteRecvRetrans,
+		ByteRecvBelated:    s.Accumulated.ByteRecvBelated - previous.ByteRecvBelated,
+		ByteSendDrop:       s.Accumulated.ByteSendDrop - previous.ByteSendDrop,
+		ByteRecvDrop:       s.Accumulated.ByteRecvDrop - previous.ByteRecvDrop,
+		ByteRecvUndecrypt:  s.Accumulated.ByteRecvUndecrypt - previous.ByteRecvUndecrypt,
+	}
+
+	// Instantaneous
+	s.Instantaneous = StatisticsInstantaneous{
+		UsPktSendPeriod:       send.UsPktSndPeriod,
+		PktFlowWindow:         uint64(c.config.FC),
+		PktFlightSize:         send.PktFlightSize,
+		MsRTT:                 c.rtt / 1000,
+		MbpsSentRate:          send.MbpsEstimatedSentBandwidth,
+		MbpsRecvRate:          recv.MbpsEstimatedRecvBandwidth,
+		MbpsLinkCapacity:      0,
+		ByteAvailSendBuf:      0, // unlimited
+		ByteAvailRecvBuf:      0, // unlimited
+		MbpsMaxBW:             float64(c.config.MaxBW) / 1024 / 1024,
+		ByteMSS:               uint64(c.config.MSS),
+		PktSendBuf:            send.PktBuf,
+		ByteSendBuf:           send.ByteBuf,
+		MsSendBuf:             send.MsBuf,
+		MsSendTsbPdDelay:      c.peerTsbpdDelay / 1000,
+		PktRecvBuf:            recv.PktBuf,
+		ByteRecvBuf:           recv.ByteBuf,
+		MsRecvBuf:             recv.MsBuf,
+		MsRecvTsbPdDelay:      c.tsbpdDelay / 1000,
+		PktReorderTolerance:   uint64(c.config.LossMaxTTL),
+		PktRecvAvgBelatedTime: 0,
+		PktSendLossRate:       send.PktLossRate,
+		PktRecvLossRate:       recv.PktLossRate,
+	}
+
+	if c.config.MaxBW < 0 {
+		s.Instantaneous.MbpsMaxBW = -1
+	}
+
+	s.MsTimeStamp = now
 }

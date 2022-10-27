@@ -236,7 +236,10 @@ func (s *server) handlePublish(conn srt.Conn) {
 
 	s.log("PUBLISH", "STOP", u.Path, "", client)
 
-	fmt.Fprintf(os.Stderr, "%+v\n", conn.Stats())
+	stats := &srt.Statistics{}
+	conn.Stats(stats)
+
+	fmt.Fprintf(os.Stderr, "%+v\n", stats)
 
 	conn.Close()
 }
@@ -264,7 +267,10 @@ func (s *server) handleSubscribe(conn srt.Conn) {
 
 	s.log("SUBSCRIBE", "STOP", u.Path, "", client)
 
-	fmt.Fprintf(os.Stderr, "%+v\n", conn.Stats())
+	stats := &srt.Statistics{}
+	conn.Stats(stats)
+
+	fmt.Fprintf(os.Stderr, "%+v\n", stats)
 
 	conn.Close()
 }

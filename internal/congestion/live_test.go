@@ -10,11 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var dropThreshold uint64 = 10
-
 func mockLiveSend(onDeliver func(p packet.Packet)) *liveSend {
 	send := NewLiveSend(SendConfig{
 		InitialSequenceNumber: circular.New(0, packet.MAX_SEQUENCENUMBER),
+		DropThreshold:         10,
 		OnDeliver:             onDeliver,
 	})
 
@@ -36,11 +35,11 @@ func TestSendSequence(t *testing.T) {
 		send.Push(p)
 	}
 
-	send.Tick(5, dropThreshold)
+	send.Tick(5)
 
 	require.Exactly(t, []uint32{0, 1, 2, 3, 4}, numbers)
 
-	send.Tick(10, dropThreshold)
+	send.Tick(10)
 
 	require.Exactly(t, []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, numbers)
 }
@@ -57,7 +56,7 @@ func TestSendLossListACK(t *testing.T) {
 		send.Push(p)
 	}
 
-	send.Tick(10, dropThreshold)
+	send.Tick(10)
 
 	require.Equal(t, 10, send.lossList.Len())
 
@@ -86,7 +85,7 @@ func TestSendRetransmit(t *testing.T) {
 		send.Push(p)
 	}
 
-	send.Tick(10, dropThreshold)
+	send.Tick(10)
 
 	require.Equal(t, 0, nRetransmit)
 
@@ -117,11 +116,11 @@ func TestSendDrop(t *testing.T) {
 		send.Push(p)
 	}
 
-	send.Tick(10, dropThreshold)
+	send.Tick(10)
 
 	require.Equal(t, 10, send.lossList.Len())
 
-	send.Tick(20, dropThreshold)
+	send.Tick(20)
 
 	require.Equal(t, 0, send.lossList.Len())
 }
@@ -141,7 +140,7 @@ func TestSendFlush(t *testing.T) {
 	require.Exactly(t, 10, send.packetList.Len())
 	require.Exactly(t, 0, send.lossList.Len())
 
-	send.Tick(5, dropThreshold)
+	send.Tick(5)
 
 	require.Exactly(t, 5, send.packetList.Len())
 	require.Exactly(t, 5, send.lossList.Len())
