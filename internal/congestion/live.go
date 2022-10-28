@@ -28,6 +28,8 @@ type liveSend struct {
 
 	statistics SendStats
 
+	probeTime uint64
+
 	rate struct {
 		period uint64 // microseconds
 		last   uint64
@@ -53,7 +55,7 @@ func NewLiveSend(config SendConfig) Sender {
 		packetList:         list.New(),
 		lossList:           list.New(),
 
-		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
+		avgPayloadSize: packet.MAX_PAYLOAD_SIZE, //  5.1.2. SRT's Default LiveCC Algorithm
 		maxBW:          float64(config.MaxBW),
 		inputBW:        float64(config.InputBW),
 		overheadBW:     float64(config.OverheadBW),
@@ -126,6 +128,19 @@ func (s *liveSend) Push(p packet.Packet) {
 	s.rate.bytes += pktLen
 
 	p.Header().Timestamp = uint32(p.Header().PktTsbpdTime & uint64(packet.MAX_TIMESTAMP))
+
+	// Every 16th and 17th packet should be sent at the same time in order
+	// for the receiver to determine the link capacity. Not really well
+	// documented in the specs.
+	// PktTsbpdTime is used for the timing of sending the packets. Here we
+	// can modify it because it has already been used to set the packet's
+	// timestamp.
+	probe := p.Header().PacketSequenceNumber.Val() & 0xF
+	if probe == 0 {
+		s.probeTime = p.Header().PktTsbpdTime
+	} else if probe == 1 {
+		p.Header().PktTsbpdTime = s.probeTime
+	}
 
 	s.packetList.PushBack(p)
 
@@ -306,7 +321,11 @@ type liveReceive struct {
 	lastPeriodicACK uint64
 	lastPeriodicNAK uint64
 
-	avgPayloadSize float64 // bytes
+	avgPayloadSize  float64 // bytes
+	avgLinkCapacity float64 // packets per second
+
+	probeTime    time.Time
+	probeNextSeq circular.Number
 
 	statistics ReceiveStats
 
@@ -371,17 +390,19 @@ func (r *liveReceive) Stats() ReceiveStats {
 
 	r.statistics.BytePayload = uint64(r.avgPayloadSize)
 	r.statistics.MbpsEstimatedRecvBandwidth = r.rate.bytesPerSecond * 8 / 1024 / 1024
+	r.statistics.MbpsEstimatedLinkCapacity = r.avgLinkCapacity * packet.MAX_PAYLOAD_SIZE * 8 / 1024 / 1024
 	r.statistics.PktLossRate = r.rate.pktLossRate
 
 	return r.statistics
 }
 
-func (r *liveReceive) PacketRate() (pps, bps float64) {
+func (r *liveReceive) PacketRate() (pps, bps, capacity float64) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	pps = r.rate.packetsPerSecond
 	bps = r.rate.bytesPerSecond
+	capacity = r.avgLinkCapacity
 
 	return
 }
@@ -399,6 +420,29 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 
 	if pkt == nil {
 		return
+	}
+
+	// This is not really well (not at all) described in the specs. See core.cpp and window.h
+	// and search for PUMASK_SEQNO_PROBE (0xF). Every 16th and 17th packet are
+	// sent in pairs. This is used as a probe for the theoretical capacity of the link.
+	if !pkt.Header().RetransmittedPacketFlag {
+		probe := pkt.Header().PacketSequenceNumber.Val() & 0xF
+		if probe == 0 {
+			r.probeTime = time.Now()
+			r.probeNextSeq = pkt.Header().PacketSequenceNumber.Inc()
+		} else if probe == 1 && pkt.Header().PacketSequenceNumber.Equals(r.probeNextSeq) && !r.probeTime.IsZero() {
+			// The time between packets scaled to a fully loaded packet
+			diff := float64(time.Since(r.probeTime).Microseconds()) * (packet.MAX_PAYLOAD_SIZE / float64(pkt.Len()))
+			if diff != 0 {
+				// Here we're doing an average of the measurements.
+				r.avgLinkCapacity = 0.875*r.avgLinkCapacity + 0.125*1_000_000/diff
+				fmt.Printf("diff: %f, pps: %f, avg: %f packets/s\n", diff, 1_000_000/diff, r.avgLinkCapacity)
+			}
+		} else {
+			r.probeTime = time.Time{}
+		}
+	} else {
+		r.probeTime = time.Time{}
 	}
 
 	r.nPackets++
@@ -726,7 +770,7 @@ func NewFakeLiveReceive(config ReceiveConfig) Receiver {
 }
 
 func (r *fakeLiveReceive) Stats() ReceiveStats { return ReceiveStats{} }
-func (r *fakeLiveReceive) PacketRate() (pps, bps float64) {
+func (r *fakeLiveReceive) PacketRate() (pps, bps, capacity float64) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 

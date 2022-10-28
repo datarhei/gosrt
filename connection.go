@@ -73,6 +73,7 @@ type connStats struct {
 	pktRecvKeepalive  uint64
 	pktSentShutdown   uint64
 	pktRecvShutdown   uint64
+	mbpsLinkCapacity  float64
 }
 
 // Check if we implement the net.Conn interface
@@ -593,6 +594,8 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 
 		c.debug.expectedRcvPacketSequenceNumber = header.PacketSequenceNumber.Inc()
 
+		//fmt.Printf("%s\n", p.String())
+
 		// Ignore FEC filter control packets
 		// https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md
 		// "An FEC control packet is distinguished from a regular data packet by having
@@ -692,6 +695,9 @@ func (c *srtConn) handleACK(p packet.Packet) {
 	if !cif.IsLite && !cif.IsSmall {
 		// 4.10.  Round-Trip Time Estimation
 		c.recalculateRTT(time.Duration(int64(cif.RTT)) * time.Microsecond)
+
+		// Estimated Link Capacity (from packets/s to Mbps)
+		c.statistics.mbpsLinkCapacity = float64(cif.EstimatedLinkCapacity) * MAX_PAYLOAD_SIZE * 8 / 1024 / 1024
 
 		c.sendACKACK(p.Header().TypeSpecific)
 	}
@@ -912,14 +918,14 @@ func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 
 		p.Header().TypeSpecific = 0
 	} else {
-		pps, _ := c.recv.PacketRate()
+		pps, bps, capacity := c.recv.PacketRate()
 
 		cif.RTT = uint32(c.rtt)
 		cif.RTTVar = uint32(c.rttVar)
-		cif.AvailableBufferSize = c.config.FC  // TODO: available buffer size (packets)
-		cif.PacketsReceivingRate = uint32(pps) // packets receiving rate (packets/s)
-		cif.EstimatedLinkCapacity = 0          // estimated link capacity (packets/s), not relevant for live mode
-		cif.ReceivingRate = 0                  // receiving rate (bytes/s), not relevant for live mode
+		cif.AvailableBufferSize = c.config.FC        // TODO: available buffer size (packets)
+		cif.PacketsReceivingRate = uint32(pps)       // packets receiving rate (packets/s)
+		cif.EstimatedLinkCapacity = uint32(capacity) // estimated link capacity (packets/s), not relevant for live mode
+		cif.ReceivingRate = uint32(bps)              // receiving rate (bytes/s), not relevant for live mode
 
 		p.Header().TypeSpecific = c.nextACKNumber.Val()
 
@@ -1145,7 +1151,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		MsRTT:                 c.rtt / 1000,
 		MbpsSentRate:          send.MbpsEstimatedSentBandwidth,
 		MbpsRecvRate:          recv.MbpsEstimatedRecvBandwidth,
-		MbpsLinkCapacity:      0,
+		MbpsLinkCapacity:      recv.MbpsEstimatedLinkCapacity,
 		ByteAvailSendBuf:      0, // unlimited
 		ByteAvailRecvBuf:      0, // unlimited
 		MbpsMaxBW:             float64(c.config.MaxBW) / 1024 / 1024,
@@ -1162,6 +1168,12 @@ func (c *srtConn) Stats(s *Statistics) {
 		PktRecvAvgBelatedTime: 0,
 		PktSendLossRate:       send.PktLossRate,
 		PktRecvLossRate:       recv.PktLossRate,
+	}
+
+	// If we're only sending, the receiver congestion control value for the link capacity is zero,
+	// use the value that we got from the receiver via the ACK packets.
+	if s.Instantaneous.MbpsLinkCapacity == 0 {
+		s.Instantaneous.MbpsLinkCapacity = c.statistics.mbpsLinkCapacity
 	}
 
 	if c.config.MaxBW < 0 {

@@ -41,7 +41,7 @@ type ReceiveConfig struct {
 // Receiver is the receiving part of the congestion control
 type Receiver interface {
 	Stats() ReceiveStats
-	PacketRate() (pps, bps float64)
+	PacketRate() (pps, bps, capacity float64)
 	Flush()
 	Push(pkt packet.Packet)
 	Tick(now uint64)
@@ -111,6 +111,7 @@ type ReceiveStats struct {
 	BytePayload uint64
 
 	MbpsEstimatedRecvBandwidth float64
+	MbpsEstimatedLinkCapacity  float64
 
 	PktLossRate float64
 }
