@@ -430,13 +430,12 @@ func (r *liveReceive) Push(pkt packet.Packet) {
 		if probe == 0 {
 			r.probeTime = time.Now()
 			r.probeNextSeq = pkt.Header().PacketSequenceNumber.Inc()
-		} else if probe == 1 && pkt.Header().PacketSequenceNumber.Equals(r.probeNextSeq) && !r.probeTime.IsZero() {
+		} else if probe == 1 && pkt.Header().PacketSequenceNumber.Equals(r.probeNextSeq) && !r.probeTime.IsZero() && pkt.Len() != 0 {
 			// The time between packets scaled to a fully loaded packet
 			diff := float64(time.Since(r.probeTime).Microseconds()) * (packet.MAX_PAYLOAD_SIZE / float64(pkt.Len()))
 			if diff != 0 {
 				// Here we're doing an average of the measurements.
 				r.avgLinkCapacity = 0.875*r.avgLinkCapacity + 0.125*1_000_000/diff
-				fmt.Printf("diff: %f, pps: %f, avg: %f packets/s\n", diff, 1_000_000/diff, r.avgLinkCapacity)
 			}
 		} else {
 			r.probeTime = time.Time{}
