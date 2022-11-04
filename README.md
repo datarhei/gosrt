@@ -18,7 +18,7 @@ Implementation of the SRT protocol in pure Go with minimal dependencies.
 -   [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
 -   [SRT Technical Overview](https://github.com/Haivision/srt/files/2489142/SRT_Protocol_TechnicalOverview_DRAFT_2018-10-17.pdf)
 
-# Implementations
+## Implementations
 
 This implementation of the SRT protocol has live streaming of video/audio in mind. Because of this, the buffer mode and File Transfer
 Congestion Control (FileCC) are not implemented.
@@ -39,17 +39,17 @@ Congestion Control (FileCC) are not implemented.
 
 The parts that are implemented are based on what has been published in the SRT RFC.
 
-# Requirements
+## Requirements
 
 A Go version of 1.16+ is required.
 
-# Installation
+## Installation
 
 ```
 go get github.com/datarhei/gosrt
 ```
 
-# Caller example
+## Caller example
 
 ```
 import "github.com/datarhei/gosrt"
@@ -77,7 +77,7 @@ conn.Close()
 
 In the `contrib/client` directory you'll find a complete example of a SRT client.
 
-# Listener example
+## Listener example
 
 ```
 import "github.com/datarhei/gosrt"
@@ -113,7 +113,7 @@ In the `contrib/server` directory you'll find a complete example of a SRT server
 this modules provides the `Server` type which is a light framework for creating your own SRT server. The
 example server is based on this type.
 
-## PUBLISH / SUBSCRIBE
+### PUBLISH / SUBSCRIBE
 
 The `Accept` function from the `Listener` expects a function that handles the connection requests. It can
 return 3 different values: `srt.PUBLISH`, `srt.SUBSCRIBE`, and `srt.REJECT`. `srt.PUBLISH` means that the
@@ -121,7 +121,7 @@ server expects the caller to send data, whereas `srt.SUBSCRIBE` means that the s
 the caller. This is opiniated towards a streaming server, however in your implementation of a listener
 you are free to handle connections requests to your liking.
 
-# Contributed client
+## Contributed client
 
 In the `contrib/client` directory you'll find an example implementation of a SRT client.
 
@@ -140,7 +140,7 @@ The application requires only two options:
 
 Both options accept an address. Valid addresses are: `-` for `stdin`, resp. `stdout`, a `srt://` address, or an `udp://` address.
 
-## SRT URL
+### SRT URL
 
 A SRT URL is of the form `srt://[host]:[port]/?[options]` where options are in the form of a `HTTP` query string. These are the
 known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/blob/master/docs/apps/srt-live-transmit.md)):
@@ -182,7 +182,7 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `transtype`          | `live`                 | Transmission type. Must be `live`.                                      |
 | `tsbpdmode`          | `bool`                 | Enable timestamp-based packet delivery mode.                            |
 
-## Usage
+### Usage
 
 Reading from a SRT sender and play with `ffplay`:
 
@@ -214,7 +214,7 @@ In the third console connect to that stream and play the video with `ffplay`:
 ./client -from "srt://127.0.0.1:6001/?mode=caller&streamid=foobar" -to - | ffplay -f mpegts -i -
 ```
 
-# Contributed server
+## Contributed server
 
 In the `contrib/server` directory you'll find an example implementation of a SRT server. This server allows you to publish
 a stream that can be read by many clients.
@@ -247,7 +247,7 @@ Use `-logtopics` in order to write debug output. The value are a comma separated
 
 Use `-profile` in order to write a CPU profile.
 
-## StreamID
+### StreamID
 
 In SRT the StreamID is used to transport somewhat arbitrary information from the caller to the listener. The provided example server uses this
 machanism to decide who is the sender and who is the receiver. The server must know if the connecting client wants to publish a stream or
@@ -259,7 +259,7 @@ receive data.
 
 If you implement your own server you are free to interpret the streamID as you wish.
 
-## Usage
+### Usage
 
 Running a server listening on port 6001 with defaults:
 
@@ -290,7 +290,7 @@ ffplay -f mpegts -transtype live -i "srt://127.0.0.1:6001?streamid=/live/stream"
 You will most likely first see some error messages from `ffplay` because it tries to make sense of the received data until a keyframe arrives. If you
 get more errors during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
 
-## Encryption
+### Encryption
 
 The stream can be encrypted with a passphrase. First start the server with a passphrase. If you are using `srt-live-transmit`, the passphrase has to be at least 10 characters long otherwise it will not be accepted.
 
@@ -313,7 +313,7 @@ ffplay -f mpegts -transtype live -i "srt://127.0.0.1:6001?streamid=/live/stream&
 You will most likely first see some error messages from `ffplay` because it tries to make sense of the received data until a keyframe arrives. If you
 get more errors during playback, you might increase the receive buffer by adding e.g. `-rcvlatency 1000000` to the command line.
 
-# Logging
+## Logging
 
 This SRT module has a built-in logging facility for debugging purposes. Check the `Logger` interface and the `NewLogger(topics []string)` function. Because logging everything would be too much output if you wonly want to debug something specific, you have the possibility to limit the logging to specific areas like everything regarding a connection or only the handshake. That's why there are various topics.
 
@@ -390,7 +390,7 @@ packet:send:dump
 
 You can run `make logtopics` in order to extract the list of topics.
 
-# Docker
+## Docker
 
 The docker image you can build with `docker build -t srt .` provides the example SRT client and server as mentioned in the paragraph above.
 E.g. run the server with `docker run -it --rm -p 6001:6001/udp srt srt-server -addr :6001`.
