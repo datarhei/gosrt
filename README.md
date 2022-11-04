@@ -1,4 +1,12 @@
+# GoSRT
+
 Implementation of the SRT protocol in pure Go with minimal dependencies.
+
+<p align="left">
+  <a href="http://srtalliance.org/">
+    <img alt="SRT" src="https://github.com/datarhei/misc/blob/main/img/gosrt.png?raw=true" width="600"/>
+  </a>
+</p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![Tests](https://github.com/datarhei/gosrt/actions/workflows/go-tests.yml/badge.svg)
@@ -9,6 +17,8 @@ Implementation of the SRT protocol in pure Go with minimal dependencies.
 -   [SRT reference implementation](https://github.com/Haivision/srt)
 -   [SRT RFC](https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html)
 -   [SRT Technical Overview](https://github.com/Haivision/srt/files/2489142/SRT_Protocol_TechnicalOverview_DRAFT_2018-10-17.pdf)
+
+# Implementations
 
 This implementation of the SRT protocol has live streaming of video/audio in mind. Because of this, the buffer mode and File Transfer
 Congestion Control (FileCC) are not implemented.
