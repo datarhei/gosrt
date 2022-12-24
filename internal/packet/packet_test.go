@@ -60,6 +60,27 @@ func TestArbitraryControlPacket(t *testing.T) {
 	require.Equal(t, "800100700000002a0000000000000000", data)
 }
 
+func FuzzPacket(f *testing.F) {
+	f.Add("00000000c00000010000000000000000")
+	f.Add("00000000c0000001000000000000000068656c6c6f20776f726c6421")
+	f.Add("800100700000002a0000000000000000")
+
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
+
+	f.Fuzz(func(t *testing.T, orig string) {
+		data, _ := hex.DecodeString(orig)
+		p := NewPacket(addr, nil)
+		p.Unmarshal(data)
+
+		var buf bytes.Buffer
+		p.Marshal(&buf)
+
+		if !bytes.Equal(data, buf.Bytes()) {
+			t.Errorf("Before: %q, after: %q", orig, buf.Bytes())
+		}
+	})
+}
+
 func TestUnmarshalPacket(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
