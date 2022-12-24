@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,20 +73,38 @@ func (s *stats) update(n uint64) {
 func main() {
 	var from string
 	var to string
+	var logtopics string
 
 	flag.StringVar(&from, "from", "", "Address to read from, sources: srt://, udp://, - (stdin)")
 	flag.StringVar(&to, "to", "", "Address to write to, targets: srt://, udp://, file://, - (stdout)")
+	flag.StringVar(&logtopics, "logtopics", "", "topics for the log output")
 
 	flag.Parse()
 
-	r, err := openReader(from)
+	var logger srt.Logger
+
+	if len(logtopics) != 0 {
+		logger = srt.NewLogger(strings.Split(logtopics, ","))
+	}
+
+	go func() {
+		if logger == nil {
+			return
+		}
+
+		for m := range logger.Listen() {
+			fmt.Fprintf(os.Stderr, "%#08x %s (in %s:%d)\n%s \n", m.SocketId, m.Topic, m.File, m.Line, m.Message)
+		}
+	}()
+
+	r, err := openReader(from, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: from: %v\n", err)
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	w, err := openWriter(to)
+	w, err := openWriter(to, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: to: %v\n", err)
 		flag.PrintDefaults()
@@ -95,9 +114,6 @@ func main() {
 	doneChan := make(chan error)
 
 	go func() {
-		wr := NewNonblockingWriter(w, 2048)
-		defer wr.Close()
-
 		buffer := make([]byte, 2048)
 
 		s := stats{}
@@ -112,7 +128,7 @@ func main() {
 
 			s.update(uint64(n))
 
-			if _, err := wr.Write(buffer[:n]); err != nil {
+			if _, err := w.Write(buffer[:n]); err != nil {
 				doneChan <- fmt.Errorf("write: %w", err)
 				return
 			}
@@ -133,6 +149,20 @@ func main() {
 		fmt.Fprint(os.Stderr, "\n")
 	}
 
+	w.Close()
+
+	if srtconn, ok := w.(srt.Conn); ok {
+		stats := &srt.Statistics{}
+		srtconn.Stats(stats)
+
+		data, err := json.MarshalIndent(stats, "", "   ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "writer: %+v\n", stats)
+		} else {
+			fmt.Fprintf(os.Stderr, "writer: %s\n", string(data))
+		}
+	}
+
 	r.Close()
 
 	if srtconn, ok := r.(srt.Conn); ok {
@@ -147,28 +177,37 @@ func main() {
 		}
 	}
 
-	if srtconn, ok := w.(srt.Conn); ok {
-		stats := &srt.Statistics{}
-		srtconn.Stats(stats)
-
-		data, err := json.MarshalIndent(stats, "", "   ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "writer: %+v\n", stats)
-		} else {
-			fmt.Fprintf(os.Stderr, "writer: %s\n", string(data))
-		}
+	if logger != nil {
+		logger.Close()
 	}
-
-	w.Close()
 }
 
-func openReader(addr string) (io.ReadCloser, error) {
+func openReader(addr string, logger srt.Logger) (io.ReadCloser, error) {
 	if len(addr) == 0 {
 		return nil, fmt.Errorf("the address must not be empty")
 	}
 
 	if addr == "-" {
 		return os.Stdin, nil
+	}
+
+	if strings.HasPrefix(addr, "debug://") {
+		readerOptions := DebugReaderOptions{}
+		parts := strings.SplitN(strings.TrimPrefix(addr, "debug://"), "?", 2)
+		if len(parts) > 1 {
+			options, err := url.ParseQuery(parts[1])
+			if err != nil {
+				return nil, err
+			}
+
+			if x, err := strconv.ParseUint(options.Get("bitrate"), 10, 64); err == nil {
+				readerOptions.Bitrate = x
+			}
+		}
+
+		r, err := NewDebugReader(readerOptions)
+
+		return r, err
 	}
 
 	u, err := url.Parse(addr)
@@ -181,6 +220,7 @@ func openReader(addr string) (io.ReadCloser, error) {
 		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
 			return nil, err
 		}
+		config.Logger = logger
 
 		mode := u.Query().Get("mode")
 
@@ -235,13 +275,13 @@ func openReader(addr string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("unsupported reader")
 }
 
-func openWriter(addr string) (io.WriteCloser, error) {
+func openWriter(addr string, logger srt.Logger) (io.WriteCloser, error) {
 	if len(addr) == 0 {
 		return nil, fmt.Errorf("the address must not be empty")
 	}
 
 	if addr == "-" {
-		return os.Stdout, nil
+		return NewNonblockingWriter(os.Stdout, 2048), nil
 	}
 
 	if strings.HasPrefix(addr, "file://") {
@@ -251,7 +291,7 @@ func openWriter(addr string) (io.WriteCloser, error) {
 			return nil, err
 		}
 
-		return file, nil
+		return NewNonblockingWriter(file, 2048), nil
 	}
 
 	u, err := url.Parse(addr)
@@ -264,6 +304,7 @@ func openWriter(addr string) (io.WriteCloser, error) {
 		if err := config.UnmarshalQuery(u.RawQuery); err != nil {
 			return nil, err
 		}
+		config.Logger = logger
 
 		mode := u.Query().Get("mode")
 

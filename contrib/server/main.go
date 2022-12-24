@@ -144,57 +144,71 @@ func (s *server) log(who, action, path, message string, client net.Addr) {
 func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	var mode srt.ConnType = srt.SUBSCRIBE
 	client := req.RemoteAddr()
-	streamId := req.StreamId()
-	path := streamId
 
-	if strings.HasPrefix(streamId, "publish:") {
+	channel := ""
+
+	if req.Version() == 4 {
 		mode = srt.PUBLISH
-		path = strings.TrimPrefix(streamId, "publish:")
-	} else if strings.HasPrefix(streamId, "subscribe:") {
-		path = strings.TrimPrefix(streamId, "subscribe:")
-	}
+		channel = "/" + client.String()
 
-	u, err := url.Parse(path)
-	if err != nil {
-		return srt.REJECT
-	}
+		req.SetPassphrase(s.passphrase)
+	} else if req.Version() == 5 {
+		streamId := req.StreamId()
+		path := streamId
 
-	if req.IsEncrypted() {
-		if err := req.SetPassphrase(s.passphrase); err != nil {
-			s.log("CONNECT", "FORBIDDEN", u.Path, err.Error(), client)
+		if strings.HasPrefix(streamId, "publish:") {
+			mode = srt.PUBLISH
+			path = strings.TrimPrefix(streamId, "publish:")
+		} else if strings.HasPrefix(streamId, "subscribe:") {
+			path = strings.TrimPrefix(streamId, "subscribe:")
+		}
+
+		u, err := url.Parse(path)
+		if err != nil {
 			return srt.REJECT
 		}
-	}
 
-	// Check the token
-	token := u.Query().Get("token")
-	if len(s.token) != 0 && s.token != token {
-		s.log("CONNECT", "FORBIDDEN", u.Path, "invalid token ("+token+")", client)
-		return srt.REJECT
-	}
+		if req.IsEncrypted() {
+			if err := req.SetPassphrase(s.passphrase); err != nil {
+				s.log("CONNECT", "FORBIDDEN", u.Path, err.Error(), client)
+				return srt.REJECT
+			}
+		}
 
-	// Check the app patch
-	if !strings.HasPrefix(u.Path, s.app) {
-		s.log("CONNECT", "FORBIDDEN", u.Path, "invalid app", client)
-		return srt.REJECT
-	}
+		// Check the token
+		token := u.Query().Get("token")
+		if len(s.token) != 0 && s.token != token {
+			s.log("CONNECT", "FORBIDDEN", u.Path, "invalid token ("+token+")", client)
+			return srt.REJECT
+		}
 
-	if len(strings.TrimPrefix(u.Path, s.app)) == 0 {
-		s.log("CONNECT", "INVALID", u.Path, "stream name not provided", client)
+		// Check the app patch
+		if !strings.HasPrefix(u.Path, s.app) {
+			s.log("CONNECT", "FORBIDDEN", u.Path, "invalid app", client)
+			return srt.REJECT
+		}
+
+		if len(strings.TrimPrefix(u.Path, s.app)) == 0 {
+			s.log("CONNECT", "INVALID", u.Path, "stream name not provided", client)
+			return srt.REJECT
+		}
+
+		channel = u.Path
+	} else {
 		return srt.REJECT
 	}
 
 	s.lock.RLock()
-	pubsub := s.channels[u.Path]
+	pubsub := s.channels[channel]
 	s.lock.RUnlock()
 
 	if mode == srt.PUBLISH && pubsub != nil {
-		s.log("CONNECT", "CONFLICT", u.Path, "already publishing", client)
+		s.log("CONNECT", "CONFLICT", channel, "already publishing", client)
 		return srt.REJECT
 	}
 
 	if mode == srt.SUBSCRIBE && pubsub == nil {
-		s.log("CONNECT", "NOTFOUND", u.Path, "", client)
+		s.log("CONNECT", "NOTFOUND", channel, "not publishing", client)
 		return srt.REJECT
 	}
 
@@ -202,39 +216,50 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 }
 
 func (s *server) handlePublish(conn srt.Conn) {
-	streamId := conn.StreamId()
 	client := conn.RemoteAddr()
-	path := strings.TrimPrefix(streamId, "publish:")
-	u, _ := url.Parse(path)
+	channel := ""
+
+	if conn.Version() == 4 {
+		channel = "/" + client.String()
+	} else if conn.Version() == 5 {
+		streamId := conn.StreamId()
+		path := strings.TrimPrefix(streamId, "publish:")
+		u, _ := url.Parse(path)
+
+		channel = u.Path
+	} else {
+		s.log("PUBLISH", "INVALID", channel, "unknown connection version", client)
+		conn.Close()
+	}
 
 	// Look for the stream
 	s.lock.Lock()
-	pubsub := s.channels[u.Path]
+	pubsub := s.channels[channel]
 	if pubsub == nil {
 		pubsub = srt.NewPubSub(srt.PubSubConfig{
 			Logger: s.server.Config.Logger,
 		})
-		s.channels[u.Path] = pubsub
+		s.channels[channel] = pubsub
 	} else {
 		pubsub = nil
 	}
 	s.lock.Unlock()
 
 	if pubsub == nil {
-		s.log("PUBLISH", "CONFLICT", u.Path, "already publishing", client)
+		s.log("PUBLISH", "CONFLICT", channel, "already publishing", client)
 		conn.Close()
 		return
 	}
 
-	s.log("PUBLISH", "START", u.Path, "", client)
+	s.log("PUBLISH", "START", channel, "publishing", client)
 
 	pubsub.Publish(conn)
 
 	s.lock.Lock()
-	delete(s.channels, u.Path)
+	delete(s.channels, channel)
 	s.lock.Unlock()
 
-	s.log("PUBLISH", "STOP", u.Path, "", client)
+	s.log("PUBLISH", "STOP", channel, "", client)
 
 	stats := &srt.Statistics{}
 	conn.Stats(stats)
@@ -245,27 +270,38 @@ func (s *server) handlePublish(conn srt.Conn) {
 }
 
 func (s *server) handleSubscribe(conn srt.Conn) {
-	streamId := conn.StreamId()
 	client := conn.RemoteAddr()
-	path := strings.TrimPrefix(streamId, "subscribe:")
-	u, _ := url.Parse(path)
+	channel := ""
 
-	s.log("SUBSCRIBE", "START", u.Path, "", client)
+	if conn.Version() == 4 {
+		channel = client.String()
+	} else if conn.Version() == 5 {
+		streamId := conn.StreamId()
+		path := strings.TrimPrefix(streamId, "subscribe:")
+		u, _ := url.Parse(path)
+
+		channel = u.Path
+	} else {
+		s.log("SUBSCRIBE", "INVALID", channel, "unknown connection version", client)
+		conn.Close()
+	}
+
+	s.log("SUBSCRIBE", "START", channel, "", client)
 
 	// Look for the stream
 	s.lock.RLock()
-	pubsub := s.channels[u.Path]
+	pubsub := s.channels[channel]
 	s.lock.RUnlock()
 
 	if pubsub == nil {
-		s.log("SUBSCRIBE", "NOTFOUND", u.Path, "", client)
+		s.log("SUBSCRIBE", "NOTFOUND", channel, "not publishing", client)
 		conn.Close()
 		return
 	}
 
 	pubsub.Subscribe(conn)
 
-	s.log("SUBSCRIBE", "STOP", u.Path, "", client)
+	s.log("SUBSCRIBE", "STOP", channel, "", client)
 
 	stats := &srt.Statistics{}
 	conn.Stats(stats)

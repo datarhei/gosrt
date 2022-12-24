@@ -25,6 +25,7 @@ Congestion Control (FileCC) are not implemented.
 
 |     |                                           |
 | --- | ----------------------------------------- |
+| ✅  | Handshake v4 and v5                       |
 | ✅  | Message mode                              |
 | ✅  | Caller-Listener Handshake                 |
 | ✅  | Timestamp-Based Packet Delivery (TSBPD)   |

@@ -19,7 +19,7 @@ func TestInvalidKM(t *testing.T) {
 	c, err := New(16)
 	require.NoError(t, err)
 
-	km := &packet.CIFKM{}
+	km := &packet.CIFKeyMaterialExtension{}
 
 	km.KeyBasedEncryption = packet.UnencryptedPacket
 	km.Salt, _ = hex.DecodeString("6c438852715a4d26e0e810b3132ca61f")
@@ -28,7 +28,7 @@ func TestInvalidKM(t *testing.T) {
 	err = c.UnmarshalKM(km, "foobarfoobar")
 	require.ErrorIs(t, err, ErrInvalidKey)
 
-	km = &packet.CIFKM{}
+	km = &packet.CIFKeyMaterialExtension{}
 
 	km.KeyBasedEncryption = packet.EvenKeyEncrypted
 	km.Salt, _ = hex.DecodeString("6c438852715a4d26e0e810b3132ca61f")
@@ -77,7 +77,7 @@ func TestUnmarshal(t *testing.T) {
 		c, err := New(test.keylength)
 		require.NoError(t, err)
 
-		km := &packet.CIFKM{}
+		km := &packet.CIFKeyMaterialExtension{}
 
 		km.KeyBasedEncryption = packet.EvenKeyEncrypted
 		km.Salt, _ = hex.DecodeString(test.salt)
@@ -155,7 +155,7 @@ func TestMarshal(t *testing.T) {
 		cr.evenSEK, _ = hex.DecodeString(test.evenSEK)
 		cr.oddSEK, _ = hex.DecodeString(test.oddSEK)
 
-		km := &packet.CIFKM{}
+		km := &packet.CIFKeyMaterialExtension{}
 
 		err = c.MarshalKM(km, test.passphrase, packet.EvenKeyEncrypted)
 		require.NoError(t, err, "keylength: %d", test.keylength)
@@ -165,7 +165,7 @@ func TestMarshal(t *testing.T) {
 		x := bytes.Compare(km.Wrap, wrap)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
-		km = &packet.CIFKM{}
+		km = &packet.CIFKeyMaterialExtension{}
 
 		err = c.MarshalKM(km, test.passphrase, packet.OddKeyEncrypted)
 		require.NoError(t, err, "keylength: %d", test.keylength)
@@ -175,7 +175,7 @@ func TestMarshal(t *testing.T) {
 		x = bytes.Compare(km.Wrap, wrap)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
-		km = &packet.CIFKM{}
+		km = &packet.CIFKeyMaterialExtension{}
 
 		err = c.MarshalKM(km, test.passphrase, packet.EvenAndOddKey)
 		require.NoError(t, err, "keylength: %d", test.keylength)

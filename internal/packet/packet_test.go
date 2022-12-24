@@ -88,30 +88,23 @@ func TestHandshake(t *testing.T) {
 		HasHS:                       true,
 		HasKM:                       false,
 		HasSID:                      true,
-		SRTVersion:                  0x010402,
-		SRTFlags: struct {
-			TSBPDSND      bool
-			TSBPDRCV      bool
-			CRYPT         bool
-			TLPKTDROP     bool
-			PERIODICNAK   bool
-			REXMITFLG     bool
-			STREAM        bool
-			PACKET_FILTER bool
-		}{
-			TSBPDSND:      true,
-			TSBPDRCV:      true,
-			CRYPT:         true,
-			TLPKTDROP:     true,
-			PERIODICNAK:   true,
-			REXMITFLG:     true,
-			STREAM:        false,
-			PACKET_FILTER: false,
+		SRTHS: &CIFHandshakeExtension{
+			SRTVersion: 0x010402,
+			SRTFlags: CIFHandshakeExtensionFlags{
+				TSBPDSND:      true,
+				TSBPDRCV:      true,
+				CRYPT:         true,
+				TLPKTDROP:     true,
+				PERIODICNAK:   true,
+				REXMITFLG:     true,
+				STREAM:        false,
+				PACKET_FILTER: false,
+			},
+			RecvTSBPDDelay: 100,
+			SendTSBPDDelay: 100,
 		},
-		RecvTSBPDDelay: 100,
-		SendTSBPDDelay: 100,
-		SRTKM:          nil,
-		StreamId:       "/live/stream.foobar",
+		SRTKM:    nil,
+		StreamId: "/live/stream.foobar",
 	}
 
 	var buf bytes.Buffer
@@ -149,37 +142,30 @@ func TestHandshakeString(t *testing.T) {
 		HasHS:                       true,
 		HasKM:                       false,
 		HasSID:                      true,
-		SRTVersion:                  0x010402,
-		SRTFlags: struct {
-			TSBPDSND      bool
-			TSBPDRCV      bool
-			CRYPT         bool
-			TLPKTDROP     bool
-			PERIODICNAK   bool
-			REXMITFLG     bool
-			STREAM        bool
-			PACKET_FILTER bool
-		}{
-			TSBPDSND:      true,
-			TSBPDRCV:      true,
-			CRYPT:         true,
-			TLPKTDROP:     true,
-			PERIODICNAK:   true,
-			REXMITFLG:     true,
-			STREAM:        false,
-			PACKET_FILTER: false,
+		SRTHS: &CIFHandshakeExtension{
+			SRTVersion: 0x010402,
+			SRTFlags: CIFHandshakeExtensionFlags{
+				TSBPDSND:      true,
+				TSBPDRCV:      true,
+				CRYPT:         true,
+				TLPKTDROP:     true,
+				PERIODICNAK:   true,
+				REXMITFLG:     true,
+				STREAM:        false,
+				PACKET_FILTER: false,
+			},
+			RecvTSBPDDelay: 100,
+			SendTSBPDDelay: 100,
 		},
-		RecvTSBPDDelay: 100,
-		SendTSBPDDelay: 100,
-		SRTKM:          nil,
-		StreamId:       "/live/stream.foobar",
+		SRTKM:    nil,
+		StreamId: "/live/stream.foobar",
 	}
 
 	require.Greater(t, len(cif.String()), 0)
 }
 
 func TestKM(t *testing.T) {
-	cif := &CIFKM{
+	cif := &CIFKeyMaterialExtension{
 		S:                     0,
 		Version:               1,
 		PacketType:            2,
@@ -206,7 +192,7 @@ func TestKM(t *testing.T) {
 
 	require.Equal(t, "122029010000000002000200000004040102030405060708090a0b0c0d0e0f10f0f1f2f3f4f5f6f71112131415161718191a1b1c1d1e1f20", data)
 
-	cif2 := &CIFKM{}
+	cif2 := &CIFKeyMaterialExtension{}
 
 	err := cif2.Unmarshal(buf.Bytes())
 
@@ -215,7 +201,7 @@ func TestKM(t *testing.T) {
 }
 
 func TestKMString(t *testing.T) {
-	cif := &CIFKM{
+	cif := &CIFKeyMaterialExtension{
 		S:                     0,
 		Version:               1,
 		PacketType:            2,

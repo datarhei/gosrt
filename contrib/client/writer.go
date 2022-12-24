@@ -10,14 +10,13 @@ import (
 // NonblockingWriter is a io.Writer and io.Closer that won't block
 // any writes. If the underlying writer is blocking the data will be
 // buffered until it's available again.
-type NonblockingWriter interface {
-	io.Writer
-	io.Closer
+type Writer interface {
+	io.WriteCloser
 }
 
 // nonblockingWriter implements the NonblockingWriter interface
 type nonblockingWriter struct {
-	dst  io.Writer
+	dst  io.WriteCloser
 	buf  *bytes.Buffer
 	lock sync.RWMutex
 	size int
@@ -33,7 +32,7 @@ type nonblockingWriter struct {
 // will close this writer. The underlying writer will not be closed. In
 // case there's an error while writing to the underlying writer, this
 // will close itself.
-func NewNonblockingWriter(writer io.Writer, size int) NonblockingWriter {
+func NewNonblockingWriter(writer io.WriteCloser, size int) Writer {
 	u := &nonblockingWriter{
 		dst:  writer,
 		buf:  new(bytes.Buffer),
@@ -63,6 +62,8 @@ func (u *nonblockingWriter) Write(p []byte) (int, error) {
 
 func (u *nonblockingWriter) Close() error {
 	u.done = true
+
+	u.dst.Close()
 
 	return nil
 }

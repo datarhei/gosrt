@@ -21,18 +21,51 @@ const MAX_TIMESTAMP uint32 = 0b11111111_11111111_11111111_11111111
 const MAX_PAYLOAD_SIZE = 1456
 
 // Table 1: SRT Control Packet Types
+type CtrlType uint16
+
 const (
-	CTRLTYPE_HANDSHAKE uint16 = 0x0000
-	CTRLTYPE_KEEPALIVE uint16 = 0x0001
-	CTRLTYPE_ACK       uint16 = 0x0002
-	CTRLTYPE_NAK       uint16 = 0x0003
-	CTRLTYPE_WARN      uint16 = 0x0004 // unimplemented, receiver->sender
-	CTRLTYPE_SHUTDOWN  uint16 = 0x0005
-	CTRLTYPE_ACKACK    uint16 = 0x0006
-	CRTLTYPE_DROPREQ   uint16 = 0x0007 // unimplemented, sender->receiver
-	CRTLTYPE_PEERERROR uint16 = 0x0008 // unimplemented, receiver->sender
-	CTRLTYPE_USER      uint16 = 0x7FFF
+	CTRLTYPE_HANDSHAKE CtrlType = 0x0000
+	CTRLTYPE_KEEPALIVE CtrlType = 0x0001
+	CTRLTYPE_ACK       CtrlType = 0x0002
+	CTRLTYPE_NAK       CtrlType = 0x0003
+	CTRLTYPE_WARN      CtrlType = 0x0004 // unimplemented, receiver->sender
+	CTRLTYPE_SHUTDOWN  CtrlType = 0x0005
+	CTRLTYPE_ACKACK    CtrlType = 0x0006
+	CRTLTYPE_DROPREQ   CtrlType = 0x0007 // unimplemented, sender->receiver
+	CRTLTYPE_PEERERROR CtrlType = 0x0008 // unimplemented, receiver->sender
+	CTRLTYPE_USER      CtrlType = 0x7FFF
 )
+
+func (h CtrlType) String() string {
+	switch h {
+	case CTRLTYPE_HANDSHAKE:
+		return "HANDSHAKE"
+	case CTRLTYPE_KEEPALIVE:
+		return "KEEPALIVE"
+	case CTRLTYPE_ACK:
+		return "ACK"
+	case CTRLTYPE_NAK:
+		return "NAK"
+	case CTRLTYPE_WARN:
+		return "WARN"
+	case CTRLTYPE_SHUTDOWN:
+		return "SHUTDOWN"
+	case CTRLTYPE_ACKACK:
+		return "ACKACK"
+	case CRTLTYPE_DROPREQ:
+		return "DROPREQ"
+	case CRTLTYPE_PEERERROR:
+		return "PEERERROR"
+	case CTRLTYPE_USER:
+		return "USER"
+	}
+
+	return "unknown"
+}
+
+func (h CtrlType) Value() uint16 {
+	return uint16(h)
+}
 
 type HandshakeType uint32
 
@@ -159,16 +192,48 @@ const (
 )
 
 // Table 5: Handshake Extension Type values
+type CtrlSubType uint16
+
 const (
-	EXTTYPE_HSREQ      uint16 = 1
-	EXTTYPE_HSRSP      uint16 = 2
-	EXTTYPE_KMREQ      uint16 = 3
-	EXTTYPE_KMRSP      uint16 = 4
-	EXTTYPE_SID        uint16 = 5
-	EXTTYPE_CONGESTION uint16 = 6
-	EXTTYPE_FILTER     uint16 = 7
-	EXTTYPE_GROUP      uint16 = 8
+	CTRLSUBTYPE_NONE   CtrlSubType = 0
+	EXTTYPE_HSREQ      CtrlSubType = 1
+	EXTTYPE_HSRSP      CtrlSubType = 2
+	EXTTYPE_KMREQ      CtrlSubType = 3
+	EXTTYPE_KMRSP      CtrlSubType = 4
+	EXTTYPE_SID        CtrlSubType = 5
+	EXTTYPE_CONGESTION CtrlSubType = 6
+	EXTTYPE_FILTER     CtrlSubType = 7
+	EXTTYPE_GROUP      CtrlSubType = 8
 )
+
+func (h CtrlSubType) String() string {
+	switch h {
+	case CTRLSUBTYPE_NONE:
+		return "NONE"
+	case EXTTYPE_HSREQ:
+		return "EXTTYPE_HSREQ"
+	case EXTTYPE_HSRSP:
+		return "EXTTYPE_HSRSP"
+	case EXTTYPE_KMREQ:
+		return "EXTTYPE_KMREQ"
+	case EXTTYPE_KMRSP:
+		return "EXTTYPE_KMRSP"
+	case EXTTYPE_SID:
+		return "EXTTYPE_SID"
+	case EXTTYPE_CONGESTION:
+		return "EXTTYPE_CONGESTION"
+	case EXTTYPE_FILTER:
+		return "EXTTYPE_FILTER"
+	case EXTTYPE_GROUP:
+		return "EXTTYPE_GROUP"
+	}
+
+	return "unknown"
+}
+
+func (h CtrlSubType) Value() uint16 {
+	return uint16(h)
+}
 
 type Packet interface {
 	String() string
@@ -194,8 +259,8 @@ type PacketHeader struct {
 
 	// control packet fields
 
-	ControlType  uint16
-	SubType      uint16
+	ControlType  CtrlType
+	SubType      CtrlSubType
 	TypeSpecific uint32
 
 	// data packet fields
@@ -252,6 +317,7 @@ func NewPacket(addr net.Addr, rawdata []byte) Packet {
 			Addr:                  addr,
 			PacketSequenceNumber:  circular.New(0, 0b01111111_11111111_11111111_11111111),
 			PacketPositionFlag:    SinglePacket,
+			OrderFlag:             false,
 			KeyBaseEncryptionFlag: UnencryptedPacket,
 			MessageNumber:         1,
 		},
@@ -284,8 +350,8 @@ func (p pkt) String() string {
 
 	if p.header.IsControlPacket {
 		fmt.Fprintf(&b, "control packet:\n")
-		fmt.Fprintf(&b, "   controlType=%#04x\n", p.header.ControlType)
-		fmt.Fprintf(&b, "   subType=%#04x\n", p.header.SubType)
+		fmt.Fprintf(&b, "   controlType=%#04x (%s)\n", p.header.ControlType.Value(), p.header.ControlType.String())
+		fmt.Fprintf(&b, "   subType=%#04x (%s)\n", p.header.SubType.Value(), p.header.SubType.String())
 		fmt.Fprintf(&b, "   typeSpecific=%#08x\n", p.header.TypeSpecific)
 	} else {
 		fmt.Fprintf(&b, "data packet:\n")
@@ -336,8 +402,8 @@ func (p *pkt) Unmarshal(data []byte) error {
 	p.header.IsControlPacket = (data[0] & 0x80) != 0
 
 	if p.header.IsControlPacket {
-		p.header.ControlType = binary.BigEndian.Uint16(data[0:]) & ^uint16(1<<15) // clear the first bit
-		p.header.SubType = binary.BigEndian.Uint16(data[2:])
+		p.header.ControlType = CtrlType(binary.BigEndian.Uint16(data[0:]) & ^uint16(1<<15)) // clear the first bit
+		p.header.SubType = CtrlSubType(binary.BigEndian.Uint16(data[2:]))
 		p.header.TypeSpecific = binary.BigEndian.Uint32(data[4:])
 	} else {
 		p.header.PacketSequenceNumber = circular.New(binary.BigEndian.Uint32(data[0:]), MAX_SEQUENCENUMBER)
@@ -365,9 +431,9 @@ func (p *pkt) Marshal(w io.Writer) error {
 	}
 
 	if p.header.IsControlPacket {
-		binary.BigEndian.PutUint16(buffer[0:], p.header.ControlType)  // control type
-		binary.BigEndian.PutUint16(buffer[2:], p.header.SubType)      // sub type
-		binary.BigEndian.PutUint32(buffer[4:], p.header.TypeSpecific) // type specific
+		binary.BigEndian.PutUint16(buffer[0:], p.header.ControlType.Value()) // control type
+		binary.BigEndian.PutUint16(buffer[2:], p.header.SubType.Value())     // sub type
+		binary.BigEndian.PutUint32(buffer[4:], p.header.TypeSpecific)        // type specific
 
 		buffer[0] |= 0x80
 	} else {
@@ -425,6 +491,7 @@ func (p *pkt) UnmarshalCIF(c CIF) error {
 type CIF interface {
 	Marshal(w io.Writer)
 	Unmarshal(data []byte) error
+	String() string
 }
 
 // 3.2.1.  Handshake
@@ -448,23 +515,10 @@ type CIFHandshake struct {
 	HasSID bool
 
 	// 3.2.1.1.  Handshake Extension Message
-
-	SRTVersion uint32
-	SRTFlags   struct { // 3.2.1.1.1.  Handshake Extension Message Flags
-		TSBPDSND      bool
-		TSBPDRCV      bool
-		CRYPT         bool
-		TLPKTDROP     bool
-		PERIODICNAK   bool
-		REXMITFLG     bool
-		STREAM        bool
-		PACKET_FILTER bool
-	}
-	RecvTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
-	SendTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
+	SRTHS *CIFHandshakeExtension
 
 	// 3.2.1.2.  Key Material Extension Message
-	SRTKM *CIFKM
+	SRTKM *CIFKeyMaterialExtension
 
 	// 3.2.1.3.  Stream ID Extension Message
 	StreamId string
@@ -486,45 +540,47 @@ func (c CIFHandshake) String() string {
 	fmt.Fprintf(&b, "   synCookie: %#08x\n", c.SynCookie)
 	fmt.Fprintf(&b, "   peerIP: %s\n", c.PeerIP)
 
-	if c.HasHS {
-		fmt.Fprintf(&b, "   SRT_CMD_HS(REQ/RSP)\n")
-		fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.SRTVersion)
-		fmt.Fprintf(&b, "      srtFlags:\n")
-		fmt.Fprintf(&b, "         TSBPDSND     : %v\n", c.SRTFlags.TSBPDSND)
-		fmt.Fprintf(&b, "         TSBPDRCV     : %v\n", c.SRTFlags.TSBPDRCV)
-		fmt.Fprintf(&b, "         CRYPT        : %v\n", c.SRTFlags.CRYPT)
-		fmt.Fprintf(&b, "         TLPKTDROP    : %v\n", c.SRTFlags.TLPKTDROP)
-		fmt.Fprintf(&b, "         PERIODICNAK  : %v\n", c.SRTFlags.PERIODICNAK)
-		fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.SRTFlags.REXMITFLG)
-		fmt.Fprintf(&b, "         STREAM       : %v\n", c.SRTFlags.STREAM)
-		fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.SRTFlags.PACKET_FILTER)
-		fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.RecvTSBPDDelay, c.RecvTSBPDDelay)
-		fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.SendTSBPDDelay, c.SendTSBPDDelay)
-	}
+	if c.Version == 5 {
+		if c.HasHS {
+			fmt.Fprintf(&b, "   SRT_CMD_HS(REQ/RSP)\n")
+			fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.SRTHS.SRTVersion)
+			fmt.Fprintf(&b, "      srtFlags:\n")
+			fmt.Fprintf(&b, "         TSBPDSND     : %v\n", c.SRTHS.SRTFlags.TSBPDSND)
+			fmt.Fprintf(&b, "         TSBPDRCV     : %v\n", c.SRTHS.SRTFlags.TSBPDRCV)
+			fmt.Fprintf(&b, "         CRYPT        : %v\n", c.SRTHS.SRTFlags.CRYPT)
+			fmt.Fprintf(&b, "         TLPKTDROP    : %v\n", c.SRTHS.SRTFlags.TLPKTDROP)
+			fmt.Fprintf(&b, "         PERIODICNAK  : %v\n", c.SRTHS.SRTFlags.PERIODICNAK)
+			fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.SRTHS.SRTFlags.REXMITFLG)
+			fmt.Fprintf(&b, "         STREAM       : %v\n", c.SRTHS.SRTFlags.STREAM)
+			fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.SRTHS.SRTFlags.PACKET_FILTER)
+			fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.SRTHS.RecvTSBPDDelay, c.SRTHS.RecvTSBPDDelay)
+			fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.SRTHS.SendTSBPDDelay, c.SRTHS.SendTSBPDDelay)
+		}
 
-	if c.HasKM {
-		fmt.Fprintf(&b, "   SRT_CMD_KM(REQ/RSP)\n")
-		fmt.Fprintf(&b, "      s: %d\n", c.SRTKM.S)
-		fmt.Fprintf(&b, "      version: %d\n", c.SRTKM.Version)
-		fmt.Fprintf(&b, "      packetType: %d\n", c.SRTKM.PacketType)
-		fmt.Fprintf(&b, "      sign: %#08x\n", c.SRTKM.Sign)
-		fmt.Fprintf(&b, "      resv1: %d\n", c.SRTKM.Resv1)
-		fmt.Fprintf(&b, "      keyBasedEncryption: %s\n", c.SRTKM.KeyBasedEncryption.String())
-		fmt.Fprintf(&b, "      keyEncryptionKeyIndex: %d\n", c.SRTKM.KeyEncryptionKeyIndex)
-		fmt.Fprintf(&b, "      cipher: %d\n", c.SRTKM.Cipher)
-		fmt.Fprintf(&b, "      authentication: %d\n", c.SRTKM.Authentication)
-		fmt.Fprintf(&b, "      streamEncapsulation: %d\n", c.SRTKM.StreamEncapsulation)
-		fmt.Fprintf(&b, "      resv2: %d\n", c.SRTKM.Resv2)
-		fmt.Fprintf(&b, "      resv3: %d\n", c.SRTKM.Resv3)
-		fmt.Fprintf(&b, "      sLen: %d (%d)\n", c.SRTKM.SLen, c.SRTKM.SLen/4)
-		fmt.Fprintf(&b, "      kLen: %d (%d)\n", c.SRTKM.KLen, c.SRTKM.KLen/4)
-		fmt.Fprintf(&b, "      salt: %#08x\n", c.SRTKM.Salt)
-		fmt.Fprintf(&b, "      wrap: %#08x\n", c.SRTKM.Wrap)
-	}
+		if c.HasKM {
+			fmt.Fprintf(&b, "   SRT_CMD_KM(REQ/RSP)\n")
+			fmt.Fprintf(&b, "      s: %d\n", c.SRTKM.S)
+			fmt.Fprintf(&b, "      version: %d\n", c.SRTKM.Version)
+			fmt.Fprintf(&b, "      packetType: %d\n", c.SRTKM.PacketType)
+			fmt.Fprintf(&b, "      sign: %#08x\n", c.SRTKM.Sign)
+			fmt.Fprintf(&b, "      resv1: %d\n", c.SRTKM.Resv1)
+			fmt.Fprintf(&b, "      keyBasedEncryption: %s\n", c.SRTKM.KeyBasedEncryption.String())
+			fmt.Fprintf(&b, "      keyEncryptionKeyIndex: %d\n", c.SRTKM.KeyEncryptionKeyIndex)
+			fmt.Fprintf(&b, "      cipher: %d\n", c.SRTKM.Cipher)
+			fmt.Fprintf(&b, "      authentication: %d\n", c.SRTKM.Authentication)
+			fmt.Fprintf(&b, "      streamEncapsulation: %d\n", c.SRTKM.StreamEncapsulation)
+			fmt.Fprintf(&b, "      resv2: %d\n", c.SRTKM.Resv2)
+			fmt.Fprintf(&b, "      resv3: %d\n", c.SRTKM.Resv3)
+			fmt.Fprintf(&b, "      sLen: %d (%d)\n", c.SRTKM.SLen, c.SRTKM.SLen/4)
+			fmt.Fprintf(&b, "      kLen: %d (%d)\n", c.SRTKM.KLen, c.SRTKM.KLen/4)
+			fmt.Fprintf(&b, "      salt: %#08x\n", c.SRTKM.Salt)
+			fmt.Fprintf(&b, "      wrap: %#08x\n", c.SRTKM.Wrap)
+		}
 
-	if c.HasSID {
-		fmt.Fprintf(&b, "   SRT_CMD_SID\n")
-		fmt.Fprintf(&b, "      streamId : %s\n", c.StreamId)
+		if c.HasSID {
+			fmt.Fprintf(&b, "   SRT_CMD_SID\n")
+			fmt.Fprintf(&b, "      streamId : %s\n", c.StreamId)
+		}
 	}
 
 	fmt.Fprintf(&b, "--- /handshake ---")
@@ -548,10 +604,6 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 	c.SynCookie = binary.BigEndian.Uint32(data[28:])
 	c.PeerIP.Unmarshal(data[32:48])
 
-	//if c.handshakeType != HSTYPE_INDUCTION && c.handshakeType != HSTYPE_CONCLUSION {
-	//	return fmt.Errorf("unimplemented handshake type")
-	//}
-
 	if c.HandshakeType == HSTYPE_INDUCTION {
 		// Nothing more to unmarshal
 		return nil
@@ -567,7 +619,8 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 	}
 
 	if len(data) <= 48 {
-		return fmt.Errorf("data too short to unmarshal")
+		// No extension data
+		return nil
 	}
 
 	switch c.EncryptionField {
@@ -582,7 +635,7 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 	pivot := data[48:]
 
 	for {
-		extensionType := binary.BigEndian.Uint16(pivot[0:])
+		extensionType := CtrlSubType(binary.BigEndian.Uint16(pivot[0:]))
 		extensionLength := int(binary.BigEndian.Uint16(pivot[2:])) * 4
 
 		pivot = pivot[4:]
@@ -595,20 +648,11 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 
 			c.HasHS = true
 
-			c.SRTVersion = binary.BigEndian.Uint32(pivot[0:])
-			srtFlags := binary.BigEndian.Uint32(pivot[4:])
+			c.SRTHS = &CIFHandshakeExtension{}
 
-			c.SRTFlags.TSBPDSND = (srtFlags&SRTFLAG_TSBPDSND != 0)
-			c.SRTFlags.TSBPDRCV = (srtFlags&SRTFLAG_TSBPDRCV != 0)
-			c.SRTFlags.CRYPT = (srtFlags&SRTFLAG_CRYPT != 0)
-			c.SRTFlags.TLPKTDROP = (srtFlags&SRTFLAG_TLPKTDROP != 0)
-			c.SRTFlags.PERIODICNAK = (srtFlags&SRTFLAG_PERIODICNAK != 0)
-			c.SRTFlags.REXMITFLG = (srtFlags&SRTFLAG_REXMITFLG != 0)
-			c.SRTFlags.STREAM = (srtFlags&SRTFLAG_STREAM != 0)
-			c.SRTFlags.PACKET_FILTER = (srtFlags&SRTFLAG_PACKET_FILTER != 0)
-
-			c.RecvTSBPDDelay = binary.BigEndian.Uint16(pivot[8:])
-			c.SendTSBPDDelay = binary.BigEndian.Uint16(pivot[10:])
+			if err := c.SRTHS.Unmarshal(pivot); err != nil {
+				return fmt.Errorf("CIFHandshakeExtension: %w", err)
+			}
 		} else if extensionType == EXTTYPE_KMREQ || extensionType == EXTTYPE_KMRSP {
 			// 3.2.1.2.  Key Material Extension Message
 			if len(pivot) < extensionLength {
@@ -617,10 +661,10 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 
 			c.HasKM = true
 
-			c.SRTKM = &CIFKM{}
+			c.SRTKM = &CIFKeyMaterialExtension{}
 
 			if err := c.SRTKM.Unmarshal(pivot); err != nil {
-				return err
+				return fmt.Errorf("CIFKeyMaterialExtension: %w", err)
 			}
 
 			if c.EncryptionField == 0 {
@@ -674,20 +718,25 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 		c.HasSID = false
 	}
 
-	if c.HandshakeType == HSTYPE_CONCLUSION {
-		c.ExtensionField = 0
-	}
+	if c.Version == 5 {
+		if c.HandshakeType == HSTYPE_CONCLUSION {
+			c.ExtensionField = 0
+		}
 
-	if c.HasHS {
-		c.ExtensionField = c.ExtensionField | 1
-	}
+		if c.HasHS {
+			c.ExtensionField = c.ExtensionField | 1
+		}
 
-	if c.HasKM {
-		c.ExtensionField = c.ExtensionField | 2
-	}
+		if c.HasKM {
+			c.ExtensionField = c.ExtensionField | 2
+		}
 
-	if c.HasSID {
-		c.ExtensionField = c.ExtensionField | 4
+		if c.HasSID {
+			c.ExtensionField = c.ExtensionField | 4
+		}
+	} else {
+		c.EncryptionField = 0
+		c.ExtensionField = 2
 	}
 
 	binary.BigEndian.PutUint32(buffer[0:], c.Version)                           // version
@@ -704,54 +753,20 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 	w.Write(buffer[:48])
 
 	if c.HasHS {
+		var data bytes.Buffer
+
+		c.SRTHS.Marshal(&data)
+
 		if c.IsRequest {
-			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSREQ)
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSREQ.Value())
 		} else {
-			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSRSP)
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_HSRSP.Value())
 		}
 
 		binary.BigEndian.PutUint16(buffer[2:], 3)
 
-		binary.BigEndian.PutUint32(buffer[4:], c.SRTVersion)
-		var srtFlags uint32 = 0
-
-		if c.SRTFlags.TSBPDSND {
-			srtFlags |= SRTFLAG_TSBPDSND
-		}
-
-		if c.SRTFlags.TSBPDRCV {
-			srtFlags |= SRTFLAG_TSBPDRCV
-		}
-
-		if c.SRTFlags.CRYPT {
-			srtFlags |= SRTFLAG_CRYPT
-		}
-
-		if c.SRTFlags.TLPKTDROP {
-			srtFlags |= SRTFLAG_TLPKTDROP
-		}
-
-		if c.SRTFlags.PERIODICNAK {
-			srtFlags |= SRTFLAG_PERIODICNAK
-		}
-
-		if c.SRTFlags.REXMITFLG {
-			srtFlags |= SRTFLAG_REXMITFLG
-		}
-
-		if c.SRTFlags.STREAM {
-			srtFlags |= SRTFLAG_STREAM
-		}
-
-		if c.SRTFlags.PACKET_FILTER {
-			srtFlags |= SRTFLAG_PACKET_FILTER
-		}
-
-		binary.BigEndian.PutUint32(buffer[8:], srtFlags)
-		binary.BigEndian.PutUint16(buffer[12:], c.RecvTSBPDDelay)
-		binary.BigEndian.PutUint16(buffer[14:], c.SendTSBPDDelay)
-
-		w.Write(buffer[:16])
+		w.Write(buffer[:4])
+		w.Write(data.Bytes())
 	}
 
 	if c.HasKM {
@@ -760,9 +775,9 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 		c.SRTKM.Marshal(&data)
 
 		if c.IsRequest {
-			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMREQ)
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMREQ.Value())
 		} else {
-			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMRSP)
+			binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_KMRSP.Value())
 		}
 
 		binary.BigEndian.PutUint16(buffer[2:], uint16(data.Len()/4))
@@ -781,7 +796,7 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 			}
 		}
 
-		binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_SID)
+		binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_SID.Value())
 		binary.BigEndian.PutUint16(buffer[2:], uint16(streamId.Len()/4))
 
 		w.Write(buffer[:4])
@@ -799,9 +814,127 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 	}
 }
 
+// 3.2.1.1.1.  Handshake Extension Message Flags
+type CIFHandshakeExtensionFlags struct {
+	TSBPDSND      bool
+	TSBPDRCV      bool
+	CRYPT         bool
+	TLPKTDROP     bool
+	PERIODICNAK   bool
+	REXMITFLG     bool
+	STREAM        bool
+	PACKET_FILTER bool
+}
+
+// 3.2.1.1.  Handshake Extension Message
+
+type CIFHandshakeExtension struct {
+	SRTVersion     uint32
+	SRTFlags       CIFHandshakeExtensionFlags
+	RecvTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
+	SendTSBPDDelay uint16 // milliseconds, see "4.4.  SRT Buffer Latency"
+}
+
+func (c CIFHandshakeExtension) String() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "--- HSExt ---\n")
+
+	fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.SRTVersion)
+	fmt.Fprintf(&b, "      srtFlags:\n")
+	fmt.Fprintf(&b, "         TSBPDSND     : %v\n", c.SRTFlags.TSBPDSND)
+	fmt.Fprintf(&b, "         TSBPDRCV     : %v\n", c.SRTFlags.TSBPDRCV)
+	fmt.Fprintf(&b, "         CRYPT        : %v\n", c.SRTFlags.CRYPT)
+	fmt.Fprintf(&b, "         TLPKTDROP    : %v\n", c.SRTFlags.TLPKTDROP)
+	fmt.Fprintf(&b, "         PERIODICNAK  : %v\n", c.SRTFlags.PERIODICNAK)
+	fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.SRTFlags.REXMITFLG)
+	fmt.Fprintf(&b, "         STREAM       : %v\n", c.SRTFlags.STREAM)
+	fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.SRTFlags.PACKET_FILTER)
+	fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.RecvTSBPDDelay, c.RecvTSBPDDelay)
+	fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.SendTSBPDDelay, c.SendTSBPDDelay)
+
+	fmt.Fprintf(&b, "--- /HSExt ---")
+
+	return b.String()
+}
+
+func (c *CIFHandshakeExtension) Unmarshal(data []byte) error {
+	if len(data) < 12 {
+		return fmt.Errorf("data too short to unmarshal")
+	}
+
+	c.SRTVersion = binary.BigEndian.Uint32(data[0:])
+	srtFlags := binary.BigEndian.Uint32(data[4:])
+
+	c.SRTFlags.TSBPDSND = (srtFlags&SRTFLAG_TSBPDSND != 0)
+	c.SRTFlags.TSBPDRCV = (srtFlags&SRTFLAG_TSBPDRCV != 0)
+	c.SRTFlags.CRYPT = (srtFlags&SRTFLAG_CRYPT != 0)
+	c.SRTFlags.TLPKTDROP = (srtFlags&SRTFLAG_TLPKTDROP != 0)
+	c.SRTFlags.PERIODICNAK = (srtFlags&SRTFLAG_PERIODICNAK != 0)
+	c.SRTFlags.REXMITFLG = (srtFlags&SRTFLAG_REXMITFLG != 0)
+	c.SRTFlags.STREAM = (srtFlags&SRTFLAG_STREAM != 0)
+	c.SRTFlags.PACKET_FILTER = (srtFlags&SRTFLAG_PACKET_FILTER != 0)
+
+	c.RecvTSBPDDelay = binary.BigEndian.Uint16(data[8:])
+	c.SendTSBPDDelay = binary.BigEndian.Uint16(data[10:])
+
+	return nil
+}
+
+func (c *CIFHandshakeExtension) Marshal(w io.Writer) {
+	var buffer [12]byte
+
+	binary.BigEndian.PutUint32(buffer[0:], c.SRTVersion)
+	var srtFlags uint32 = 0
+
+	if c.SRTFlags.TSBPDSND {
+		srtFlags |= SRTFLAG_TSBPDSND
+	}
+
+	if c.SRTFlags.TSBPDRCV {
+		srtFlags |= SRTFLAG_TSBPDRCV
+	}
+
+	if c.SRTFlags.CRYPT {
+		srtFlags |= SRTFLAG_CRYPT
+	}
+
+	if c.SRTFlags.TLPKTDROP {
+		srtFlags |= SRTFLAG_TLPKTDROP
+	}
+
+	if c.SRTFlags.PERIODICNAK {
+		srtFlags |= SRTFLAG_PERIODICNAK
+	}
+
+	if c.SRTFlags.REXMITFLG {
+		srtFlags |= SRTFLAG_REXMITFLG
+	}
+
+	if c.SRTFlags.STREAM {
+		srtFlags |= SRTFLAG_STREAM
+	}
+
+	if c.SRTFlags.PACKET_FILTER {
+		srtFlags |= SRTFLAG_PACKET_FILTER
+	}
+
+	binary.BigEndian.PutUint32(buffer[4:], srtFlags)
+	binary.BigEndian.PutUint16(buffer[8:], c.RecvTSBPDDelay)
+	binary.BigEndian.PutUint16(buffer[10:], c.SendTSBPDDelay)
+
+	w.Write(buffer[:12])
+}
+
 // 3.2.2.  Key Material
 
-type CIFKM struct {
+const (
+	KM_NOSECRET  uint32 = 3
+	KM_BADSECRET uint32 = 4
+)
+
+type CIFKeyMaterialExtension struct {
+	Error                 uint32
 	S                     uint8
 	Version               uint8
 	PacketType            uint8
@@ -820,10 +953,10 @@ type CIFKM struct {
 	Wrap                  []byte
 }
 
-func (c CIFKM) String() string {
+func (c CIFKeyMaterialExtension) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "--- KM ---\n")
+	fmt.Fprintf(&b, "--- KMExt ---\n")
 
 	fmt.Fprintf(&b, "   s: %d\n", c.S)
 	fmt.Fprintf(&b, "   version: %d\n", c.Version)
@@ -842,13 +975,20 @@ func (c CIFKM) String() string {
 	fmt.Fprintf(&b, "   salt: %#08x\n", c.Salt)
 	fmt.Fprintf(&b, "   wrap: %#08x\n", c.Wrap)
 
-	fmt.Fprintf(&b, "--- /KM ---")
+	fmt.Fprintf(&b, "--- /KMExt ---")
 
 	return b.String()
 }
 
-func (c *CIFKM) Unmarshal(data []byte) error {
-	if len(data) < 16 {
+func (c *CIFKeyMaterialExtension) Unmarshal(data []byte) error {
+	if len(data) == 4 {
+		// This is an error response
+		c.Error = binary.LittleEndian.Uint32(data[0:])
+		if c.Error != KM_NOSECRET && c.Error != KM_BADSECRET {
+			return fmt.Errorf("invalid error (%d)", c.Error)
+		}
+		return nil
+	} else if len(data) < 16 {
 		return fmt.Errorf("data too short to unmarshal")
 	}
 
@@ -935,7 +1075,7 @@ func (c *CIFKM) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (c *CIFKM) Marshal(w io.Writer) {
+func (c *CIFKeyMaterialExtension) Marshal(w io.Writer) {
 	var buffer [128]byte
 
 	b := byte(0)

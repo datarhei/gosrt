@@ -12,7 +12,7 @@ github.com/pmezard/go-difflib/difflib
 ## explicit
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
-# golang.org/x/crypto v0.1.0
+# golang.org/x/crypto v0.4.0
 ## explicit
 golang.org/x/crypto/pbkdf2
 # gopkg.in/yaml.v3 v3.0.1
