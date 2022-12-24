@@ -42,6 +42,24 @@ func TestArbitraryPacket(t *testing.T) {
 	require.Equal(t, "00000000c0000001000000000000000068656c6c6f20776f726c6421", data)
 }
 
+func TestArbitraryControlPacket(t *testing.T) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
+
+	p := NewPacket(addr, nil)
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = CTRLTYPE_KEEPALIVE
+	p.Header().SubType = 112
+	p.Header().TypeSpecific = 42
+
+	var buf bytes.Buffer
+
+	p.Marshal(&buf)
+
+	data := hex.EncodeToString(buf.Bytes())
+
+	require.Equal(t, "800100700000002a0000000000000000", data)
+}
+
 func TestUnmarshalPacket(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
@@ -69,7 +87,44 @@ func TestPacketString(t *testing.T) {
 	require.Greater(t, len(p.String()), 0)
 }
 
-func TestHandshake(t *testing.T) {
+func TestHandshakeV4(t *testing.T) {
+	ip := srtnet.IP{}
+	ip.Parse("127.0.0.1")
+
+	cif := &CIFHandshake{
+		IsRequest:                   false,
+		Version:                     4,
+		EncryptionField:             0,
+		ExtensionField:              2,
+		InitialPacketSequenceNumber: circular.New(42, MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     1500,
+		MaxFlowWindowSize:           100,
+		HandshakeType:               HSTYPE_CONCLUSION,
+		SRTSocketId:                 0x274921,
+		SynCookie:                   0x123456,
+		PeerIP:                      ip,
+		HasHS:                       false,
+		HasKM:                       false,
+		HasSID:                      false,
+	}
+
+	var buf bytes.Buffer
+
+	cif.Marshal(&buf)
+
+	data := hex.EncodeToString(buf.Bytes())
+
+	require.Equal(t, "00000004000000020000002a000005dc00000064ffffffff00274921001234560100007f000000000000000000000000", data)
+
+	cif2 := &CIFHandshake{}
+
+	err := cif2.Unmarshal(buf.Bytes())
+
+	require.NoError(t, err)
+	require.Equal(t, cif, cif2)
+}
+
+func TestHandshakeV5(t *testing.T) {
 	ip := srtnet.IP{}
 	ip.Parse("127.0.0.1")
 
@@ -86,7 +141,7 @@ func TestHandshake(t *testing.T) {
 		SynCookie:                   0x123456,
 		PeerIP:                      ip,
 		HasHS:                       true,
-		HasKM:                       false,
+		HasKM:                       true,
 		HasSID:                      true,
 		SRTHS: &CIFHandshakeExtension{
 			SRTVersion: 0x010402,
@@ -103,7 +158,24 @@ func TestHandshake(t *testing.T) {
 			RecvTSBPDDelay: 100,
 			SendTSBPDDelay: 100,
 		},
-		SRTKM:    nil,
+		SRTKM: &CIFKeyMaterialExtension{
+			S:                     0,
+			Version:               1,
+			PacketType:            2,
+			Sign:                  0x2029,
+			Resv1:                 0,
+			KeyBasedEncryption:    EvenKeyEncrypted,
+			KeyEncryptionKeyIndex: 0,
+			Cipher:                2,
+			Authentication:        0,
+			StreamEncapsulation:   2,
+			Resv2:                 0,
+			Resv3:                 0,
+			SLen:                  16,
+			KLen:                  16,
+			Salt:                  []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+			Wrap:                  []byte{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
+		},
 		StreamId: "/live/stream.foobar",
 	}
 
@@ -113,7 +185,7 @@ func TestHandshake(t *testing.T) {
 
 	data := hex.EncodeToString(buf.Bytes())
 
-	require.Equal(t, "00000005000000050000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000020003000104020000003f006400640005000576696c2f74732f656d6165726f6f662e00726162", data)
+	require.Equal(t, "00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000020003000104020000003f006400640004000e122029010000000002000200000004040102030405060708090a0b0c0d0e0f10f0f1f2f3f4f5f6f71112131415161718191a1b1c1d1e1f200005000576696c2f74732f656d6165726f6f662e00726162", data)
 
 	cif2 := &CIFHandshake{}
 

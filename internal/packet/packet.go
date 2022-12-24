@@ -259,18 +259,18 @@ type PacketHeader struct {
 
 	// control packet fields
 
-	ControlType  CtrlType
-	SubType      CtrlSubType
-	TypeSpecific uint32
+	ControlType  CtrlType    // Control Packet Type.  The use of these bits is determined by the control packet type definition.
+	SubType      CtrlSubType // This field specifies an additional subtype for specific packets.
+	TypeSpecific uint32      // The use of this field depends on the particular control packet type. Handshake packets do not use this field.
 
 	// data packet fields
 
-	PacketSequenceNumber    circular.Number
-	PacketPositionFlag      PacketPosition
-	OrderFlag               bool
-	KeyBaseEncryptionFlag   PacketEncryption
-	RetransmittedPacketFlag bool
-	MessageNumber           uint32
+	PacketSequenceNumber    circular.Number  // The sequential number of the data packet.
+	PacketPositionFlag      PacketPosition   // This field indicates the position of the data packet in the message. The value "10b" (binary) means the first packet of the message. "00b" indicates a packet in the middle. "01b" designates the last packet. If a single data packet forms the whole message, the value is "11b".
+	OrderFlag               bool             // Indicates whether the message should be delivered by the receiver in order (1) or not (0). Certain restrictions apply depending on the data transmission mode used (Section 4.2).
+	KeyBaseEncryptionFlag   PacketEncryption // The flag bits indicate whether or not data is encrypted. The value "00b" (binary) means data is not encrypted. "01b" indicates that data is encrypted with an even key, and "10b" is used for odd key encryption. Refer to Section 6.  The value "11b" is only used in control packets.
+	RetransmittedPacketFlag bool             // This flag is clear when a packet is transmitted the first time. The flag is set to "1" when a packet is retransmitted.
+	MessageNumber           uint32           // The sequential number of consecutive data packets that form a message (see PP field).
 
 	// common fields
 
@@ -499,16 +499,16 @@ type CIF interface {
 type CIFHandshake struct {
 	IsRequest bool
 
-	Version                     uint32
-	EncryptionField             uint16
-	ExtensionField              uint16
-	InitialPacketSequenceNumber circular.Number
-	MaxTransmissionUnitSize     uint32
-	MaxFlowWindowSize           uint32
-	HandshakeType               HandshakeType
-	SRTSocketId                 uint32
-	SynCookie                   uint32
-	PeerIP                      srtnet.IP
+	Version                     uint32          // A base protocol version number. Currently used values are 4 and 5. Values greater than 5 are reserved for future use.
+	EncryptionField             uint16          // Block cipher family and key size. The values of this field are described in Table 2. The default value is AES-128.
+	ExtensionField              uint16          // This field is message specific extension related to Handshake Type field. The value MUST be set to 0 except for the following cases. (1) If the handshake control packet is the INDUCTION message, this field is sent back by the Listener. (2) In the case of a CONCLUSION message, this field value should contain a combination of Extension Type values. For more details, see Section 4.3.1.
+	InitialPacketSequenceNumber circular.Number // The sequence number of the very first data packet to be sent.
+	MaxTransmissionUnitSize     uint32          // This value is typically set to 1500, which is the default Maximum Transmission Unit (MTU) size for Ethernet, but can be less.
+	MaxFlowWindowSize           uint32          // The value of this field is the maximum number of data packets allowed to be "in flight" (i.e. the number of sent packets for which an ACK control packet has not yet been received).
+	HandshakeType               HandshakeType   // This field indicates the handshake packet type. The possible values are described in Table 4. For more details refer to Section 4.3.
+	SRTSocketId                 uint32          // This field holds the ID of the source SRT socket from which a handshake packet is issued.
+	SynCookie                   uint32          // Randomized value for processing a handshake. The value of this field is specified by the handshake message type. See Section 4.3.
+	PeerIP                      srtnet.IP       // IPv4 or IPv6 address of the packet's sender. The value consists of four 32-bit fields. In the case of IPv4 addresses, fields 2, 3 and 4 are filled with zeroes.
 
 	HasHS  bool
 	HasKM  bool
@@ -542,44 +542,17 @@ func (c CIFHandshake) String() string {
 
 	if c.Version == 5 {
 		if c.HasHS {
-			fmt.Fprintf(&b, "   SRT_CMD_HS(REQ/RSP)\n")
-			fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.SRTHS.SRTVersion)
-			fmt.Fprintf(&b, "      srtFlags:\n")
-			fmt.Fprintf(&b, "         TSBPDSND     : %v\n", c.SRTHS.SRTFlags.TSBPDSND)
-			fmt.Fprintf(&b, "         TSBPDRCV     : %v\n", c.SRTHS.SRTFlags.TSBPDRCV)
-			fmt.Fprintf(&b, "         CRYPT        : %v\n", c.SRTHS.SRTFlags.CRYPT)
-			fmt.Fprintf(&b, "         TLPKTDROP    : %v\n", c.SRTHS.SRTFlags.TLPKTDROP)
-			fmt.Fprintf(&b, "         PERIODICNAK  : %v\n", c.SRTHS.SRTFlags.PERIODICNAK)
-			fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.SRTHS.SRTFlags.REXMITFLG)
-			fmt.Fprintf(&b, "         STREAM       : %v\n", c.SRTHS.SRTFlags.STREAM)
-			fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.SRTHS.SRTFlags.PACKET_FILTER)
-			fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.SRTHS.RecvTSBPDDelay, c.SRTHS.RecvTSBPDDelay)
-			fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.SRTHS.SendTSBPDDelay, c.SRTHS.SendTSBPDDelay)
+			fmt.Fprintf(&b, "%s\n", c.SRTHS.String())
 		}
 
 		if c.HasKM {
-			fmt.Fprintf(&b, "   SRT_CMD_KM(REQ/RSP)\n")
-			fmt.Fprintf(&b, "      s: %d\n", c.SRTKM.S)
-			fmt.Fprintf(&b, "      version: %d\n", c.SRTKM.Version)
-			fmt.Fprintf(&b, "      packetType: %d\n", c.SRTKM.PacketType)
-			fmt.Fprintf(&b, "      sign: %#08x\n", c.SRTKM.Sign)
-			fmt.Fprintf(&b, "      resv1: %d\n", c.SRTKM.Resv1)
-			fmt.Fprintf(&b, "      keyBasedEncryption: %s\n", c.SRTKM.KeyBasedEncryption.String())
-			fmt.Fprintf(&b, "      keyEncryptionKeyIndex: %d\n", c.SRTKM.KeyEncryptionKeyIndex)
-			fmt.Fprintf(&b, "      cipher: %d\n", c.SRTKM.Cipher)
-			fmt.Fprintf(&b, "      authentication: %d\n", c.SRTKM.Authentication)
-			fmt.Fprintf(&b, "      streamEncapsulation: %d\n", c.SRTKM.StreamEncapsulation)
-			fmt.Fprintf(&b, "      resv2: %d\n", c.SRTKM.Resv2)
-			fmt.Fprintf(&b, "      resv3: %d\n", c.SRTKM.Resv3)
-			fmt.Fprintf(&b, "      sLen: %d (%d)\n", c.SRTKM.SLen, c.SRTKM.SLen/4)
-			fmt.Fprintf(&b, "      kLen: %d (%d)\n", c.SRTKM.KLen, c.SRTKM.KLen/4)
-			fmt.Fprintf(&b, "      salt: %#08x\n", c.SRTKM.Salt)
-			fmt.Fprintf(&b, "      wrap: %#08x\n", c.SRTKM.Wrap)
+			fmt.Fprintf(&b, "%s\n", c.SRTKM.String())
 		}
 
 		if c.HasSID {
-			fmt.Fprintf(&b, "   SRT_CMD_SID\n")
-			fmt.Fprintf(&b, "      streamId : %s\n", c.StreamId)
+			fmt.Fprintf(&b, "--- SIDExt ---\n")
+			fmt.Fprintf(&b, "   streamId : %s\n", c.StreamId)
+			fmt.Fprintf(&b, "--- /SIDExt ---\n")
 		}
 	}
 
@@ -728,6 +701,7 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 		}
 
 		if c.HasKM {
+			c.EncryptionField = c.SRTKM.KLen / 8
 			c.ExtensionField = c.ExtensionField | 2
 		}
 
@@ -816,14 +790,14 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 
 // 3.2.1.1.1.  Handshake Extension Message Flags
 type CIFHandshakeExtensionFlags struct {
-	TSBPDSND      bool
-	TSBPDRCV      bool
-	CRYPT         bool
-	TLPKTDROP     bool
-	PERIODICNAK   bool
-	REXMITFLG     bool
-	STREAM        bool
-	PACKET_FILTER bool
+	TSBPDSND      bool // Defines if the TSBPD mechanism (Section 4.5) will be used for sending.
+	TSBPDRCV      bool // Defines if the TSBPD mechanism (Section 4.5) will be used for receiving.
+	CRYPT         bool // MUST be set. It is a legacy flag that indicates the party understands KK field of the SRT Packet (Figure 3).
+	TLPKTDROP     bool // Should be set if too-late packet drop mechanism will be used during transmission.  See Section 4.6.
+	PERIODICNAK   bool // Indicates the peer will send periodic NAK packets. See Section 4.8.2.
+	REXMITFLG     bool // MUST be set. It is a legacy flag that indicates the peer understands the R field of the SRT DATA Packet
+	STREAM        bool // Identifies the transmission mode (Section 4.2) to be used in the connection. If the flag is set, the buffer mode (Section 4.2.2) is used. Otherwise, the message mode (Section 4.2.1) is used.
+	PACKET_FILTER bool // Indicates if the peer supports packet filter.
 }
 
 // 3.2.1.1.  Handshake Extension Message
@@ -840,18 +814,18 @@ func (c CIFHandshakeExtension) String() string {
 
 	fmt.Fprintf(&b, "--- HSExt ---\n")
 
-	fmt.Fprintf(&b, "      srtVersion: %#08x\n", c.SRTVersion)
-	fmt.Fprintf(&b, "      srtFlags:\n")
-	fmt.Fprintf(&b, "         TSBPDSND     : %v\n", c.SRTFlags.TSBPDSND)
-	fmt.Fprintf(&b, "         TSBPDRCV     : %v\n", c.SRTFlags.TSBPDRCV)
-	fmt.Fprintf(&b, "         CRYPT        : %v\n", c.SRTFlags.CRYPT)
-	fmt.Fprintf(&b, "         TLPKTDROP    : %v\n", c.SRTFlags.TLPKTDROP)
-	fmt.Fprintf(&b, "         PERIODICNAK  : %v\n", c.SRTFlags.PERIODICNAK)
-	fmt.Fprintf(&b, "         REXMITFLG    : %v\n", c.SRTFlags.REXMITFLG)
-	fmt.Fprintf(&b, "         STREAM       : %v\n", c.SRTFlags.STREAM)
-	fmt.Fprintf(&b, "         PACKET_FILTER: %v\n", c.SRTFlags.PACKET_FILTER)
-	fmt.Fprintf(&b, "      recvTSBPDDelay: %#04x (%dms)\n", c.RecvTSBPDDelay, c.RecvTSBPDDelay)
-	fmt.Fprintf(&b, "      sendTSBPDDelay: %#04x (%dms)\n", c.SendTSBPDDelay, c.SendTSBPDDelay)
+	fmt.Fprintf(&b, "   srtVersion: %#08x\n", c.SRTVersion)
+	fmt.Fprintf(&b, "   srtFlags:\n")
+	fmt.Fprintf(&b, "      TSBPDSND     : %v\n", c.SRTFlags.TSBPDSND)
+	fmt.Fprintf(&b, "      TSBPDRCV     : %v\n", c.SRTFlags.TSBPDRCV)
+	fmt.Fprintf(&b, "      CRYPT        : %v\n", c.SRTFlags.CRYPT)
+	fmt.Fprintf(&b, "      TLPKTDROP    : %v\n", c.SRTFlags.TLPKTDROP)
+	fmt.Fprintf(&b, "      PERIODICNAK  : %v\n", c.SRTFlags.PERIODICNAK)
+	fmt.Fprintf(&b, "      REXMITFLG    : %v\n", c.SRTFlags.REXMITFLG)
+	fmt.Fprintf(&b, "      STREAM       : %v\n", c.SRTFlags.STREAM)
+	fmt.Fprintf(&b, "      PACKET_FILTER: %v\n", c.SRTFlags.PACKET_FILTER)
+	fmt.Fprintf(&b, "   recvTSBPDDelay: %#04x (%dms)\n", c.RecvTSBPDDelay, c.RecvTSBPDDelay)
+	fmt.Fprintf(&b, "   sendTSBPDDelay: %#04x (%dms)\n", c.SendTSBPDDelay, c.SendTSBPDDelay)
 
 	fmt.Fprintf(&b, "--- /HSExt ---")
 
@@ -935,22 +909,22 @@ const (
 
 type CIFKeyMaterialExtension struct {
 	Error                 uint32
-	S                     uint8
-	Version               uint8
-	PacketType            uint8
-	Sign                  uint16
-	Resv1                 uint8
-	KeyBasedEncryption    PacketEncryption
-	KeyEncryptionKeyIndex uint32
-	Cipher                uint8
-	Authentication        uint8
-	StreamEncapsulation   uint8
-	Resv2                 uint8
-	Resv3                 uint16
-	SLen                  uint16
-	KLen                  uint16
-	Salt                  []byte
-	Wrap                  []byte
+	S                     uint8            // This is a fixed-width field that is reserved for future usage. value = {0}
+	Version               uint8            // This is a fixed-width field that indicates the SRT version. value = {1}
+	PacketType            uint8            // This is a fixed-width field that indicates the Packet Type: 0: Reserved, 1: Media Stream Message (MSmsg), 2: Keying Material Message (KMmsg), 7: Reserved to discriminate MPEG-TS packet (0x47=sync byte). value = {2}
+	Sign                  uint16           // This is a fixed-width field that contains the signature 'HAI' encoded as a PnP Vendor ID [PNPID] (in big-endian order). value = {0x2029}
+	Resv1                 uint8            // This is a fixed-width field reserved for flag extension or other usage. value = {0}
+	KeyBasedEncryption    PacketEncryption // This is a fixed-width field that indicates which SEKs (odd and/or even) are provided in the extension: 00b: No SEK is provided (invalid extension format); 01b: Even key is provided; 10b: Odd key is provided; 11b: Both even and odd keys are provided.
+	KeyEncryptionKeyIndex uint32           // This is a fixed-width field for specifying the KEK index (big-endian order) was used to wrap (and optionally authenticate) the SEK(s). The value 0 is used to indicate the default key of the current stream. Other values are reserved for the possible use of a key management system in the future to retrieve a cryptographic context. 0: Default stream associated key (stream/system default); 1..255: Reserved for manually indexed keys. value = {0}
+	Cipher                uint8            // This is a fixed-width field for specifying encryption cipher and mode: 0: None or KEKI indexed crypto context; 2: AES-CTR [SP800-38A].
+	Authentication        uint8            // This is a fixed-width field for specifying a message authentication code algorithm: 0: None or KEKI indexed crypto context.
+	StreamEncapsulation   uint8            // This is a fixed-width field for describing the stream encapsulation: 0: Unspecified or KEKI indexed crypto context; 1: MPEG-TS/UDP; 2: MPEG-TS/SRT. value = {2}
+	Resv2                 uint8            // This is a fixed-width field reserved for future use. value = {0}
+	Resv3                 uint16           // This is a fixed-width field reserved for future use. value = {0}
+	SLen                  uint16           // This is a fixed-width field for specifying salt length SLen in bytes divided by 4. Can be zero if no salt/IV present. The only valid length of salt defined is 128 bits.
+	KLen                  uint16           // This is a fixed-width field for specifying SEK length in bytes divided by 4. Size of one key even if two keys present. MUST match the key size specified in the Encryption Field of the handshake packet Table 2.
+	Salt                  []byte           // This is a variable-width field that complements the keying material by specifying a salt key.
+	Wrap                  []byte           // (64 + n * KLen * 8) bits. This is a variable- width field for specifying Wrapped key(s), where n = (KK + 1)/2 and the size of the wrap field is ((n * KLen) + 8) bytes.
 }
 
 func (c CIFKeyMaterialExtension) String() string {
