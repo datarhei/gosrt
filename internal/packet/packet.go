@@ -315,7 +315,7 @@ func NewPacket(addr net.Addr, rawdata []byte) Packet {
 	p := &pkt{
 		header: PacketHeader{
 			Addr:                  addr,
-			PacketSequenceNumber:  circular.New(0, 0b01111111_11111111_11111111_11111111),
+			PacketSequenceNumber:  circular.New(0, MAX_SEQUENCENUMBER),
 			PacketPositionFlag:    SinglePacket,
 			OrderFlag:             false,
 			KeyBaseEncryptionFlag: UnencryptedPacket,
@@ -411,7 +411,7 @@ func (p *pkt) Unmarshal(data []byte) error {
 		p.header.OrderFlag = (data[4] & 0b00100000) != 0
 		p.header.KeyBaseEncryptionFlag = PacketEncryption((data[4] & 0b00011000) >> 3)
 		p.header.RetransmittedPacketFlag = (data[4] & 0b00000100) != 0
-		p.header.MessageNumber = binary.BigEndian.Uint32(data[4:]) & ^uint32(0b11111000<<24)
+		p.header.MessageNumber = binary.BigEndian.Uint32(data[4:]) & ^uint32(0b11111100<<24)
 	}
 
 	p.header.Timestamp = binary.BigEndian.Uint32(data[8:])
@@ -439,20 +439,20 @@ func (p *pkt) Marshal(w io.Writer) error {
 	} else {
 		binary.BigEndian.PutUint32(buffer[0:], p.header.PacketSequenceNumber.Val()) // sequence number
 
-		p.header.TypeSpecific = 0
+		var field uint32 = 0
 
-		p.header.TypeSpecific |= (uint32(p.header.PacketPositionFlag) << 6)
+		field |= ((p.header.PacketPositionFlag.Val() & 0b11) << 6) // 0b11000000
 		if p.header.OrderFlag {
-			p.header.TypeSpecific |= (1 << 5)
+			field |= (1 << 5) // 0b11100000
 		}
-		p.header.TypeSpecific |= (uint32(p.header.KeyBaseEncryptionFlag) << 3)
+		field |= ((p.header.KeyBaseEncryptionFlag.Val() & 0b11) << 3) // 0b11111000
 		if p.header.RetransmittedPacketFlag {
-			p.header.TypeSpecific |= (1 << 2)
+			field |= (1 << 2) // 0b11111100
 		}
-		p.header.TypeSpecific = p.header.TypeSpecific << 24
-		p.header.TypeSpecific += p.header.MessageNumber
+		field = field << 24 // 0b11111100_00000000_00000000_00000000
+		field += (p.header.MessageNumber & 0b00000011_11111111_11111111_11111111)
 
-		binary.BigEndian.PutUint32(buffer[4:], p.header.TypeSpecific) // sequence number
+		binary.BigEndian.PutUint32(buffer[4:], field) // sequence number
 	}
 
 	binary.BigEndian.PutUint32(buffer[8:], p.header.Timestamp)            // timestamp
@@ -1331,6 +1331,10 @@ func (p PacketPosition) IsValid() bool {
 	return p < 4
 }
 
+func (p PacketPosition) Val() uint32 {
+	return uint32(p)
+}
+
 //  3.1. Data Packets
 
 type PacketEncryption uint
@@ -1371,4 +1375,8 @@ func (p PacketEncryption) Opposite() PacketEncryption {
 	}
 
 	return p
+}
+
+func (p PacketEncryption) Val() uint32 {
+	return uint32(p)
 }

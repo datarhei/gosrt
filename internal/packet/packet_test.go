@@ -68,15 +68,24 @@ func FuzzPacket(f *testing.F) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
 	f.Fuzz(func(t *testing.T, orig string) {
-		data, _ := hex.DecodeString(orig)
-		p := NewPacket(addr, nil)
-		p.Unmarshal(data)
+		data, err := hex.DecodeString(orig)
+		if err != nil {
+			return
+		}
+		if len(data) == 0 {
+			return
+		}
+		p := NewPacket(addr, data)
+		if p == nil {
+			return
+		}
 
 		var buf bytes.Buffer
+		buf.Reset()
 		p.Marshal(&buf)
 
 		if !bytes.Equal(data, buf.Bytes()) {
-			t.Errorf("Before: %q, after: %q", orig, buf.Bytes())
+			t.Errorf("Before: %q, after: %q\n%s", orig, hex.EncodeToString(buf.Bytes()), p.Dump())
 		}
 	})
 }
