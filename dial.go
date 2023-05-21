@@ -106,7 +106,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	// Set TOS
 	if config.IPTOS > 0 {
-		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+		err = setSockOpt(file.Fd(), syscall.IP_TOS, config.IPTOS)
 		if err != nil {
 			return nil, fmt.Errorf("failed setting socket option TOS: %w", err)
 		}
@@ -114,7 +114,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	// Set TTL
 	if config.IPTTL > 0 {
-		err = syscall.SetsockoptInt(int(file.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
+		err = setSockOpt(file.Fd(), syscall.IP_TTL, config.IPTTL)
 		if err != nil {
 			return nil, fmt.Errorf("failed setting socket option TTL: %w", err)
 		}
