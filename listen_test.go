@@ -122,7 +122,7 @@ func TestListenHSV4(t *testing.T) {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
 				// Set REUSEADDR
-				opErr = setSockOpt(fd, syscall.SO_REUSEADDR, 1)
+				opErr = setSockOptREUSE(fd)
 				if opErr != nil {
 					return
 				}
@@ -269,7 +269,7 @@ func TestListenHSV5(t *testing.T) {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
 				// Set REUSEADDR
-				opErr = setSockOpt(fd, syscall.SO_REUSEADDR, 1)
+				opErr = setSockOptREUSE(fd)
 				if opErr != nil {
 					return
 				}

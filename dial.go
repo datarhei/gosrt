@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/datarhei/gosrt/internal/circular"
@@ -99,14 +98,9 @@ func Dial(network, address string, config Config) (Conn, error) {
 		return nil, fmt.Errorf("failed dialing: %w", err)
 	}
 
-	file, err := pc.File()
-	if err != nil {
-		return nil, err
-	}
-
 	// Set TOS
 	if config.IPTOS > 0 {
-		err = setSockOpt(file.Fd(), syscall.IP_TOS, config.IPTOS)
+		err = setSockOptIPTOSFromConn(pc, config.IPTOS)
 		if err != nil {
 			return nil, fmt.Errorf("failed setting socket option TOS: %w", err)
 		}
@@ -114,7 +108,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	// Set TTL
 	if config.IPTTL > 0 {
-		err = setSockOpt(file.Fd(), syscall.IP_TTL, config.IPTTL)
+		err = setSockOptIPTTLFromConn(pc, config.IPTTL)
 		if err != nil {
 			return nil, fmt.Errorf("failed setting socket option TTL: %w", err)
 		}
