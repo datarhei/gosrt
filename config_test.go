@@ -56,7 +56,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 		Logger:                nil,
 	}
 
-	url := wantConfig.MarshalURL("localhost", 6000)
+	url := wantConfig.MarshalURL("localhost:6000")
 
 	config := Config{}
 	config.UnmarshalURL(url)
