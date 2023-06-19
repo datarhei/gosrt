@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/datarhei/gosrt/internal/crypto"
@@ -191,36 +190,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 	}
 
 	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			var opErr error
-			err := c.Control(func(fd uintptr) {
-				// Set REUSEADDR
-				opErr = setSockOptREUSE(fd)
-				if opErr != nil {
-					return
-				}
-
-				// Set TOS
-				if config.IPTOS > 0 {
-					opErr = setSockOptIPTOS(fd, config.IPTOS)
-					if opErr != nil {
-						return
-					}
-				}
-
-				// Set TTL
-				if config.IPTTL > 0 {
-					opErr = setSockOptIPTTL(fd, config.IPTTL)
-					if opErr != nil {
-						return
-					}
-				}
-			})
-			if err != nil {
-				return err
-			}
-			return opErr
-		},
+		Control: ListenControl(config),
 	}
 
 	lp, err := lc.ListenPacket(context.Background(), "udp", address)

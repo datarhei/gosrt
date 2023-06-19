@@ -5,7 +5,6 @@ import (
 	"context"
 	"net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -118,20 +117,7 @@ func TestListenHSV4(t *testing.T) {
 	start := time.Now()
 
 	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			var opErr error
-			err := c.Control(func(fd uintptr) {
-				// Set REUSEADDR
-				opErr = setSockOptREUSE(fd)
-				if opErr != nil {
-					return
-				}
-			})
-			if err != nil {
-				return err
-			}
-			return opErr
-		},
+		Control: ListenControl(DefaultConfig()),
 	}
 
 	lp, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:6003")
@@ -265,20 +251,7 @@ func TestListenHSV5(t *testing.T) {
 	start := time.Now()
 
 	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			var opErr error
-			err := c.Control(func(fd uintptr) {
-				// Set REUSEADDR
-				opErr = setSockOptREUSE(fd)
-				if opErr != nil {
-					return
-				}
-			})
-			if err != nil {
-				return err
-			}
-			return opErr
-		},
+		Control: ListenControl(DefaultConfig()),
 	}
 
 	lp, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:6003")

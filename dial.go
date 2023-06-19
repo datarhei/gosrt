@@ -88,30 +88,18 @@ func Dial(network, address string, config Config) (Conn, error) {
 		config: config,
 	}
 
-	raddr, err := net.ResolveUDPAddr("udp", address)
-	if err != nil {
-		return nil, fmt.Errorf("unable to resolve address: %w", err)
+	netdialer := net.Dialer{
+		Control: DialControl(config),
 	}
 
-	pc, err := net.DialUDP("udp", nil, raddr)
+	conn, err := netdialer.Dial("udp", address)
 	if err != nil {
 		return nil, fmt.Errorf("failed dialing: %w", err)
 	}
 
-	// Set TOS
-	if config.IPTOS > 0 {
-		err = setSockOptIPTOSFromConn(pc, config.IPTOS)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting socket option TOS: %w", err)
-		}
-	}
-
-	// Set TTL
-	if config.IPTTL > 0 {
-		err = setSockOptIPTTLFromConn(pc, config.IPTTL)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting socket option TTL: %w", err)
-		}
+	pc, ok := conn.(*net.UDPConn)
+	if !ok {
+		return nil, fmt.Errorf("failed dialing: connection is not a UDP connection")
 	}
 
 	dl.pc = pc
