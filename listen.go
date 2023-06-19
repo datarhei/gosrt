@@ -195,14 +195,14 @@ func Listen(network, address string, config Config) (Listener, error) {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
 				// Set REUSEADDR
-				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+				opErr = setSockOptREUSE(fd)
 				if opErr != nil {
 					return
 				}
 
 				// Set TOS
 				if config.IPTOS > 0 {
-					opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TOS, config.IPTOS)
+					opErr = setSockOptIPTOS(fd, config.IPTOS)
 					if opErr != nil {
 						return
 					}
@@ -210,7 +210,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 				// Set TTL
 				if config.IPTTL > 0 {
-					opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
+					opErr = setSockOptIPTTL(fd, config.IPTTL)
 					if opErr != nil {
 						return
 					}
