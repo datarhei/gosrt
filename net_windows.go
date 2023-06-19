@@ -6,7 +6,7 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows"
-}
+)
 
 func ListenControl(config Config) func(network, address string, c syscall.RawConn) error {
 	return func(network, address string, c syscall.RawConn) error {
