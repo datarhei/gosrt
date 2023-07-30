@@ -1152,7 +1152,12 @@ func (c *srtConn) sendNAK(from, to circular.Number) {
 	c.log("control:send:NAK:dump", func() string { return p.Dump() })
 	c.log("control:send:NAK:cif", func() string { return cif.String() })
 
+	// sendNACK is called by both recv.Tick() and recv.Push(), hence
+	// pktSentNAK must be protected. Use cryptoLock since it already exists and
+	// it is used for similar purposes.
+	c.cryptoLock.Lock()
 	c.statistics.pktSentNAK++
+	c.cryptoLock.Unlock()
 
 	c.pop(p)
 }
