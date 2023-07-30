@@ -13,7 +13,7 @@ jobs:
         with:
           go-version: '1.18'
       - name: Run coverage
-        run: go test -coverprofile=coverage.out -covermode=atomic -v ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic -race -v ./...
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2
         with:
