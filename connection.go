@@ -91,8 +91,6 @@ type srtConn struct {
 
 	start time.Time
 
-	shutdown     bool
-	shutdownLock sync.RWMutex
 	shutdownOnce sync.Once
 
 	socketId     uint32
@@ -129,20 +127,16 @@ type srtConn struct {
 	dropThreshold       uint64 // microseconds
 
 	// Queue for packets that are coming from the network
-	networkQueue     chan packet.Packet
-	stopNetworkQueue context.CancelFunc
+	networkQueue chan packet.Packet
 
 	// Queue for packets that are written with writePacket() and will be send to the network
-	writeQueue     chan packet.Packet
-	stopWriteQueue context.CancelFunc
-	writeBuffer    bytes.Buffer
-	writeData      []byte
+	writeQueue  chan packet.Packet
+	writeBuffer bytes.Buffer
+	writeData   []byte
 
 	// Queue for packets that will be read locally with ReadPacket()
 	readQueue  chan packet.Packet
 	readBuffer bytes.Buffer
-
-	stopTicker context.CancelFunc
 
 	onSend     func(p packet.Packet)
 	onShutdown func(socketId uint32)
@@ -152,6 +146,10 @@ type srtConn struct {
 	// Congestion control
 	recv congestion.Receiver
 	snd  congestion.Sender
+
+	// context of all channels and routines
+	ctx       context.Context
+	cancelCtx context.CancelFunc
 
 	statistics connStats
 
@@ -280,17 +278,11 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		OnDeliver:             c.pop,
 	})
 
-	var networkCtx context.Context
-	networkCtx, c.stopNetworkQueue = context.WithCancel(context.Background())
-	go c.networkQueueReader(networkCtx)
+	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
 
-	var writeCtx context.Context
-	writeCtx, c.stopWriteQueue = context.WithCancel(context.Background())
-	go c.writeQueueReader(writeCtx)
-
-	var tickerCtx context.Context
-	tickerCtx, c.stopTicker = context.WithCancel(context.Background())
-	go c.ticker(tickerCtx)
+	go c.networkQueueReader()
+	go c.writeQueueReader()
+	go c.ticker()
 
 	c.debug.expectedRcvPacketSequenceNumber = c.initialPacketSequenceNumber
 	c.debug.expectedReadPacketSequenceNumber = c.initialPacketSequenceNumber
@@ -345,7 +337,7 @@ func (c *srtConn) Version() uint32 {
 
 // ticker invokes the congestion control in regular intervals with
 // the current connection time.
-func (c *srtConn) ticker(ctx context.Context) {
+func (c *srtConn) ticker() {
 	ticker := time.NewTicker(c.tick)
 	defer ticker.Stop()
 	defer func() {
@@ -354,7 +346,7 @@ func (c *srtConn) ticker(ctx context.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.ctx.Done():
 			return
 		case t := <-ticker.C:
 			tickTime := uint64(t.Sub(c.start).Microseconds())
@@ -368,13 +360,11 @@ func (c *srtConn) ticker(ctx context.Context) {
 // readPacket reads a packet from the queue of received packets. It blocks
 // if the queue is empty. Only data packets are returned.
 func (c *srtConn) readPacket() (packet.Packet, error) {
-	if c.isShutdown() {
+	var p packet.Packet
+	select {
+	case <-c.ctx.Done():
 		return nil, io.EOF
-	}
-
-	p := <-c.readQueue
-	if p == nil {
-		return nil, io.EOF
+	case p = <-c.readQueue:
 	}
 
 	if p.Header().PacketSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) {
@@ -416,10 +406,6 @@ func (c *srtConn) Read(b []byte) (int, error) {
 // writePacket writes a packet to the write queue. Packets on the write queue
 // will be sent to the peer of the connection. Only data packets will be sent.
 func (c *srtConn) writePacket(p packet.Packet) error {
-	if c.isShutdown() {
-		return io.EOF
-	}
-
 	if p.Header().IsControlPacket {
 		// Ignore control packets
 		return nil
@@ -450,12 +436,10 @@ func (c *srtConn) Write(b []byte) (int, error) {
 		// Give the packet a deliver timestamp
 		p.Header().PktTsbpdTime = c.getTimestamp()
 
-		if c.isShutdown() {
-			return 0, io.EOF
-		}
-
 		// Non-blocking write to the write queue
 		select {
+		case <-c.ctx.Done():
+			return 0, io.EOF
 		case c.writeQueue <- p:
 		default:
 			return 0, io.EOF
@@ -473,12 +457,9 @@ func (c *srtConn) Write(b []byte) (int, error) {
 
 // push puts a packet on the network queue. This is where packets go that came in from the network.
 func (c *srtConn) push(p packet.Packet) {
-	if c.isShutdown() {
-		return
-	}
-
 	// Non-blocking write to the network queue
 	select {
+	case <-c.ctx.Done():
 	case c.networkQueue <- p:
 	default:
 		c.log("connection:error", func() string { return "network queue is full" })
@@ -544,14 +525,14 @@ func (c *srtConn) pop(p packet.Packet) {
 }
 
 // networkQueueReader reads the packets from the network queue in order to process them.
-func (c *srtConn) networkQueueReader(ctx context.Context) {
+func (c *srtConn) networkQueueReader() {
 	defer func() {
 		c.log("connection:close", func() string { return "left network queue reader loop" })
 	}()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.ctx.Done():
 			return
 		case p := <-c.networkQueue:
 			c.handlePacket(p)
@@ -561,14 +542,14 @@ func (c *srtConn) networkQueueReader(ctx context.Context) {
 
 // writeQueueReader reads the packets from the write queue and puts them into congestion
 // control for sending.
-func (c *srtConn) writeQueueReader(ctx context.Context) {
+func (c *srtConn) writeQueueReader() {
 	defer func() {
 		c.log("connection:close", func() string { return "left write queue reader loop" })
 	}()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.ctx.Done():
 			return
 		case p := <-c.writeQueue:
 			// Put the packet into the send congestion control
@@ -579,12 +560,9 @@ func (c *srtConn) writeQueueReader(ctx context.Context) {
 
 // deliver writes the packets to the read queue in order to be consumed by the Read function.
 func (c *srtConn) deliver(p packet.Packet) {
-	if c.isShutdown() {
-		return
-	}
-
 	// Non-blocking write to the read queue
 	select {
+	case <-c.ctx.Done():
 	case c.readQueue <- p:
 	default:
 		c.log("connection:error", func() string { return "readQueue was blocking, dropping packet" })
@@ -1317,18 +1295,8 @@ func (c *srtConn) Close() error {
 	return nil
 }
 
-func (c *srtConn) isShutdown() bool {
-	c.shutdownLock.RLock()
-	defer c.shutdownLock.RUnlock()
-
-	return c.shutdown
-}
-
 // close closes the connection.
 func (c *srtConn) close() {
-	c.shutdownLock.Lock()
-	c.shutdown = true
-	c.shutdownLock.Unlock()
 
 	c.shutdownOnce.Do(func() {
 		c.log("connection:close", func() string { return "stopping peer idle timeout" })
@@ -1339,28 +1307,9 @@ func (c *srtConn) close() {
 
 		c.sendShutdown()
 
-		c.log("connection:close", func() string { return "stopping reader" })
+		c.log("connection:close", func() string { return "stopping all routines and channels" })
 
-		// send nil to the readQueue in order to abort any pending ReadPacket call
-		c.readQueue <- nil
-
-		c.log("connection:close", func() string { return "stopping network reader" })
-
-		c.stopNetworkQueue()
-
-		c.log("connection:close", func() string { return "stopping writer" })
-
-		c.stopWriteQueue()
-
-		c.log("connection:close", func() string { return "stopping ticker" })
-
-		c.stopTicker()
-
-		c.log("connection:close", func() string { return "closing queues" })
-
-		close(c.networkQueue)
-		close(c.readQueue)
-		close(c.writeQueue)
+		c.cancelCtx()
 
 		c.log("connection:close", func() string { return "flushing congestion" })
 
