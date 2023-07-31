@@ -9,12 +9,13 @@ import (
 func TestSYNCookie(t *testing.T) {
 	counter := int64(0)
 
-	s := NewSYNCookie("192.168.0.1", 42, func() int64 {
+	s, err := NewSYNCookie("192.168.0.1", func() int64 {
 		return counter
 	})
+	require.NoError(t, err)
 
-	require.Equal(t, "dl2INvNSQTZ5zQu9MxNmGyAVmNkB33io", s.secret1)
-	require.Equal(t, "nwj2qrsh3xyC8OmCp1gObD0iOtQNQsLi", s.secret2)
+	s.secret1 = "dl2INvNSQTZ5zQu9MxNmGyAVmNkB33io"
+	s.secret2 = "nwj2qrsh3xyC8OmCp1gObD0iOtQNQsLi"
 
 	cookie := s.Get("192.168.0.2")
 
