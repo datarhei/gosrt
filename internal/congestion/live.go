@@ -579,8 +579,9 @@ func (r *liveReceive) periodicACK(now uint64) (ok bool, sequenceNumber circular.
 			maxPktTsbpdTime = p.Header().PktTsbpdTime
 
 			if e != nil {
-				e = e.Next()
-				p = e.Value.(packet.Packet)
+				if e = e.Next(); e != nil {
+					p = e.Value.(packet.Packet)
+				}
 			}
 		}
 
