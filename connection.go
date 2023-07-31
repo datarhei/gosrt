@@ -151,7 +151,8 @@ type srtConn struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 
-	statistics connStats
+	statistics     connStats
+	statisticsLock sync.RWMutex
 
 	logger Logger
 
@@ -664,12 +665,16 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	if c.crypto != nil {
 		if header.KeyBaseEncryptionFlag != 0 {
 			if err := c.crypto.EncryptOrDecryptPayload(p.Data(), header.KeyBaseEncryptionFlag, header.PacketSequenceNumber.Val()); err != nil {
+				c.statisticsLock.Lock()
 				c.statistics.pktRecvUndecrypt++
 				c.statistics.byteRecvUndecrypt += p.Len()
+				c.statisticsLock.Unlock()
 			}
 		} else {
+			c.statisticsLock.Lock()
 			c.statistics.pktRecvUndecrypt++
 			c.statistics.byteRecvUndecrypt += p.Len()
+			c.statisticsLock.Unlock()
 		}
 	}
 	c.cryptoLock.Unlock()
@@ -682,8 +687,10 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 func (c *srtConn) handleKeepAlive(p packet.Packet) {
 	c.log("control:recv:keepalive:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvKeepalive++
 	c.statistics.pktSentKeepalive++
+	c.statisticsLock.Unlock()
 
 	c.peerIdleTimeout.Reset(c.config.PeerIdleTimeout)
 
@@ -696,7 +703,9 @@ func (c *srtConn) handleKeepAlive(p packet.Packet) {
 func (c *srtConn) handleShutdown(p packet.Packet) {
 	c.log("control:recv:shutdown:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvShutdown++
+	c.statisticsLock.Unlock()
 
 	go c.close()
 }
@@ -706,12 +715,16 @@ func (c *srtConn) handleShutdown(p packet.Packet) {
 func (c *srtConn) handleACK(p packet.Packet) {
 	c.log("control:recv:ACK:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvACK++
+	c.statisticsLock.Unlock()
 
 	cif := &packet.CIFACK{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:ACK:error", func() string { return fmt.Sprintf("invalid ACK: %s", err) })
 		return
 	}
@@ -725,7 +738,9 @@ func (c *srtConn) handleACK(p packet.Packet) {
 		c.recalculateRTT(time.Duration(int64(cif.RTT)) * time.Microsecond)
 
 		// Estimated Link Capacity (from packets/s to Mbps)
+		c.statisticsLock.Lock()
 		c.statistics.mbpsLinkCapacity = float64(cif.EstimatedLinkCapacity) * MAX_PAYLOAD_SIZE * 8 / 1024 / 1024
+		c.statisticsLock.Unlock()
 
 		c.sendACKACK(p.Header().TypeSpecific)
 	}
@@ -735,12 +750,16 @@ func (c *srtConn) handleACK(p packet.Packet) {
 func (c *srtConn) handleNAK(p packet.Packet) {
 	c.log("control:recv:NAK:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvNAK++
+	c.statisticsLock.Unlock()
 
 	cif := &packet.CIFNAK{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:NAK:error", func() string { return fmt.Sprintf("invalid NAK: %s", err) })
 		return
 	}
@@ -755,7 +774,9 @@ func (c *srtConn) handleNAK(p packet.Packet) {
 func (c *srtConn) handleACKACK(p packet.Packet) {
 	c.ackLock.RLock()
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvACKACK++
+	c.statisticsLock.Unlock()
 
 	c.log("control:recv:ACKACK:dump", func() string { return p.Dump() })
 
@@ -766,7 +787,9 @@ func (c *srtConn) handleACKACK(p packet.Packet) {
 		delete(c.ackNumbers, p.Header().TypeSpecific)
 	} else {
 		c.log("control:recv:ACKACK:error", func() string { return fmt.Sprintf("got unknown ACKACK (%d)", p.Header().TypeSpecific) })
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 	}
 
 	for i := range c.ackNumbers {
@@ -810,7 +833,9 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 	cif := &packet.CIFHandshakeExtension{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:HSReq:error", func() string { return fmt.Sprintf("invalid HSReq: %s", err) })
 		return
 	}
@@ -899,7 +924,9 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 	cif := &packet.CIFHandshakeExtension{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:HSRes:error", func() string { return fmt.Sprintf("invalid HSRes: %s", err) })
 		return
 	}
@@ -981,12 +1008,16 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 func (c *srtConn) handleKMRequest(p packet.Packet) {
 	c.log("control:recv:KMReq:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvKM++
+	c.statisticsLock.Unlock()
 
 	cif := &packet.CIFKeyMaterialExtension{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:KMReq:error", func() string { return fmt.Sprintf("invalid KMReq: %s", err) })
 		return
 	}
@@ -1015,7 +1046,9 @@ func (c *srtConn) handleKMRequest(p packet.Packet) {
 	}
 
 	if cif.KeyBasedEncryption == c.keyBaseEncryption {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:KMReq:error", func() string {
 			return "invalid KM request. wants to reset the key that is already in use"
 		})
@@ -1024,7 +1057,9 @@ func (c *srtConn) handleKMRequest(p packet.Packet) {
 	}
 
 	if err := c.crypto.UnmarshalKM(cif, c.config.Passphrase); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:KMReq:error", func() string { return fmt.Sprintf("invalid KMReq: %s", err) })
 		c.cryptoLock.Unlock()
 		return
@@ -1038,7 +1073,9 @@ func (c *srtConn) handleKMRequest(p packet.Packet) {
 	// Send KM Response
 	p.Header().SubType = packet.EXTTYPE_KMRSP
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentKM++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1047,12 +1084,16 @@ func (c *srtConn) handleKMRequest(p packet.Packet) {
 func (c *srtConn) handleKMResponse(p packet.Packet) {
 	c.log("control:recv:KMRes:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktRecvKM++
+	c.statisticsLock.Unlock()
 
 	cif := &packet.CIFKeyMaterialExtension{}
 
 	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
 		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
 		c.log("control:recv:KMRes:error", func() string { return fmt.Sprintf("invalid KMRes: %s", err) })
 		return
 	}
@@ -1106,7 +1147,9 @@ func (c *srtConn) sendShutdown() {
 	c.log("control:send:shutdown:dump", func() string { return p.Dump() })
 	c.log("control:send:shutdown:cif", func() string { return cif.String() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentShutdown++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1130,7 +1173,9 @@ func (c *srtConn) sendNAK(from, to circular.Number) {
 	c.log("control:send:NAK:dump", func() string { return p.Dump() })
 	c.log("control:send:NAK:cif", func() string { return cif.String() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentNAK++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1179,7 +1224,9 @@ func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 	c.log("control:send:ACK:dump", func() string { return p.Dump() })
 	c.log("control:send:ACK:cif", func() string { return cif.String() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentACK++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1197,7 +1244,9 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 
 	c.log("control:send:ACKACK:dump", func() string { return p.Dump() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentACKACK++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1283,7 +1332,9 @@ func (c *srtConn) sendKMRequest(key packet.PacketEncryption) {
 	c.log("control:send:KMReq:dump", func() string { return p.Dump() })
 	c.log("control:send:KMReq:cif", func() string { return cif.String() })
 
+	c.statisticsLock.Lock()
 	c.statistics.pktSentKM++
+	c.statisticsLock.Unlock()
 
 	c.pop(p)
 }
@@ -1333,6 +1384,10 @@ func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }
 
 func (c *srtConn) Stats(s *Statistics) {
+	if s == nil {
+		return
+	}
+
 	now := uint64(time.Since(c.start).Milliseconds())
 
 	send := c.snd.Stats()
@@ -1340,6 +1395,9 @@ func (c *srtConn) Stats(s *Statistics) {
 
 	previous := s.Accumulated
 	interval := now - s.MsTimeStamp
+
+	c.statisticsLock.RLock()
+	defer c.statisticsLock.RUnlock()
 
 	// Accumulated
 	s.Accumulated = StatisticsAccumulated{
