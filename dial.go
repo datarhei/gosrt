@@ -3,10 +3,10 @@ package srt
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -20,6 +20,16 @@ import (
 // ErrClientClosed is returned when the client connection has
 // been voluntarily closed.
 var ErrClientClosed = errors.New("srt: client closed")
+
+func randUint32() (uint32, error) {
+	var b [4]byte
+	_, err := rand.Read(b[:])
+	if err != nil {
+		return 0, err
+	}
+
+	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3]), nil
+}
 
 // dialer implements the Conn interface
 type dialer struct {
@@ -99,6 +109,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	pc, ok := conn.(*net.UDPConn)
 	if !ok {
+		conn.Close()
 		return nil, fmt.Errorf("failed dialing: connection is not a UDP connection")
 	}
 
@@ -117,10 +128,18 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	dl.start = time.Now()
 
-	// create a new socket ID
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	dl.socketId = r.Uint32()
-	dl.initialPacketSequenceNumber = circular.New(r.Uint32()&packet.MAX_SEQUENCENUMBER, packet.MAX_SEQUENCENUMBER)
+	dl.socketId, err = randUint32()
+	if err != nil {
+		dl.Close()
+		return nil, err
+	}
+
+	seqNum, err := randUint32()
+	if err != nil {
+		dl.Close()
+		return nil, err
+	}
+	dl.initialPacketSequenceNumber = circular.New(seqNum&packet.MAX_SEQUENCENUMBER, packet.MAX_SEQUENCENUMBER)
 
 	go func() {
 		buffer := make([]byte, MAX_MSS_SIZE) // MTU size
