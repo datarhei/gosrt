@@ -42,21 +42,16 @@ func TestPubSub(t *testing.T) {
 		},
 	}
 
-	serverWg := sync.WaitGroup{}
-	serverWg.Add(1)
+	err := server.Listen()
+	require.NoError(t, err)
 
-	go func(s *Server) {
-		serverWg.Done()
-		if err := s.ListenAndServe(); err != nil {
-			if err == ErrServerClosed {
-				return
-			}
-
-			require.NoError(t, err)
+	go func() {
+		err := server.Serve()
+		if err == ErrServerClosed {
+			return
 		}
-	}(&server)
-
-	serverWg.Wait()
+		require.NoError(t, err)
+	}()
 
 	readerWg := sync.WaitGroup{}
 	readerWg.Add(2)

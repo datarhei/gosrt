@@ -3,7 +3,6 @@ package srt
 import (
 	"bytes"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -51,26 +50,18 @@ func TestEncryption(t *testing.T) {
 		},
 	}
 
+	err := server.Listen()
+	require.NoError(t, err)
+
 	defer server.Shutdown()
 
-	wgListen := sync.WaitGroup{}
-	wgListen.Add(1)
-
 	go func() {
-		wgListen.Done()
-		if err := server.ListenAndServe(); err != nil {
-			if err == ErrServerClosed {
-				return
-			}
-
-			if !assert.NoError(t, err) {
-				panic(err.Error())
-			}
+		err := server.Serve()
+		if err == ErrServerClosed {
+			return
 		}
+		require.NoError(t, err)
 	}()
-
-	// Wait for goroutine to be started
-	wgListen.Wait()
 
 	{
 		// Reject connection if wrong password is set
@@ -195,26 +186,18 @@ func TestEncryptionKeySwap(t *testing.T) {
 		},
 	}
 
+	err := server.Listen()
+	require.NoError(t, err)
+
 	defer server.Shutdown()
 
-	wgListen := sync.WaitGroup{}
-	wgListen.Add(1)
-
 	go func() {
-		wgListen.Done()
-		if err := server.ListenAndServe(); err != nil {
-			if err == ErrServerClosed {
-				return
-			}
-
-			if !assert.NoError(t, err) {
-				panic(err.Error())
-			}
+		err := server.Serve()
+		if err == ErrServerClosed {
+			return
 		}
+		require.NoError(t, err)
 	}()
-
-	// Wait for goroutine to be started
-	wgListen.Wait()
 
 	// Test transmitting encrypted messages with key swap in between
 
@@ -328,26 +311,18 @@ func TestStats(t *testing.T) {
 		},
 	}
 
+	err := server.Listen()
+	require.NoError(t, err)
+
 	defer server.Shutdown()
 
-	wgListen := sync.WaitGroup{}
-	wgListen.Add(1)
-
 	go func() {
-		wgListen.Done()
-		if err := server.ListenAndServe(); err != nil {
-			if err == ErrServerClosed {
-				return
-			}
-
-			if !assert.NoError(t, err) {
-				panic(err.Error())
-			}
+		err := server.Serve()
+		if err == ErrServerClosed {
+			return
 		}
+		require.NoError(t, err)
 	}()
-
-	// Wait for goroutine to be started
-	wgListen.Wait()
 
 	statsReader := Statistics{}
 	statsWriter := Statistics{}

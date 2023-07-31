@@ -1,7 +1,6 @@
 package srt
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,21 +22,18 @@ func TestServer(t *testing.T) {
 		},
 	}
 
-	serverWg := sync.WaitGroup{}
-	serverWg.Add(1)
+	err := server.Listen()
+	require.NoError(t, err)
 
-	go func(s *Server) {
-		serverWg.Done()
-		if err := s.ListenAndServe(); err != nil {
-			if err == ErrServerClosed {
-				return
-			}
+	defer server.Shutdown()
 
-			require.NoError(t, err)
+	go func() {
+		err := server.Serve()
+		if err == ErrServerClosed {
+			return
 		}
-	}(&server)
-
-	serverWg.Wait()
+		require.NoError(t, err)
+	}()
 
 	config := DefaultConfig()
 	config.StreamId = "publish"
@@ -62,6 +58,4 @@ func TestServer(t *testing.T) {
 
 	_, err = Dial("srt", "127.0.0.1:6003", config)
 	require.Error(t, err)
-
-	server.Shutdown()
 }
