@@ -3,7 +3,6 @@ package srt
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,21 +14,12 @@ import (
 	"github.com/datarhei/gosrt/internal/circular"
 	"github.com/datarhei/gosrt/internal/crypto"
 	"github.com/datarhei/gosrt/internal/packet"
+	"github.com/datarhei/gosrt/internal/rand"
 )
 
 // ErrClientClosed is returned when the client connection has
 // been voluntarily closed.
 var ErrClientClosed = errors.New("srt: client closed")
-
-func randUint32() (uint32, error) {
-	var b [4]byte
-	_, err := rand.Read(b[:])
-	if err != nil {
-		return 0, err
-	}
-
-	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3]), nil
-}
 
 // dialer implements the Conn interface
 type dialer struct {
@@ -128,13 +118,14 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 	dl.start = time.Now()
 
-	dl.socketId, err = randUint32()
+	// create a new socket ID
+	dl.socketId, err = rand.Uint32()
 	if err != nil {
 		dl.Close()
 		return nil, err
 	}
 
-	seqNum, err := randUint32()
+	seqNum, err := rand.Uint32()
 	if err != nil {
 		dl.Close()
 		return nil, err
