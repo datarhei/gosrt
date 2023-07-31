@@ -3,7 +3,6 @@ package srt
 import (
 	"bytes"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -53,12 +52,8 @@ func TestEncryption(t *testing.T) {
 
 	defer server.Shutdown()
 
-	serverWg := sync.WaitGroup{}
-	serverWg.Add(1)
-
-	go func(s *Server) {
-		serverWg.Done()
-		if err := s.ListenAndServe(); err != nil {
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
 			if err == ErrServerClosed {
 				return
 			}
@@ -67,9 +62,7 @@ func TestEncryption(t *testing.T) {
 				panic(err.Error())
 			}
 		}
-	}(&server)
-
-	serverWg.Wait()
+	}()
 
 	{
 		// Reject connection if wrong password is set
@@ -82,12 +75,14 @@ func TestEncryption(t *testing.T) {
 	}
 	// Test transmitting an encrypted message
 
-	readerWg := sync.WaitGroup{}
-	readerWg.Add(1)
+	readerConnected := make(chan struct{})
+	readerDone := make(chan struct{})
 
 	dataReader1 := bytes.Buffer{}
 
 	go func() {
+		defer close(readerDone)
+
 		config := DefaultConfig()
 		config.StreamId = "subscribe"
 		config.Passphrase = "foobarfoobar"
@@ -97,9 +92,9 @@ func TestEncryption(t *testing.T) {
 			panic(err.Error())
 		}
 
-		buffer := make([]byte, 2048)
+		close(readerConnected)
 
-		readerWg.Done()
+		buffer := make([]byte, 2048)
 
 		for {
 			n, err := conn.Read(buffer)
@@ -116,13 +111,12 @@ func TestEncryption(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	readerWg.Wait()
+	<-readerConnected
 
-	writerWg := sync.WaitGroup{}
-	writerWg.Add(1)
+	writerDone := make(chan struct{})
 
 	go func() {
-		defer writerWg.Done()
+		defer close(writerDone)
 
 		config := DefaultConfig()
 		config.StreamId = "publish"
@@ -145,7 +139,8 @@ func TestEncryption(t *testing.T) {
 		assert.NoError(t, err)
 	}()
 
-	writerWg.Wait()
+	<-writerDone
+	<-readerDone
 
 	reader1 := dataReader1.String()
 
@@ -194,12 +189,8 @@ func TestEncryptionKeySwap(t *testing.T) {
 
 	defer server.Shutdown()
 
-	serverWg := sync.WaitGroup{}
-	serverWg.Add(1)
-
-	go func(s *Server) {
-		serverWg.Done()
-		if err := s.ListenAndServe(); err != nil {
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
 			if err == ErrServerClosed {
 				return
 			}
@@ -208,18 +199,18 @@ func TestEncryptionKeySwap(t *testing.T) {
 				panic(err.Error())
 			}
 		}
-	}(&server)
-
-	serverWg.Wait()
+	}()
 
 	// Test transmitting encrypted messages with key swap in between
 
-	readerWg := sync.WaitGroup{}
-	readerWg.Add(1)
-
 	dataReader1 := bytes.Buffer{}
 
+	readerConnected := make(chan struct{})
+	readerDone := make(chan struct{})
+
 	go func() {
+		defer close(readerDone)
+
 		config := DefaultConfig()
 		config.StreamId = "subscribe"
 		config.Passphrase = "foobarfoobar"
@@ -231,7 +222,7 @@ func TestEncryptionKeySwap(t *testing.T) {
 
 		buffer := make([]byte, 2048)
 
-		readerWg.Done()
+		close(readerConnected)
 
 		for {
 			n, err := conn.Read(buffer)
@@ -248,13 +239,12 @@ func TestEncryptionKeySwap(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	readerWg.Wait()
+	<-readerConnected
 
-	writerWg := sync.WaitGroup{}
-	writerWg.Add(1)
+	writerDone := make(chan struct{})
 
 	go func() {
-		defer writerWg.Done()
+		defer close(writerDone)
 
 		config := DefaultConfig()
 		config.StreamId = "publish"
@@ -283,7 +273,8 @@ func TestEncryptionKeySwap(t *testing.T) {
 		assert.NoError(t, err)
 	}()
 
-	writerWg.Wait()
+	<-writerDone
+	<-readerDone
 
 	reader1 := dataReader1.String()
 
