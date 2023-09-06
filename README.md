@@ -212,7 +212,6 @@ ffmpeg \
     -r 25 \
     -g 50 \
     -pix_fmt yuv420p \
-    -vsync 1 \
     -flags2 local_header \
     -f mpegts \
     "udp://127.0.0.1:6000?pkt_size=1316"
@@ -304,7 +303,6 @@ ffmpeg \
     -r 25 \
     -g 50 \
     -pix_fmt yuv420p \
-    -vsync 1 \
     -flags2 local_header \
     -f mpegts \
     -transtype live \
@@ -345,7 +343,6 @@ ffmpeg \
     -r 25 \
     -g 50 \
     -pix_fmt yuv420p \
-    -vsync 1 \
     -flags2 local_header \
     -f mpegts \
     -transtype live \
