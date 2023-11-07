@@ -173,7 +173,7 @@ func (s *liveSend) Tick(now uint64) {
 
 			s.rate.bytesSent += pktLen
 
-			s.deliver(p)
+			s.deliver(p.Clone())
 			removeList = append(removeList, e)
 		} else {
 			break
