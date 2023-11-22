@@ -268,8 +268,7 @@ func (dl *dialer) send(p packet.Packet) {
 	}
 }
 
-// writer reads packets from the send queue and writes them to the wire Packets
-// from the queue will be decommissioned.
+// writer reads packets from the send queue and writes them to the wire.
 func (dl *dialer) writer(ctx context.Context) {
 	defer func() {
 		dl.log("dial", func() string { return "left writer loop" })
@@ -299,7 +298,10 @@ func (dl *dialer) writer(ctx context.Context) {
 			// Write the packet's contents to the wire.
 			dl.pc.Write(buffer)
 
-			p.Decommission()
+			if p.Header().IsControlPacket {
+				// Control packets can be decommissioned because they will not be sent again
+				p.Decommission()
+			}
 		}
 	}
 }

@@ -498,8 +498,7 @@ func (ln *listener) send(p packet.Packet) {
 	}
 }
 
-// writer reads packets from the send queue and writes them to the wire. Packets
-// from the queue will be decommissioned.
+// writer reads packets from the send queue and writes them to the wire.
 func (ln *listener) writer(ctx context.Context) {
 	defer func() {
 		ln.log("listen", func() string { return "left writer loop" })
@@ -529,7 +528,10 @@ func (ln *listener) writer(ctx context.Context) {
 			// Write the packet's contents to the wire
 			ln.pc.WriteTo(buffer, p.Header().Addr)
 
-			p.Decommission()
+			if p.Header().IsControlPacket {
+				// Control packets can be decommissioned because they will not be sent again (data packets might be retransferred)
+				p.Decommission()
+			}
 		}
 	}
 }
