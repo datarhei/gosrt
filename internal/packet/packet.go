@@ -430,6 +430,10 @@ func (p *pkt) Unmarshal(data []byte) error {
 }
 
 func (p *pkt) Marshal(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("invalid writer")
+	}
+
 	var buffer [16]byte
 
 	if p.payload == nil {
@@ -691,6 +695,10 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 }
 
 func (c *CIFHandshake) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	var buffer [128]byte
 
 	if len(c.StreamId) == 0 {
@@ -862,6 +870,10 @@ func (c *CIFHandshakeExtension) Unmarshal(data []byte) error {
 }
 
 func (c *CIFHandshakeExtension) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	var buffer [12]byte
 
 	binary.BigEndian.PutUint32(buffer[0:], c.SRTVersion)
@@ -1056,6 +1068,10 @@ func (c *CIFKeyMaterialExtension) Unmarshal(data []byte) error {
 }
 
 func (c *CIFKeyMaterialExtension) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	var buffer [128]byte
 
 	b := byte(0)
@@ -1176,6 +1192,10 @@ func (c *CIFACK) Unmarshal(data []byte) error {
 }
 
 func (c *CIFACK) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	var buffer [28]byte
 
 	binary.BigEndian.PutUint32(buffer[0:], c.LastACKPacketSequenceNumber.Val())
@@ -1263,6 +1283,10 @@ func (c *CIFNAK) Unmarshal(data []byte) error {
 }
 
 func (c *CIFNAK) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	if len(c.LostPacketSequenceNumber)%2 != 0 {
 		return
 	}
@@ -1300,6 +1324,10 @@ func (c *CIFShutdown) Unmarshal(data []byte) error {
 }
 
 func (c *CIFShutdown) Marshal(w io.Writer) {
+	if w == nil {
+		return
+	}
+
 	var buffer [4]byte
 
 	binary.BigEndian.PutUint32(buffer[0:], 0)

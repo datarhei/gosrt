@@ -188,6 +188,10 @@ func openReader(addr string, logger srt.Logger) (io.ReadCloser, error) {
 	}
 
 	if addr == "-" {
+		if os.Stdin == nil {
+			return nil, fmt.Errorf("stdin is not defined")
+		}
+
 		return os.Stdin, nil
 	}
 
@@ -281,6 +285,10 @@ func openWriter(addr string, logger srt.Logger) (io.WriteCloser, error) {
 	}
 
 	if addr == "-" {
+		if os.Stdout == nil {
+			return nil, fmt.Errorf("stdout is not defined")
+		}
+
 		return NewNonblockingWriter(os.Stdout, 2048), nil
 	}
 

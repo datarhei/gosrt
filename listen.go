@@ -203,6 +203,9 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 	ln.pc = pc
 	ln.addr = pc.LocalAddr()
+	if ln.addr == nil {
+		return nil, fmt.Errorf("listen: no local address")
+	}
 
 	ln.conns = make(map[uint32]*srtConn)
 
@@ -210,11 +213,12 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 	ln.rcvQueue = make(chan packet.Packet, 2048)
 
-	ln.syncookie, err = srtnet.NewSYNCookie(ln.addr.String(), nil)
+	syncookie, err := srtnet.NewSYNCookie(ln.addr.String(), nil)
 	if err != nil {
 		ln.Close()
 		return nil, err
 	}
+	ln.syncookie = syncookie
 
 	ln.doneChan = make(chan error)
 
@@ -440,7 +444,12 @@ func (ln *listener) Close() {
 }
 
 func (ln *listener) Addr() net.Addr {
-	addr, _ := net.ResolveUDPAddr("udp", ln.addr.String())
+	addrString := "0.0.0.0:0"
+	if ln.addr != nil {
+		addrString = ln.addr.String()
+	}
+
+	addr, _ := net.ResolveUDPAddr("udp", addrString)
 	return addr
 }
 
@@ -700,5 +709,9 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 }
 
 func (ln *listener) log(topic string, message func() string) {
+	if ln.config.Logger == nil {
+		return
+	}
+
 	ln.config.Logger.Print(topic, 0, 2, message)
 }

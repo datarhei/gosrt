@@ -216,20 +216,24 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 }
 
 func (s *server) handlePublish(conn srt.Conn) {
-	client := conn.RemoteAddr()
 	channel := ""
+	client := conn.RemoteAddr()
+	if client == nil {
+		conn.Close()
+		return
+	}
 
 	if conn.Version() == 4 {
 		channel = "/" + client.String()
 	} else if conn.Version() == 5 {
 		streamId := conn.StreamId()
 		path := strings.TrimPrefix(streamId, "publish:")
-		u, _ := url.Parse(path)
 
-		channel = u.Path
+		channel = path
 	} else {
 		s.log("PUBLISH", "INVALID", channel, "unknown connection version", client)
 		conn.Close()
+		return
 	}
 
 	// Look for the stream
@@ -270,20 +274,24 @@ func (s *server) handlePublish(conn srt.Conn) {
 }
 
 func (s *server) handleSubscribe(conn srt.Conn) {
-	client := conn.RemoteAddr()
 	channel := ""
+	client := conn.RemoteAddr()
+	if client == nil {
+		conn.Close()
+		return
+	}
 
 	if conn.Version() == 4 {
 		channel = client.String()
 	} else if conn.Version() == 5 {
 		streamId := conn.StreamId()
 		path := strings.TrimPrefix(streamId, "subscribe:")
-		u, _ := url.Parse(path)
 
-		channel = u.Path
+		channel = path
 	} else {
 		s.log("SUBSCRIBE", "INVALID", channel, "unknown connection version", client)
 		conn.Close()
+		return
 	}
 
 	s.log("SUBSCRIBE", "START", channel, "", client)
