@@ -10,6 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func mustDecodeString(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return b
+}
+
 func TestInvalidKeylength(t *testing.T) {
 	_, err := New(42)
 	require.Error(t, err, "succeeded to create crypto with invalid keylength")
@@ -22,8 +31,8 @@ func TestInvalidKM(t *testing.T) {
 	km := &packet.CIFKeyMaterialExtension{}
 
 	km.KeyBasedEncryption = packet.UnencryptedPacket
-	km.Salt, _ = hex.DecodeString("6c438852715a4d26e0e810b3132ca61f")
-	km.Wrap, _ = hex.DecodeString("699ab4eac6b7c66c3a9fa0d6836326c2b294a10764233356")
+	km.Salt = mustDecodeString("6c438852715a4d26e0e810b3132ca61f")
+	km.Wrap = mustDecodeString("699ab4eac6b7c66c3a9fa0d6836326c2b294a10764233356")
 
 	err = c.UnmarshalKM(km, "foobarfoobar")
 	require.ErrorIs(t, err, ErrInvalidKey)
@@ -31,8 +40,8 @@ func TestInvalidKM(t *testing.T) {
 	km = &packet.CIFKeyMaterialExtension{}
 
 	km.KeyBasedEncryption = packet.EvenKeyEncrypted
-	km.Salt, _ = hex.DecodeString("6c438852715a4d26e0e810b3132ca61f")
-	km.Wrap, _ = hex.DecodeString("5b901889bd106609ca8a83264b12ed1bfab3f02812bad65784ac396b1f57eb16c53e1020d3a3250b")
+	km.Salt = mustDecodeString("6c438852715a4d26e0e810b3132ca61f")
+	km.Wrap = mustDecodeString("5b901889bd106609ca8a83264b12ed1bfab3f02812bad65784ac396b1f57eb16c53e1020d3a3250b")
 
 	err = c.UnmarshalKM(km, "foobarfoobar")
 	require.ErrorIs(t, err, ErrInvalidWrap)
@@ -80,22 +89,22 @@ func TestUnmarshal(t *testing.T) {
 		km := &packet.CIFKeyMaterialExtension{}
 
 		km.KeyBasedEncryption = packet.EvenKeyEncrypted
-		km.Salt, _ = hex.DecodeString(test.salt)
-		km.Wrap, _ = hex.DecodeString(test.evenWrap)
+		km.Salt = mustDecodeString(test.salt)
+		km.Wrap = mustDecodeString(test.evenWrap)
 
 		err = c.UnmarshalKM(km, test.passphrase)
 		require.NoError(t, err)
 
 		km.KeyBasedEncryption = packet.OddKeyEncrypted
-		km.Salt, _ = hex.DecodeString(test.salt)
-		km.Wrap, _ = hex.DecodeString(test.oddWrap)
+		km.Salt = mustDecodeString(test.salt)
+		km.Wrap = mustDecodeString(test.oddWrap)
 
 		err = c.UnmarshalKM(km, test.passphrase)
 		require.NoError(t, err)
 
 		km.KeyBasedEncryption = packet.EvenAndOddKey
-		km.Salt, _ = hex.DecodeString(test.salt)
-		km.Wrap, _ = hex.DecodeString(test.evenOddWrap)
+		km.Salt = mustDecodeString(test.salt)
+		km.Wrap = mustDecodeString(test.evenOddWrap)
 
 		err = c.UnmarshalKM(km, test.passphrase)
 		require.NoError(t, err)
@@ -151,16 +160,16 @@ func TestMarshal(t *testing.T) {
 
 		cr := c.(*crypto)
 
-		cr.salt, _ = hex.DecodeString(test.salt)
-		cr.evenSEK, _ = hex.DecodeString(test.evenSEK)
-		cr.oddSEK, _ = hex.DecodeString(test.oddSEK)
+		cr.salt = mustDecodeString(test.salt)
+		cr.evenSEK = mustDecodeString(test.evenSEK)
+		cr.oddSEK = mustDecodeString(test.oddSEK)
 
 		km := &packet.CIFKeyMaterialExtension{}
 
 		err = c.MarshalKM(km, test.passphrase, packet.EvenKeyEncrypted)
 		require.NoError(t, err, "keylength: %d", test.keylength)
 
-		wrap, _ := hex.DecodeString(test.evenWrap)
+		wrap := mustDecodeString(test.evenWrap)
 
 		x := bytes.Compare(km.Wrap, wrap)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
@@ -170,7 +179,7 @@ func TestMarshal(t *testing.T) {
 		err = c.MarshalKM(km, test.passphrase, packet.OddKeyEncrypted)
 		require.NoError(t, err, "keylength: %d", test.keylength)
 
-		wrap, _ = hex.DecodeString(test.oddWrap)
+		wrap = mustDecodeString(test.oddWrap)
 
 		x = bytes.Compare(km.Wrap, wrap)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
@@ -180,7 +189,7 @@ func TestMarshal(t *testing.T) {
 		err = c.MarshalKM(km, test.passphrase, packet.EvenAndOddKey)
 		require.NoError(t, err, "keylength: %d", test.keylength)
 
-		wrap, _ = hex.DecodeString(test.evenOddWrap)
+		wrap = mustDecodeString(test.evenOddWrap)
 
 		x = bytes.Compare(km.Wrap, wrap)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
@@ -234,11 +243,11 @@ func TestDecode(t *testing.T) {
 
 		cr := c.(*crypto)
 
-		cr.salt, _ = hex.DecodeString(test.salt)
-		cr.evenSEK, _ = hex.DecodeString(test.evenSEK)
-		cr.oddSEK, _ = hex.DecodeString(test.oddSEK)
+		cr.salt = mustDecodeString(test.salt)
+		cr.evenSEK = mustDecodeString(test.evenSEK)
+		cr.oddSEK = mustDecodeString(test.oddSEK)
 
-		encrypted, _ := hex.DecodeString(test.evenEncrypted)
+		encrypted := mustDecodeString(test.evenEncrypted)
 
 		err = c.EncryptOrDecryptPayload(encrypted, packet.EvenKeyEncrypted, packetSequenceNumber)
 		require.NoError(t, err, "keylength: %d", test.keylength)
@@ -246,7 +255,7 @@ func TestDecode(t *testing.T) {
 		x := bytes.Compare(data, encrypted)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
-		encrypted, _ = hex.DecodeString(test.oddEncrypted)
+		encrypted = mustDecodeString(test.oddEncrypted)
 
 		err = c.EncryptOrDecryptPayload(encrypted, packet.OddKeyEncrypted, packetSequenceNumber)
 		require.NoError(t, err, "keylength: %d", test.keylength)
@@ -303,24 +312,24 @@ func TestEncode(t *testing.T) {
 
 		cr := c.(*crypto)
 
-		cr.salt, _ = hex.DecodeString(test.salt)
-		cr.evenSEK, _ = hex.DecodeString(test.evenSEK)
-		cr.oddSEK, _ = hex.DecodeString(test.oddSEK)
+		cr.salt = mustDecodeString(test.salt)
+		cr.evenSEK = mustDecodeString(test.evenSEK)
+		cr.oddSEK = mustDecodeString(test.oddSEK)
 
 		data, _ := hex.DecodeString(originalData)
 
 		c.EncryptOrDecryptPayload(data, packet.EvenKeyEncrypted, packetSequenceNumber)
 
-		encrypted, _ := hex.DecodeString(test.evenEncrypted)
+		encrypted := mustDecodeString(test.evenEncrypted)
 
 		x := bytes.Compare(data, encrypted)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
 
-		data, _ = hex.DecodeString(originalData)
+		data = mustDecodeString(originalData)
 
 		c.EncryptOrDecryptPayload(data, packet.OddKeyEncrypted, packetSequenceNumber)
 
-		encrypted, _ = hex.DecodeString(test.oddEncrypted)
+		encrypted = mustDecodeString(test.oddEncrypted)
 
 		x = bytes.Compare(data, encrypted)
 		require.Equal(t, 0, x, "keylength: %d", test.keylength)
