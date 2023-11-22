@@ -127,7 +127,7 @@ func (c *crypto) UnmarshalKM(km *packet.CIFKeyMaterialExtension, passphrase stri
 
 	wrapLength := n * c.keyLength
 
-	if len(km.Wrap) != wrapLength {
+	if len(km.Wrap)-8 != wrapLength {
 		return ErrInvalidWrap
 	}
 
