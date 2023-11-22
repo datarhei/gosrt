@@ -157,8 +157,8 @@ func Dial(network, address string, config Config) (Conn, error) {
 				return
 			}
 
-			p := packet.NewPacket(dl.remoteAddr, buffer[:n])
-			if p == nil {
+			p, err := packet.NewPacketFromData(dl.remoteAddr, buffer[:n])
+			if err != nil {
 				continue
 			}
 
@@ -532,7 +532,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 }
 
 func (dl *dialer) sendInduction() {
-	p := packet.NewPacket(dl.remoteAddr, nil)
+	p := packet.NewPacket(dl.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -567,7 +567,7 @@ func (dl *dialer) sendInduction() {
 }
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
-	p := packet.NewPacket(dl.remoteAddr, nil)
+	p := packet.NewPacket(dl.remoteAddr)
 
 	data := [4]byte{}
 	binary.BigEndian.PutUint32(data[0:], 0)

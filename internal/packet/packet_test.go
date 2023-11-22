@@ -16,7 +16,7 @@ import (
 func TestEmptyPacket(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := NewPacket(addr, nil)
+	p := NewPacket(addr)
 
 	var buf bytes.Buffer
 
@@ -30,7 +30,7 @@ func TestEmptyPacket(t *testing.T) {
 func TestArbitraryPacket(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := NewPacket(addr, nil)
+	p := NewPacket(addr)
 	p.SetData([]byte("hello world!"))
 
 	var buf bytes.Buffer
@@ -45,7 +45,7 @@ func TestArbitraryPacket(t *testing.T) {
 func TestArbitraryControlPacket(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := NewPacket(addr, nil)
+	p := NewPacket(addr)
 	p.Header().IsControlPacket = true
 	p.Header().ControlType = CTRLTYPE_KEEPALIVE
 	p.Header().SubType = 112
@@ -75,8 +75,8 @@ func FuzzPacket(f *testing.F) {
 		if len(data) == 0 {
 			return
 		}
-		p := NewPacket(addr, data)
-		if p == nil {
+		p, err := NewPacketFromData(addr, data)
+		if err != nil {
 			return
 		}
 
@@ -95,7 +95,8 @@ func TestUnmarshalPacket(t *testing.T) {
 
 	data, _ := hex.DecodeString("00000000c0000001000000000000000068656c6c6f20776f726c6421")
 
-	p := NewPacket(addr, data)
+	p, err := NewPacketFromData(addr, data)
+	require.NoError(t, err)
 
 	require.Equal(t, p.Header().Timestamp, uint32(0))
 	require.Equal(t, p.Header().Addr.String(), "127.0.0.1:6000")
@@ -111,7 +112,7 @@ func TestUnmarshalPacket(t *testing.T) {
 func TestPacketString(t *testing.T) {
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := NewPacket(addr, nil)
+	p := NewPacket(addr)
 	p.SetData([]byte("hello world!"))
 
 	require.Greater(t, len(p.String()), 0)
@@ -525,10 +526,20 @@ func TestShutdownString(t *testing.T) {
 }
 
 func BenchmarkNewPacket(b *testing.B) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
+
+	for i := 0; i < b.N; i++ {
+		pkt := NewPacket(addr)
+
+		pkt.Decommission()
+	}
+}
+
+func BenchmarkNewPacketWithData(b *testing.B) {
 	data := make([]byte, 1316)
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:6000")
 
-	p := NewPacket(addr, nil)
+	p := NewPacket(addr)
 	p.SetData(data)
 
 	var buf bytes.Buffer
@@ -540,9 +551,11 @@ func BenchmarkNewPacket(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		pkt := NewPacket(addr, data)
+		pkt, _ := NewPacketFromData(addr, data)
 
-		pkt.Decommission()
+		if pkt != nil {
+			pkt.Decommission()
+		}
 	}
 }
 

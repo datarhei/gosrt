@@ -122,14 +122,14 @@ func TestDialV4(t *testing.T) {
 				return
 			}
 
-			p := packet.NewPacket(pc.RemoteAddr(), buffer[:n])
-			require.NotEqual(t, nil, p)
+			p, err := packet.NewPacketFromData(pc.RemoteAddr(), buffer[:n])
+			require.NoError(t, err)
 
 			packets <- p
 		}
 	}()
 
-	p := packet.NewPacket(pc.RemoteAddr(), nil)
+	p := packet.NewPacket(pc.RemoteAddr())
 
 	p.Header().IsControlPacket = true
 	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
@@ -268,14 +268,14 @@ func TestDialV5(t *testing.T) {
 				return
 			}
 
-			p := packet.NewPacket(pc.RemoteAddr(), buffer[:n])
-			require.NotEqual(t, nil, p)
+			p, err := packet.NewPacketFromData(pc.RemoteAddr(), buffer[:n])
+			require.NoError(t, err)
 
 			packets <- p
 		}
 	}()
 
-	p := packet.NewPacket(pc.RemoteAddr(), nil)
+	p := packet.NewPacket(pc.RemoteAddr())
 
 	p.Header().IsControlPacket = true
 

@@ -429,7 +429,7 @@ func (c *srtConn) Write(b []byte) (int, error) {
 			return 0, err
 		}
 
-		p := packet.NewPacket(nil, nil)
+		p := packet.NewPacket(nil)
 
 		p.SetData(c.writeData[:n])
 
@@ -1133,7 +1133,7 @@ func (c *srtConn) handleKMResponse(p packet.Packet) {
 
 // sendShutdown sends a shutdown packet to the peer.
 func (c *srtConn) sendShutdown() {
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -1156,7 +1156,7 @@ func (c *srtConn) sendShutdown() {
 
 // sendNAK sends a NAK to the peer with the given range of sequence numbers.
 func (c *srtConn) sendNAK(from, to circular.Number) {
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -1182,7 +1182,7 @@ func (c *srtConn) sendNAK(from, to circular.Number) {
 
 // sendACK sends an ACK to the peer with the given sequence number.
 func (c *srtConn) sendACK(seq circular.Number, lite bool) {
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -1233,7 +1233,7 @@ func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 
 // sendACKACK sends an ACKACK to the peer with the given ACK sequence.
 func (c *srtConn) sendACKACK(ackSequence uint32) {
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -1280,7 +1280,7 @@ func (c *srtConn) sendHSRequest() {
 		SendTSBPDDelay: uint16(c.config.ReceiverLatency.Milliseconds()),
 	}
 
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 
@@ -1319,7 +1319,7 @@ func (c *srtConn) sendKMRequest(key packet.PacketEncryption) {
 
 	c.crypto.MarshalKM(cif, c.config.Passphrase, key)
 
-	p := packet.NewPacket(c.remoteAddr, nil)
+	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
 

@@ -249,8 +249,8 @@ func Listen(network, address string, config Config) (Listener, error) {
 				return
 			}
 
-			p := packet.NewPacket(addr, buffer[:n])
-			if p == nil {
+			p, err := packet.NewPacketFromData(addr, buffer[:n])
+			if err != nil {
 				continue
 			}
 
@@ -372,7 +372,7 @@ func (ln *listener) handleShutdown(socketId uint32) {
 }
 
 func (ln *listener) reject(request connRequest, reason packet.HandshakeType) {
-	p := packet.NewPacket(request.addr, nil)
+	p := packet.NewPacket(request.addr)
 	p.Header().IsControlPacket = true
 
 	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
@@ -393,7 +393,7 @@ func (ln *listener) reject(request connRequest, reason packet.HandshakeType) {
 }
 
 func (ln *listener) accept(request connRequest) {
-	p := packet.NewPacket(request.addr, nil)
+	p := packet.NewPacket(request.addr)
 
 	p.Header().IsControlPacket = true
 

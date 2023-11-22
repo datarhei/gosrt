@@ -140,8 +140,8 @@ func TestListenHSV4(t *testing.T) {
 				return
 			}
 
-			p := packet.NewPacket(addr, buffer[:n])
-			require.NotEqual(t, nil, p)
+			p, err := packet.NewPacketFromData(addr, buffer[:n])
+			require.NoError(t, err)
 
 			if p.Header().ControlType != packet.CTRLTYPE_HANDSHAKE {
 				continue
@@ -274,8 +274,8 @@ func TestListenHSV5(t *testing.T) {
 				return
 			}
 
-			p := packet.NewPacket(addr, buffer[:n])
-			require.NotEqual(t, nil, p)
+			p, err := packet.NewPacketFromData(addr, buffer[:n])
+			require.NoError(t, err)
 
 			if p.Header().ControlType != packet.CTRLTYPE_HANDSHAKE {
 				continue

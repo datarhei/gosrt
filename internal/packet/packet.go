@@ -311,7 +311,20 @@ func (p *pool) Put(b *bytes.Buffer) {
 
 var payloadPool *pool = newPool()
 
-func NewPacket(addr net.Addr, rawdata []byte) Packet {
+func NewPacketFromData(addr net.Addr, rawdata []byte) (Packet, error) {
+	p := NewPacket(addr)
+
+	if len(rawdata) != 0 {
+		if err := p.Unmarshal(rawdata); err != nil {
+			p.Decommission()
+			return nil, fmt.Errorf("invalid data: %w", err)
+		}
+	}
+
+	return p, nil
+}
+
+func NewPacket(addr net.Addr) Packet {
 	p := &pkt{
 		header: PacketHeader{
 			Addr:                  addr,
@@ -322,13 +335,6 @@ func NewPacket(addr net.Addr, rawdata []byte) Packet {
 			MessageNumber:         1,
 		},
 		payload: payloadPool.Get(),
-	}
-
-	if len(rawdata) != 0 {
-		if err := p.Unmarshal(rawdata); err != nil {
-			p.Decommission()
-			return nil
-		}
 	}
 
 	return p
