@@ -39,6 +39,48 @@ const (
 	SUBSCRIBE                                // This connection is meant to read data from a PUBLISHed stream
 )
 
+// RejectionReason are the rejection reasons wrapped from the internal packet package
+// so they can be returned from the Accept Fn to set the rejection reason.
+type RejectionReason uint32
+
+const (
+	RejUnknown    = RejectionReason(packet.REJ_UNKNOWN)
+	RejSystem     = RejectionReason(packet.REJ_SYSTEM)
+	RejPeer       = RejectionReason(packet.REJ_PEER)
+	RejResource   = RejectionReason(packet.REJ_RESOURCE)
+	RejBacklog    = RejectionReason(packet.REJ_BACKLOG)
+	RejInternal   = RejectionReason(packet.REJ_IPE)
+	RejClose      = RejectionReason(packet.REJ_CLOSE)
+	RejVersion    = RejectionReason(packet.REJ_VERSION)
+	RejRdvCookie  = RejectionReason(packet.REJ_RDVCOOKIE)
+	RejBadSecret  = RejectionReason(packet.REJ_BADSECRET)
+	RejUnsecure   = RejectionReason(packet.REJ_UNSECURE)
+	RejMessageApi = RejectionReason(packet.REJ_MESSAGEAPI)
+	RejCongestion = RejectionReason(packet.REJ_CONGESTION)
+	RejFilter     = RejectionReason(packet.REJ_FILTER)
+	RejGroup      = RejectionReason(packet.REJ_GROUP)
+
+	// These are the extended rejection reasons that may be less well supported
+	// Codes & their meanings taken from https://github.com/Haivision/srt/blob/f477af533562505abf5295f059cf2156b17be740/srtcore/access_control.h
+	RejxBadRequest    RejectionReason = 1400 // General syntax error in the SocketID specification (also a fallback code for undefined cases)
+	RejxUnauthorized  RejectionReason = 1401 // Authentication failed, provided that the user was correctly identified and access to the required resource would be granted
+	RejxOverloaded    RejectionReason = 1402 // The server is too heavily loaded, or you have exceeded credits for accessing the service and the resource.
+	RejxForbidden     RejectionReason = 1403 // Access denied to the resource by any kind of reason.
+	RejxNotFound      RejectionReason = 1404 // Resource not found at this time.
+	RejxBadMode       RejectionReason = 1405 // The mode specified in `m` key in StreamID is not supported for this request.
+	RejxUnacceptable  RejectionReason = 1406 // The requested parameters specified in SocketID cannot be satisfied for the requested resource. Also when m=publish and the data format is not acceptable.
+	RejxConflict      RejectionReason = 1407 // The resource being accessed is already locked for modification. This is in case of m=publish and the specified resource is currently read-only.
+	RejxNotSubMedia   RejectionReason = 1415 // The media type is not supported by the application. This is the `t` key that specifies the media type as stream, file and auth, possibly extended by the application.
+	RejxLocked        RejectionReason = 1423 // The resource being accessed is locked for any access.
+	RejxFailedDepend  RejectionReason = 1424 // The request failed because it specified a dependent session ID that has been disconnected.
+	RejxInternal      RejectionReason = 1500 // Unexpected internal server error
+	RejxUnimplemented RejectionReason = 1501 // The request was recognized, but the current version doesn't support it.
+	RejxGateway       RejectionReason = 1502 // The server acts as a gateway and the target endpoint rejected the connection.
+	RejxDown          RejectionReason = 1503 // The service has been temporarily taken over by a stub reporting this error. The real service can be down for maintenance or crashed.
+	RejxVersion       RejectionReason = 1505 // SRT version not supported. This might be either unsupported backward compatibility, or an upper value of a version.
+	RejxNoRoom        RejectionReason = 1507 // The data stream cannot be archived due to lacking storage space. This is in case when the request type was to send a file or the live stream to be archived.
+)
+
 // ConnRequest is an incoming connection request
 type ConnRequest interface {
 	// RemoteAddr returns the address of the peer. The returned net.Addr
@@ -63,6 +105,9 @@ type ConnRequest interface {
 	// data. Returns an error if the passphrase did not work or the connection
 	// is not encrypted.
 	SetPassphrase(p string) error
+
+	// SetRejectionReason sets the rejection reason for the connection.
+	SetRejectionReason(RejectionReason)
 }
 
 // connRequest implements the ConnRequest interface
@@ -72,9 +117,10 @@ type connRequest struct {
 	socketId  uint32
 	timestamp uint32
 
-	handshake  *packet.CIFHandshake
-	crypto     crypto.Crypto
-	passphrase string
+	handshake       *packet.CIFHandshake
+	crypto          crypto.Crypto
+	passphrase      string
+	rejectionReason RejectionReason
 }
 
 func (req *connRequest) RemoteAddr() net.Addr {
@@ -108,6 +154,10 @@ func (req *connRequest) SetPassphrase(passphrase string) error {
 	req.passphrase = passphrase
 
 	return nil
+}
+
+func (req *connRequest) SetRejectionReason(reason RejectionReason) {
+	req.rejectionReason = reason
 }
 
 // ErrListenerClosed is returned when the listener is about to shutdown.
@@ -286,7 +336,12 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 
 		mode := acceptFn(&request)
 		if mode != PUBLISH && mode != SUBSCRIBE {
-			ln.reject(request, packet.REJ_PEER)
+			// Figure out the reason
+			reason := packet.REJ_PEER
+			if request.rejectionReason > 0 {
+				reason = packet.HandshakeType(request.rejectionReason)
+			}
+			ln.reject(request, reason)
 			break
 		}
 
