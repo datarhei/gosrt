@@ -39,46 +39,50 @@ const (
 	SUBSCRIBE                                // This connection is meant to read data from a PUBLISHed stream
 )
 
-// RejectionReason are the rejection reasons wrapped from the internal packet package
-// so they can be returned from the Accept Fn to set the rejection reason.
+// RejectionReason are the rejection reasons that can be returned from the AcceptFunc in order to send
+// another reason than the default one (REJ_PEER) to the client.
 type RejectionReason uint32
 
+// Table 7: Handshake Rejection Reason Codes
 const (
-	RejUnknown    = RejectionReason(packet.REJ_UNKNOWN)
-	RejSystem     = RejectionReason(packet.REJ_SYSTEM)
-	RejPeer       = RejectionReason(packet.REJ_PEER)
-	RejResource   = RejectionReason(packet.REJ_RESOURCE)
-	RejBacklog    = RejectionReason(packet.REJ_BACKLOG)
-	RejInternal   = RejectionReason(packet.REJ_IPE)
-	RejClose      = RejectionReason(packet.REJ_CLOSE)
-	RejVersion    = RejectionReason(packet.REJ_VERSION)
-	RejRdvCookie  = RejectionReason(packet.REJ_RDVCOOKIE)
-	RejBadSecret  = RejectionReason(packet.REJ_BADSECRET)
-	RejUnsecure   = RejectionReason(packet.REJ_UNSECURE)
-	RejMessageApi = RejectionReason(packet.REJ_MESSAGEAPI)
-	RejCongestion = RejectionReason(packet.REJ_CONGESTION)
-	RejFilter     = RejectionReason(packet.REJ_FILTER)
-	RejGroup      = RejectionReason(packet.REJ_GROUP)
+	REJ_UNKNOWN    RejectionReason = 1000 // unknown reason
+	REJ_SYSTEM     RejectionReason = 1001 // system function error
+	REJ_PEER       RejectionReason = 1002 // rejected by peer
+	REJ_RESOURCE   RejectionReason = 1003 // resource allocation problem
+	REJ_ROGUE      RejectionReason = 1004 // incorrect data in handshake
+	REJ_BACKLOG    RejectionReason = 1005 // listener's backlog exceeded
+	REJ_IPE        RejectionReason = 1006 // internal program error
+	REJ_CLOSE      RejectionReason = 1007 // socket is closing
+	REJ_VERSION    RejectionReason = 1008 // peer is older version than agent's min
+	REJ_RDVCOOKIE  RejectionReason = 1009 // rendezvous cookie collision
+	REJ_BADSECRET  RejectionReason = 1010 // wrong password
+	REJ_UNSECURE   RejectionReason = 1011 // password required or unexpected
+	REJ_MESSAGEAPI RejectionReason = 1012 // stream flag collision
+	REJ_CONGESTION RejectionReason = 1013 // incompatible congestion-controller type
+	REJ_FILTER     RejectionReason = 1014 // incompatible packet filter
+	REJ_GROUP      RejectionReason = 1015 // incompatible group
+)
 
-	// These are the extended rejection reasons that may be less well supported
-	// Codes & their meanings taken from https://github.com/Haivision/srt/blob/f477af533562505abf5295f059cf2156b17be740/srtcore/access_control.h
-	RejxBadRequest    RejectionReason = 1400 // General syntax error in the SocketID specification (also a fallback code for undefined cases)
-	RejxUnauthorized  RejectionReason = 1401 // Authentication failed, provided that the user was correctly identified and access to the required resource would be granted
-	RejxOverloaded    RejectionReason = 1402 // The server is too heavily loaded, or you have exceeded credits for accessing the service and the resource.
-	RejxForbidden     RejectionReason = 1403 // Access denied to the resource by any kind of reason.
-	RejxNotFound      RejectionReason = 1404 // Resource not found at this time.
-	RejxBadMode       RejectionReason = 1405 // The mode specified in `m` key in StreamID is not supported for this request.
-	RejxUnacceptable  RejectionReason = 1406 // The requested parameters specified in SocketID cannot be satisfied for the requested resource. Also when m=publish and the data format is not acceptable.
-	RejxConflict      RejectionReason = 1407 // The resource being accessed is already locked for modification. This is in case of m=publish and the specified resource is currently read-only.
-	RejxNotSubMedia   RejectionReason = 1415 // The media type is not supported by the application. This is the `t` key that specifies the media type as stream, file and auth, possibly extended by the application.
-	RejxLocked        RejectionReason = 1423 // The resource being accessed is locked for any access.
-	RejxFailedDepend  RejectionReason = 1424 // The request failed because it specified a dependent session ID that has been disconnected.
-	RejxInternal      RejectionReason = 1500 // Unexpected internal server error
-	RejxUnimplemented RejectionReason = 1501 // The request was recognized, but the current version doesn't support it.
-	RejxGateway       RejectionReason = 1502 // The server acts as a gateway and the target endpoint rejected the connection.
-	RejxDown          RejectionReason = 1503 // The service has been temporarily taken over by a stub reporting this error. The real service can be down for maintenance or crashed.
-	RejxVersion       RejectionReason = 1505 // SRT version not supported. This might be either unsupported backward compatibility, or an upper value of a version.
-	RejxNoRoom        RejectionReason = 1507 // The data stream cannot be archived due to lacking storage space. This is in case when the request type was to send a file or the live stream to be archived.
+// These are the extended rejection reasons that may be less well supported
+// Codes & their meanings taken from https://github.com/Haivision/srt/blob/f477af533562505abf5295f059cf2156b17be740/srtcore/access_control.h
+const (
+	REJX_BAD_REQUEST   RejectionReason = 1400 // General syntax error in the SocketID specification (also a fallback code for undefined cases)
+	REJX_UNAUTHORIZED  RejectionReason = 1401 // Authentication failed, provided that the user was correctly identified and access to the required resource would be granted
+	REJX_OVERLOAD      RejectionReason = 1402 // The server is too heavily loaded, or you have exceeded credits for accessing the service and the resource.
+	REJX_FORBIDDEN     RejectionReason = 1403 // Access denied to the resource by any kind of reason.
+	REJX_NOTFOUND      RejectionReason = 1404 // Resource not found at this time.
+	REJX_BAD_MODE      RejectionReason = 1405 // The mode specified in `m` key in StreamID is not supported for this request.
+	REJX_UNACCEPTABLE  RejectionReason = 1406 // The requested parameters specified in SocketID cannot be satisfied for the requested resource. Also when m=publish and the data format is not acceptable.
+	REJX_CONFLICT      RejectionReason = 1407 // The resource being accessed is already locked for modification. This is in case of m=publish and the specified resource is currently read-only.
+	REJX_NOTSUP_MEDIA  RejectionReason = 1415 // The media type is not supported by the application. This is the `t` key that specifies the media type as stream, file and auth, possibly extended by the application.
+	REJX_LOCKED        RejectionReason = 1423 // The resource being accessed is locked for any access.
+	REJX_FAILED_DEPEND RejectionReason = 1424 // The request failed because it specified a dependent session ID that has been disconnected.
+	REJX_ISE           RejectionReason = 1500 // Unexpected internal server error
+	REJX_UNIMPLEMENTED RejectionReason = 1501 // The request was recognized, but the current version doesn't support it.
+	REJX_GW            RejectionReason = 1502 // The server acts as a gateway and the target endpoint rejected the connection.
+	REJX_DOWN          RejectionReason = 1503 // The service has been temporarily taken over by a stub reporting this error. The real service can be down for maintenance or crashed.
+	REJX_VERSION       RejectionReason = 1505 // SRT version not supported. This might be either unsupported backward compatibility, or an upper value of a version.
+	REJX_NOROOM        RejectionReason = 1507 // The data stream cannot be archived due to lacking storage space. This is in case when the request type was to send a file or the live stream to be archived.
 )
 
 // ConnRequest is an incoming connection request
@@ -106,8 +110,9 @@ type ConnRequest interface {
 	// is not encrypted.
 	SetPassphrase(p string) error
 
-	// SetRejectionReason sets the rejection reason for the connection.
-	SetRejectionReason(RejectionReason)
+	// SetRejectionReason sets the rejection reason for the connection. If
+	// no set, REJ_PEER will be used.
+	SetRejectionReason(r RejectionReason)
 }
 
 // connRequest implements the ConnRequest interface
@@ -330,23 +335,23 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 		return nil, REJECT, err
 	case request := <-ln.backlog:
 		if acceptFn == nil {
-			ln.reject(request, packet.REJ_PEER)
+			ln.reject(request, REJ_PEER)
 			break
 		}
 
 		mode := acceptFn(&request)
 		if mode != PUBLISH && mode != SUBSCRIBE {
 			// Figure out the reason
-			reason := packet.REJ_PEER
+			reason := REJ_PEER
 			if request.rejectionReason > 0 {
-				reason = packet.HandshakeType(request.rejectionReason)
+				reason = request.rejectionReason
 			}
 			ln.reject(request, reason)
 			break
 		}
 
 		if request.crypto != nil && len(request.passphrase) == 0 {
-			ln.reject(request, packet.REJ_BADSECRET)
+			ln.reject(request, REJ_BADSECRET)
 			break
 		}
 
@@ -430,7 +435,7 @@ func (ln *listener) handleShutdown(socketId uint32) {
 	ln.lock.Unlock()
 }
 
-func (ln *listener) reject(request connRequest, reason packet.HandshakeType) {
+func (ln *listener) reject(request connRequest, reason RejectionReason) {
 	p := packet.NewPacket(request.addr)
 	p.Header().IsControlPacket = true
 
@@ -441,7 +446,7 @@ func (ln *listener) reject(request connRequest, reason packet.HandshakeType) {
 	p.Header().Timestamp = uint32(time.Since(ln.start).Microseconds())
 	p.Header().DestinationSocketId = request.socketId
 
-	request.handshake.HandshakeType = reason
+	request.handshake.HandshakeType = packet.HandshakeType(reason)
 
 	p.MarshalCIF(request.handshake)
 
@@ -617,7 +622,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 	} else if cif.HandshakeType == packet.HSTYPE_CONCLUSION {
 		// Verify the SYN cookie
 		if !ln.syncookie.Verify(cif.SynCookie, p.Header().Addr.String()) {
-			cif.HandshakeType = packet.REJ_ROGUE
+			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 			ln.log("handshake:recv:error", func() string { return "invalid SYN cookie" })
 			p.MarshalCIF(cif)
 			ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -629,7 +634,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 
 		// Peer is advertising a too big MSS
 		if cif.MaxTransmissionUnitSize > MAX_MSS_SIZE {
-			cif.HandshakeType = packet.REJ_ROGUE
+			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("MTU is too big (%d bytes)", cif.MaxTransmissionUnitSize) })
 			p.MarshalCIF(cif)
 			ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -645,7 +650,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 			ln.config.PayloadSize = ln.config.MSS - SRT_HEADER_SIZE - UDP_HEADER_SIZE
 
 			if ln.config.PayloadSize < MIN_PAYLOAD_SIZE {
-				cif.HandshakeType = packet.REJ_ROGUE
+				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 				ln.log("handshake:recv:error", func() string { return fmt.Sprintf("payload size is too small (%d bytes)", ln.config.PayloadSize) })
 				p.MarshalCIF(cif)
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -658,7 +663,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 		if cif.Version == 4 {
 			// Check if the type (encryption field + extension field) has the value 2
 			if cif.EncryptionField != 0 || cif.ExtensionField != 2 {
-				cif.HandshakeType = packet.REJ_ROGUE
+				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 				ln.log("handshake:recv:error", func() string { return "invalid type, expecting a value of 2 (UDT_DGRAM)" })
 				p.MarshalCIF(cif)
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -670,7 +675,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 		} else if cif.Version == 5 {
 			// Check if the peer version is sufficient
 			if cif.SRTHS.SRTVersion < ln.config.MinVersion {
-				cif.HandshakeType = packet.REJ_VERSION
+				cif.HandshakeType = packet.HandshakeType(REJ_VERSION)
 				ln.log("handshake:recv:error", func() string {
 					return fmt.Sprintf("peer version insufficient (%#06x), expecting at least %#06x", cif.SRTHS.SRTVersion, ln.config.MinVersion)
 				})
@@ -684,7 +689,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 
 			// Check the required SRT flags
 			if !cif.SRTHS.SRTFlags.TSBPDSND || !cif.SRTHS.SRTFlags.TSBPDRCV || !cif.SRTHS.SRTFlags.TLPKTDROP || !cif.SRTHS.SRTFlags.PERIODICNAK || !cif.SRTHS.SRTFlags.REXMITFLG {
-				cif.HandshakeType = packet.REJ_ROGUE
+				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 				ln.log("handshake:recv:error", func() string { return "not all required flags are set" })
 				p.MarshalCIF(cif)
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -696,7 +701,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 
 			// We only support live streaming
 			if cif.SRTHS.SRTFlags.STREAM {
-				cif.HandshakeType = packet.REJ_MESSAGEAPI
+				cif.HandshakeType = packet.HandshakeType(REJ_MESSAGEAPI)
 				ln.log("handshake:recv:error", func() string { return "only live streaming is supported" })
 				p.MarshalCIF(cif)
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -706,7 +711,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				return
 			}
 		} else {
-			cif.HandshakeType = packet.REJ_ROGUE
+			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("only HSv4 and HSv5 are supported (got HSv%d)", cif.Version) })
 			p.MarshalCIF(cif)
 			ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -730,7 +735,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 		if cif.SRTKM != nil {
 			cr, err := crypto.New(int(cif.SRTKM.KLen))
 			if err != nil {
-				cif.HandshakeType = packet.REJ_ROGUE
+				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 				ln.log("handshake:recv:error", func() string { return fmt.Sprintf("crypto: %s", err) })
 				p.MarshalCIF(cif)
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -747,7 +752,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 		select {
 		case ln.backlog <- c:
 		default:
-			cif.HandshakeType = packet.REJ_BACKLOG
+			cif.HandshakeType = packet.HandshakeType(REJ_BACKLOG)
 			ln.log("handshake:recv:error", func() string { return "backlog is full" })
 			p.MarshalCIF(cif)
 			ln.log("handshake:send:dump", func() string { return p.Dump() })

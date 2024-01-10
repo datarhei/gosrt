@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -78,26 +79,6 @@ const (
 	HSTYPE_INDUCTION  HandshakeType = 0x00000001
 )
 
-// Table 7: Handshake Rejection Reason Codes
-const (
-	REJ_UNKNOWN    HandshakeType = 1000
-	REJ_SYSTEM     HandshakeType = 1001
-	REJ_PEER       HandshakeType = 1002
-	REJ_RESOURCE   HandshakeType = 1003
-	REJ_ROGUE      HandshakeType = 1004
-	REJ_BACKLOG    HandshakeType = 1005
-	REJ_IPE        HandshakeType = 1006
-	REJ_CLOSE      HandshakeType = 1007
-	REJ_VERSION    HandshakeType = 1008
-	REJ_RDVCOOKIE  HandshakeType = 1009
-	REJ_BADSECRET  HandshakeType = 1010
-	REJ_UNSECURE   HandshakeType = 1011
-	REJ_MESSAGEAPI HandshakeType = 1012
-	REJ_CONGESTION HandshakeType = 1013
-	REJ_FILTER     HandshakeType = 1014
-	REJ_GROUP      HandshakeType = 1015
-)
-
 func (h HandshakeType) String() string {
 	switch h {
 	case HSTYPE_DONE:
@@ -110,45 +91,9 @@ func (h HandshakeType) String() string {
 		return "WAVEHAND"
 	case HSTYPE_INDUCTION:
 		return "INDUCTION"
-	case REJ_UNKNOWN:
-		return "REJ_UNKNOWN (unknown reason)"
-	case REJ_SYSTEM:
-		return "REJ_SYSTEM (system function error)"
-	case REJ_PEER:
-		return "REJ_PEER (rejected by peer)"
-	case REJ_RESOURCE:
-		return "REJ_RESOURCE (resource allocation problem)"
-	case REJ_ROGUE:
-		return "REJ_ROGUE (incorrect data in handshake)"
-	case REJ_BACKLOG:
-		return "REJ_BACKLOG (listener's backlog exceeded)"
-	case REJ_IPE:
-		return "REJ_IPE (internal program error)"
-	case REJ_CLOSE:
-		return "REJ_CLOSE (socket is closing)"
-	case REJ_VERSION:
-		return "REJ_VERSION (peer is older version than agent's min)"
-	case REJ_RDVCOOKIE:
-		return "REJ_RDVCOOKIE (rendezvous cookie collision)"
-	case REJ_BADSECRET:
-		return "REJ_BADSECRET (wrong password)"
-	case REJ_UNSECURE:
-		return "REJ_UNSECURE (password required or unexpected)"
-	case REJ_MESSAGEAPI:
-		return "REJ_MESSAGEAPI (stream flag collision)"
-	case REJ_CONGESTION:
-		return "REJ_CONGESTION (incompatible congestion-controller type)"
-	case REJ_FILTER:
-		return "REJ_FILTER (incompatible packet filter)"
-	case REJ_GROUP:
-		return "REJ_GROUP (incompatible group)"
 	}
 
-	return "unknown"
-}
-
-func (h HandshakeType) IsUnknown() bool {
-	return h.String() == "unknown"
+	return "REJECT (" + strconv.FormatUint(uint64(h), 32) + ")"
 }
 
 func (h HandshakeType) IsHandshake() bool {
@@ -166,13 +111,7 @@ func (h HandshakeType) IsHandshake() bool {
 }
 
 func (h HandshakeType) IsRejection() bool {
-	if h.IsUnknown() {
-		return false
-	} else if h.IsHandshake() {
-		return false
-	}
-
-	return true
+	return !h.IsHandshake()
 }
 
 func (h HandshakeType) Val() uint32 {
