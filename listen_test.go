@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -381,4 +382,56 @@ func TestListenHSV5(t *testing.T) {
 	pc.WriteTo(data.Bytes(), p.Header().Addr)
 
 	pc.Close()
+}
+
+func TestListenAsync(t *testing.T) {
+	const parallelCount = 2
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+	var (
+		// All streams are pending
+		pendingWg  sync.WaitGroup
+		pendingSet sync.Map // Set of which streams are pending
+		// All streams are connected
+		connectedWg sync.WaitGroup
+		// All listener goroutines are stopped
+		listenerWg sync.WaitGroup
+	)
+	listenerWg.Add(parallelCount)
+	pendingWg.Add(parallelCount)
+	connectedWg.Add(parallelCount)
+	for i := 0; i < parallelCount; i++ {
+		go func() {
+			defer listenerWg.Done()
+			for {
+				_, _, err := ln.Accept(func(req ConnRequest) ConnType {
+					// Only call Done() if we're the first request for this stream
+					if _, ok := pendingSet.Swap(req.StreamId(), struct{}{}); !ok {
+						pendingWg.Done()
+					}
+					// Wait for all streams to be pending Before returning
+					pendingWg.Wait()
+					return PUBLISH
+				})
+				if err == ErrListenerClosed {
+					return
+				}
+				require.NoError(t, err)
+			}
+		}()
+
+		go func(streamId string) {
+			config := DefaultConfig()
+			config.StreamId = streamId
+			conn, err := Dial("srt", "127.0.0.1:6003", config)
+			require.NoError(t, err)
+			connectedWg.Done()
+			conn.Close()
+		}(strconv.Itoa(i))
+	}
+
+	// Wait for all streams to be connected
+	connectedWg.Wait()
+	ln.Close()
+	listenerWg.Wait()
 }
