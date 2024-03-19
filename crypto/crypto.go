@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/datarhei/gosrt/internal/packet"
-	"github.com/datarhei/gosrt/internal/rand"
+	"github.com/datarhei/gosrt/packet"
+	"github.com/datarhei/gosrt/rand"
 
 	"github.com/benburkert/openpgp/aes/keywrap"
 	"golang.org/x/crypto/pbkdf2"

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/datarhei/gosrt/internal/rand"
+	"github.com/datarhei/gosrt/rand"
 )
 
 // SYNCookie implements a syn cookie for the SRT handshake.

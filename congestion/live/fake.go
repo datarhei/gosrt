@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datarhei/gosrt/internal/circular"
-	"github.com/datarhei/gosrt/internal/congestion"
-	"github.com/datarhei/gosrt/internal/packet"
+	"github.com/datarhei/gosrt/circular"
+	"github.com/datarhei/gosrt/congestion"
+	"github.com/datarhei/gosrt/packet"
 )
 
 type fakeLiveReceive struct {
