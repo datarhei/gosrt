@@ -6,17 +6,6 @@ import (
 	"github.com/datarhei/gosrt/internal/packet"
 )
 
-// SendConfig is the configuration for the liveSend congestion control
-type SendConfig struct {
-	InitialSequenceNumber circular.Number
-	DropThreshold         uint64
-	MaxBW                 int64
-	InputBW               int64
-	MinInputBW            int64
-	OverheadBW            int64
-	OnDeliver             func(p packet.Packet)
-}
-
 // Sender is the sending part of the congestion control
 type Sender interface {
 	Stats() SendStats
@@ -26,16 +15,6 @@ type Sender interface {
 	ACK(sequenceNumber circular.Number)
 	NAK(sequenceNumbers []circular.Number)
 	SetDropThreshold(threshold uint64)
-}
-
-// ReceiveConfig is the configuration for the liveResv congestion control
-type ReceiveConfig struct {
-	InitialSequenceNumber circular.Number
-	PeriodicACKInterval   uint64 // microseconds
-	PeriodicNAKInterval   uint64 // microseconds
-	OnSendACK             func(seq circular.Number, light bool)
-	OnSendNAK             func(from, to circular.Number)
-	OnDeliver             func(p packet.Packet)
 }
 
 // Receiver is the receiving part of the congestion control
@@ -48,7 +27,7 @@ type Receiver interface {
 	SetNAKInterval(nakInterval uint64)
 }
 
-// SendStats are collected statistics from liveSend
+// SendStats are collected statistics from a sender
 type SendStats struct {
 	Pkt  uint64 // Sent packets in total
 	Byte uint64 // Sent bytes in total
@@ -83,7 +62,7 @@ type SendStats struct {
 	PktLossRate float64
 }
 
-// ReceiveStats are collected statistics from liveRecv
+// ReceiveStats are collected statistics from a reciever
 type ReceiveStats struct {
 	Pkt  uint64
 	Byte uint64

@@ -13,6 +13,7 @@ import (
 
 	"github.com/datarhei/gosrt/internal/circular"
 	"github.com/datarhei/gosrt/internal/congestion"
+	"github.com/datarhei/gosrt/internal/congestion/live"
 	"github.com/datarhei/gosrt/internal/crypto"
 	"github.com/datarhei/gosrt/internal/packet"
 )
@@ -252,7 +253,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	// 4.8.1.  Packet Acknowledgement (ACKs, ACKACKs) -> periodicACK = 10 milliseconds
 	// 4.8.2.  Packet Retransmission (NAKs) -> periodicNAK at least 20 milliseconds
-	c.recv = congestion.NewLiveReceive(congestion.ReceiveConfig{
+	c.recv = live.NewReceiver(live.ReceiveConfig{
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
 		PeriodicACKInterval:   10_000,
 		PeriodicNAKInterval:   20_000,
@@ -269,7 +270,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	}
 	c.dropThreshold += 20_000
 
-	c.snd = congestion.NewLiveSend(congestion.SendConfig{
+	c.snd = live.NewSender(live.SendConfig{
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
 		DropThreshold:         c.dropThreshold,
 		MaxBW:                 c.config.MaxBW,
