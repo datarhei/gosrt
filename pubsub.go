@@ -23,11 +23,6 @@ type PubSub interface {
 	Subscribe(c Conn) error
 }
 
-type packetReadWriter interface {
-	readPacket() (packet.Packet, error)
-	writePacket(p packet.Packet) error
-}
-
 // pubSub is an implementation of the PubSub interface
 type pubSub struct {
 	incoming      chan packet.Packet
@@ -107,12 +102,6 @@ func (pb *pubSub) Publish(c Conn) error {
 
 	var p packet.Packet
 	var err error
-	conn, ok := c.(packetReadWriter)
-	if !ok {
-		err := fmt.Errorf("the provided connection is not a SRT connection")
-		pb.logger.Print("pubsub:error", 0, 1, func() string { return err.Error() })
-		return err
-	}
 
 	socketId := c.SocketId()
 
@@ -121,7 +110,7 @@ func (pb *pubSub) Publish(c Conn) error {
 	pb.publish = true
 
 	for {
-		p, err = conn.readPacket()
+		p, err = c.ReadPacket()
 		if err != nil {
 			pb.logger.Print("pubsub:error", socketId, 1, func() string { return err.Error() })
 			break
@@ -142,12 +131,6 @@ func (pb *pubSub) Publish(c Conn) error {
 func (pb *pubSub) Subscribe(c Conn) error {
 	l := make(chan packet.Packet, 1024)
 	socketId := c.SocketId()
-	conn, ok := c.(packetReadWriter)
-	if !ok {
-		err := fmt.Errorf("the provided connection is not a SRT connection")
-		pb.logger.Print("pubsub:error", 0, 1, func() string { return err.Error() })
-		return err
-	}
 
 	pb.logger.Print("pubsub:subscribe", socketId, 1, func() string { return "new subscriber" })
 
@@ -166,7 +149,7 @@ func (pb *pubSub) Subscribe(c Conn) error {
 		case <-pb.ctx.Done():
 			return io.EOF
 		case p := <-l:
-			err := conn.writePacket(p)
+			err := c.WritePacket(p)
 			p.Decommission()
 			if err != nil {
 				pb.logger.Print("pubsub:error", socketId, 1, func() string { return err.Error() })

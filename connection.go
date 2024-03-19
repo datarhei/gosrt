@@ -25,10 +25,19 @@ type Conn interface {
 	// time limit; see SetDeadline and SetReadDeadline.
 	Read(p []byte) (int, error)
 
+	// ReadPacket reads a packet from the queue of received packets. It blocks
+	// if the queue is empty. Only data packets are returned. Using ReadPacket
+	// and Read at the same time may lead to data loss.
+	ReadPacket() (packet.Packet, error)
+
 	// Write writes data to the connection.
 	// Write can be made to time out and return an error after a fixed
 	// time limit; see SetDeadline and SetWriteDeadline.
 	Write(p []byte) (int, error)
+
+	// WritePacket writes a packet to the write queue. Packets on the write queue
+	// will be sent to the peer of the connection. Only data packets will be sent.
+	WritePacket(p packet.Packet) error
 
 	// Close closes the connection.
 	// Any blocked Read or Write operations will be unblocked and return errors.
@@ -367,9 +376,7 @@ func (c *srtConn) ticker(ctx context.Context) {
 	}
 }
 
-// readPacket reads a packet from the queue of received packets. It blocks
-// if the queue is empty. Only data packets are returned.
-func (c *srtConn) readPacket() (packet.Packet, error) {
+func (c *srtConn) ReadPacket() (packet.Packet, error) {
 	var p packet.Packet
 	select {
 	case <-c.ctx.Done():
@@ -400,7 +407,7 @@ func (c *srtConn) Read(b []byte) (int, error) {
 
 	c.readBuffer.Reset()
 
-	p, err := c.readPacket()
+	p, err := c.ReadPacket()
 	if err != nil {
 		return 0, err
 	}
@@ -413,9 +420,9 @@ func (c *srtConn) Read(b []byte) (int, error) {
 	return c.readBuffer.Read(b)
 }
 
-// writePacket writes a packet to the write queue. Packets on the write queue
+// WritePacket writes a packet to the write queue. Packets on the write queue
 // will be sent to the peer of the connection. Only data packets will be sent.
-func (c *srtConn) writePacket(p packet.Packet) error {
+func (c *srtConn) WritePacket(p packet.Packet) error {
 	if p.Header().IsControlPacket {
 		// Ignore control packets
 		return nil

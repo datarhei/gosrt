@@ -701,7 +701,7 @@ func (dl *dialer) Read(p []byte) (n int, err error) {
 	return dl.conn.Read(p)
 }
 
-func (dl *dialer) readPacket() (packet.Packet, error) {
+func (dl *dialer) ReadPacket() (packet.Packet, error) {
 	if err := dl.checkConnection(); err != nil {
 		return nil, err
 	}
@@ -713,7 +713,7 @@ func (dl *dialer) readPacket() (packet.Packet, error) {
 		return nil, fmt.Errorf("no connection")
 	}
 
-	return dl.conn.readPacket()
+	return dl.conn.ReadPacket()
 }
 
 func (dl *dialer) Write(p []byte) (n int, err error) {
@@ -731,7 +731,7 @@ func (dl *dialer) Write(p []byte) (n int, err error) {
 	return dl.conn.Write(p)
 }
 
-func (dl *dialer) writePacket(p packet.Packet) error {
+func (dl *dialer) WritePacket(p packet.Packet) error {
 	if err := dl.checkConnection(); err != nil {
 		return err
 	}
@@ -743,7 +743,7 @@ func (dl *dialer) writePacket(p packet.Packet) error {
 		return fmt.Errorf("no connection")
 	}
 
-	return dl.conn.writePacket(p)
+	return dl.conn.WritePacket(p)
 }
 
 func (dl *dialer) SetDeadline(t time.Time) error      { return dl.conn.SetDeadline(t) }
