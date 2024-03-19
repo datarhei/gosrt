@@ -42,7 +42,7 @@ The parts that are implemented are based on what has been published in the SRT R
 
 ## Requirements
 
-A Go version of 1.18+ is required.
+A Go version of 1.20+ is required.
 
 ## Installation
 
