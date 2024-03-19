@@ -18,6 +18,10 @@ func RandomString(length int, charset string) (string, error) {
 	return string(b), nil
 }
 
+func Read(b []byte) (int, error) {
+	return rand.Read(b)
+}
+
 func Uint32() (uint32, error) {
 	var b [4]byte
 	_, err := rand.Read(b[:])

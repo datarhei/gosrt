@@ -4,13 +4,13 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
 
 	"github.com/datarhei/gosrt/internal/packet"
+	"github.com/datarhei/gosrt/internal/rand"
 
 	"github.com/benburkert/openpgp/aes/keywrap"
 	"golang.org/x/crypto/pbkdf2"
