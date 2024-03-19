@@ -175,17 +175,44 @@ func (h CtrlSubType) Value() uint16 {
 }
 
 type Packet interface {
+	// String returns a string representation of the packet.
 	String() string
+
+	// Clone clones a packet.
 	Clone() Packet
+
+	// Header returns a pointer to the packet header.
 	Header() *PacketHeader
+
+	// Data returns the payload the packets holds. The packets stays the
+	// owner of the data, i.e. modifying the returned data will also
+	// modify the payload.
 	Data() []byte
+
+	// SetData replaces the payload of the packet with the provided one.
 	SetData([]byte)
+
+	// Len return the length of the payload in the packet.
 	Len() uint64
-	Unmarshal(data []byte) error
+
+	// Marshal writes the bytes representation of the packet to the provided writer.
 	Marshal(w io.Writer) error
+
+	// Unmarshal parses the given data into the packet header and its payload. Returns an error on failure.
+	Unmarshal(data []byte) error
+
+	// Dump returns the same as String with an additional hex-dump of the marshalled packet.
 	Dump() string
+
+	// MarshalCIF writes the byte representation of a control information field as payload
+	// of the packet. Only for control packets.
 	MarshalCIF(c CIF)
+
+	// UnmarshalCIF parses the payload into a control information field struct. Returns an error
+	// on failure.
 	UnmarshalCIF(c CIF) error
+
+	// Decommission frees the payload. The packet shouldn't be uses afterwards.
 	Decommission()
 }
 
@@ -437,14 +464,21 @@ func (p *pkt) UnmarshalCIF(c CIF) error {
 	return c.Unmarshal(p.payload.Bytes())
 }
 
+// CIF reepresents a control information field
 type CIF interface {
+	// Marshal writes a byte representation of the CIF to the provided writer.
 	Marshal(w io.Writer)
+
+	// Unmarshal parses the provided bytes into the CIF. Returns a non nil error of failure.
 	Unmarshal(data []byte) error
+
+	// String returns a string representation of the CIF.
 	String() string
 }
 
 // 3.2.1.  Handshake
 
+// CIFHandshake represents the SRT handshake messages.
 type CIFHandshake struct {
 	IsRequest bool
 
@@ -742,6 +776,8 @@ func (c *CIFHandshake) Marshal(w io.Writer) {
 }
 
 // 3.2.1.1.1.  Handshake Extension Message Flags
+
+// CIFHandshakeExtensionFlags represents the Handshake Extension Message Flags
 type CIFHandshakeExtensionFlags struct {
 	TSBPDSND      bool // Defines if the TSBPD mechanism (Section 4.5) will be used for sending.
 	TSBPDRCV      bool // Defines if the TSBPD mechanism (Section 4.5) will be used for receiving.
@@ -755,6 +791,7 @@ type CIFHandshakeExtensionFlags struct {
 
 // 3.2.1.1.  Handshake Extension Message
 
+// CIFHandshakeExtension represents the Handshake Extension Message
 type CIFHandshakeExtension struct {
 	SRTVersion     uint32
 	SRTFlags       CIFHandshakeExtensionFlags
@@ -864,6 +901,8 @@ const (
 	KM_BADSECRET uint32 = 4
 )
 
+// CIFKeyMaterialExtension represents the Key Material message. It is used as part of
+// the v5 handshake or on its own after a v4 handshake.
 type CIFKeyMaterialExtension struct {
 	Error                 uint32
 	S                     uint8            // This is a fixed-width field that is reserved for future usage. value = {0}
@@ -1054,6 +1093,7 @@ func (c *CIFKeyMaterialExtension) Marshal(w io.Writer) {
 
 // 3.2.4.  ACK (Acknowledgment)
 
+// CIFACK represents an ACK message.
 type CIFACK struct {
 	IsLite                      bool
 	IsSmall                     bool
@@ -1156,6 +1196,7 @@ func (c *CIFACK) Marshal(w io.Writer) {
 
 // 3.2.5.  NAK (Loss Report)
 
+// CIFNAK represents a NAK message
 type CIFNAK struct {
 	LostPacketSequenceNumber []circular.Number
 }
@@ -1248,6 +1289,7 @@ func (c *CIFNAK) Marshal(w io.Writer) {
 
 //  3.2.7. Shutdown
 
+// CIFShutdown represents a shutdown message.
 type CIFShutdown struct{}
 
 func (c CIFShutdown) String() string {
