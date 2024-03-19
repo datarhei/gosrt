@@ -9,6 +9,7 @@ import (
 	"github.com/datarhei/gosrt/internal/rand"
 )
 
+// SYNCookie implements a syn cookie for the SRT handshake.
 type SYNCookie struct {
 	secret1 string
 	secret2 string
@@ -20,6 +21,7 @@ func defaultCounter() int64 {
 	return time.Now().Unix() >> 6
 }
 
+// NewSYNCookie returns a SYNCookie for a destination address.
 func NewSYNCookie(daddr string, counter func() int64) (*SYNCookie, error) {
 	s := &SYNCookie{
 		daddr:   daddr,
@@ -44,10 +46,12 @@ func NewSYNCookie(daddr string, counter func() int64) (*SYNCookie, error) {
 	return s, nil
 }
 
+// Get returns the current syn cookie with a sender address.
 func (s *SYNCookie) Get(saddr string) uint32 {
 	return s.calculate(s.counter(), saddr)
 }
 
+// Verify verfies that two syn cookies relate.
 func (s *SYNCookie) Verify(cookie uint32, saddr string) bool {
 	counter := s.counter()
 
