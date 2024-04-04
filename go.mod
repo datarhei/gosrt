@@ -7,7 +7,7 @@ require (
 	github.com/pkg/profile v1.7.0
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.21.0
-	golang.org/x/sys v0.18.0
+	golang.org/x/sys v0.19.0
 )
 
 require (
