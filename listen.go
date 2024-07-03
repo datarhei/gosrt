@@ -122,9 +122,10 @@ type listener struct {
 
 	config Config
 
-	backlog chan packet.Packet
-	conns   map[uint32]*srtConn
-	lock    sync.RWMutex
+	backlog  chan packet.Packet
+	connReqs map[uint32]*connRequest
+	conns    map[uint32]*srtConn
+	lock     sync.RWMutex
 
 	start time.Time
 
@@ -190,6 +191,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 		return nil, fmt.Errorf("listen: no local address")
 	}
 
+	ln.connReqs = make(map[uint32]*connRequest)
 	ln.conns = make(map[uint32]*srtConn)
 
 	ln.backlog = make(chan packet.Packet, 128)

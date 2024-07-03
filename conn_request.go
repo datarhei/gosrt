@@ -217,7 +217,7 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 			return nil
 		}
 
-		c := &connRequest{
+		req := &connRequest{
 			ln:        ln,
 			addr:      p.Header().Addr,
 			start:     time.Now(),
@@ -240,10 +240,22 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 				return nil
 			}
 
-			c.crypto = cr
+			req.crypto = cr
 		}
 
-		return c
+		ln.lock.Lock()
+		_, exists := ln.connReqs[cif.SRTSocketId]
+		if !exists {
+			ln.connReqs[cif.SRTSocketId] = req
+		}
+		ln.lock.Unlock()
+
+		// we received a duplicate request: reject silently
+		if exists {
+			return nil
+		}
+
+		return req
 	} else {
 		if cif.HandshakeType.IsRejection() {
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("connection rejected: %s", cif.HandshakeType.String()) })
@@ -293,6 +305,10 @@ func (req *connRequest) SetRejectionReason(reason RejectionReason) {
 }
 
 func (req *connRequest) Reject(reason RejectionReason) {
+	req.ln.lock.Lock()
+	delete(req.ln.connReqs, req.socketId)
+	req.ln.lock.Unlock()
+
 	p := packet.NewPacket(req.addr)
 	p.Header().IsControlPacket = true
 	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
@@ -386,9 +402,9 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
 	req.ln.send(p)
 
-	// Add the connection to the list of known connections
 	req.ln.lock.Lock()
 	req.ln.conns[socketId] = conn
+	delete(req.ln.connReqs, req.socketId)
 	req.ln.lock.Unlock()
 
 	return conn, nil
