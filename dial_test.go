@@ -394,3 +394,80 @@ func TestDialV5(t *testing.T) {
 	pc.Close()
 	ln.Close()
 }
+
+func TestDialV5MissingExtension(t *testing.T) {
+	ln, err := net.ListenPacket("udp", "127.0.0.1:6003")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	go func() {
+		// read induction request
+		buf := make([]byte, MAX_MSS_SIZE)
+		n, addr, err := ln.ReadFrom(buf)
+		require.NoError(t, err)
+		p, err := packet.NewPacketFromData(addr, buf[:n])
+		require.NoError(t, err)
+		recvcif := &packet.CIFHandshake{}
+		err = p.UnmarshalCIF(recvcif)
+		require.NoError(t, err)
+		require.Equal(t, packet.HSTYPE_INDUCTION, recvcif.HandshakeType)
+
+		// write induction response
+		p.Header().IsControlPacket = true
+		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+		p.Header().SubType = 0
+		p.Header().TypeSpecific = 0
+		p.Header().Timestamp = 0
+		p.Header().DestinationSocketId = recvcif.SRTSocketId
+		sendcif := &packet.CIFHandshake{
+			IsRequest:                   false,
+			Version:                     5,
+			EncryptionField:             0,
+			ExtensionField:              0x4A17,
+			InitialPacketSequenceNumber: recvcif.InitialPacketSequenceNumber,
+			MaxTransmissionUnitSize:     recvcif.MaxTransmissionUnitSize,
+			MaxFlowWindowSize:           recvcif.MaxFlowWindowSize,
+			HandshakeType:               packet.HSTYPE_INDUCTION,
+			SRTSocketId:                 recvcif.SRTSocketId,
+			SynCookie:                   1234,
+		}
+		sendcif.PeerIP.FromNetAddr(ln.LocalAddr())
+		p.MarshalCIF(sendcif)
+		var outbuf bytes.Buffer
+		err = p.Marshal(&outbuf)
+		require.NoError(t, err)
+		ln.WriteTo(outbuf.Bytes(), p.Header().Addr)
+
+		// read conclusion request
+		n, addr, err = ln.ReadFrom(buf)
+		require.NoError(t, err)
+		p, err = packet.NewPacketFromData(addr, buf[:n])
+		require.NoError(t, err)
+		recvcif = &packet.CIFHandshake{}
+		err = p.UnmarshalCIF(recvcif)
+		require.NoError(t, err)
+		require.Equal(t, packet.HSTYPE_CONCLUSION, recvcif.HandshakeType)
+
+		// write invalid conclusion response
+		p.Header().IsControlPacket = true
+		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+		p.Header().SubType = 0
+		p.Header().TypeSpecific = 0
+		p.Header().Timestamp = 0
+		p.Header().DestinationSocketId = recvcif.SRTSocketId
+		sendcif = recvcif
+		sendcif.IsRequest = false
+		sendcif.SRTSocketId = 9876
+		sendcif.SynCookie = 0
+		sendcif.PeerIP.FromNetAddr(ln.LocalAddr())
+		sendcif.HasHS = false
+		p.MarshalCIF(sendcif)
+		outbuf.Reset()
+		err = p.Marshal(&outbuf)
+		require.NoError(t, err)
+		ln.WriteTo(outbuf.Bytes(), p.Header().Addr)
+	}()
+
+	_, err = Dial("srt", "127.0.0.1:6003", DefaultConfig())
+	require.EqualError(t, err, "missing handshake extension")
+}
