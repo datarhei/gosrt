@@ -94,11 +94,17 @@ type AcceptFunc func(req ConnRequest) ConnType
 
 // Listener waits for new connections
 type Listener interface {
+	// Accept2 waits for new connections.
+	// On closing the err will be ErrListenerClosed.
+	Accept2() (ConnRequest, error)
+
 	// Accept waits for new connections. For each new connection the AcceptFunc
 	// gets called. Conn is a new connection if AcceptFunc is PUBLISH or SUBSCRIBE.
 	// If AcceptFunc returns REJECT, Conn is nil. In case of failure error is not
 	// nil, Conn is nil and ConnType is REJECT. On closing the listener err will
 	// be ErrListenerClosed and ConnType is REJECT.
+	//
+	// Deprecated: replaced by Accept2().
 	Accept(AcceptFunc) (Conn, ConnType, error)
 
 	// Close closes the listener. It will stop accepting new connections and
@@ -247,44 +253,56 @@ func Listen(network, address string, config Config) (Listener, error) {
 	return ln, nil
 }
 
-func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
+func (ln *listener) Accept2() (ConnRequest, error) {
 	if ln.isShutdown() {
-		return nil, REJECT, ErrListenerClosed
+		return nil, ErrListenerClosed
 	}
 
 	for {
 		select {
 		case <-ln.doneChan:
-			return nil, REJECT, ln.error()
+			return nil, ln.error()
+
 		case p := <-ln.backlog:
 			req := newConnRequest(ln, p)
 			if req == nil {
 				break
 			}
 
-			if acceptFn == nil {
-				req.reject(REJ_PEER)
-				break
-			}
-
-			mode := acceptFn(req)
-			if mode != PUBLISH && mode != SUBSCRIBE {
-				// Figure out the reason
-				reason := REJ_PEER
-				if req.rejectionReason > 0 {
-					reason = req.rejectionReason
-				}
-				req.reject(reason)
-				break
-			}
-
-			conn, err := req.accept()
-			if err != nil {
-				break
-			}
-
-			return conn, mode, nil
+			return req, nil
 		}
+	}
+}
+
+func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
+	for {
+		req, err := ln.Accept2()
+		if err != nil {
+			return nil, REJECT, err
+		}
+
+		if acceptFn == nil {
+			req.Reject(REJ_PEER)
+			continue
+		}
+
+		mode := acceptFn(req)
+		if mode != PUBLISH && mode != SUBSCRIBE {
+			// Figure out the reason
+			reason := REJ_PEER
+			if req.(*connRequest).rejectionReason > 0 {
+				reason = req.(*connRequest).rejectionReason
+			}
+			req.Reject(reason)
+			continue
+		}
+
+		conn, err := req.Accept()
+		if err != nil {
+			continue
+		}
+
+		return conn, mode, nil
 	}
 }
 

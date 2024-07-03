@@ -36,7 +36,15 @@ type ConnRequest interface {
 
 	// SetRejectionReason sets the rejection reason for the connection. If
 	// no set, REJ_PEER will be used.
+	//
+	// Deprecated: replaced by Reject().
 	SetRejectionReason(r RejectionReason)
+
+	// Accept accepts the request and returns a connection.
+	Accept() (Conn, error)
+
+	// Reject rejects the request.
+	Reject(r RejectionReason)
 }
 
 // connRequest implements the ConnRequest interface
@@ -284,30 +292,24 @@ func (req *connRequest) SetRejectionReason(reason RejectionReason) {
 	req.rejectionReason = reason
 }
 
-func (req *connRequest) reject(reason RejectionReason) {
+func (req *connRequest) Reject(reason RejectionReason) {
 	p := packet.NewPacket(req.addr)
 	p.Header().IsControlPacket = true
-
 	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
 	p.Header().SubType = 0
 	p.Header().TypeSpecific = 0
-
 	p.Header().Timestamp = uint32(time.Since(req.ln.start).Microseconds())
 	p.Header().DestinationSocketId = req.socketId
-
 	req.handshake.HandshakeType = packet.HandshakeType(reason)
-
 	p.MarshalCIF(req.handshake)
-
 	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
-
 	req.ln.send(p)
 }
 
-func (req *connRequest) accept() (*srtConn, error) {
+func (req *connRequest) Accept() (Conn, error) {
 	if req.crypto != nil && len(req.passphrase) == 0 {
-		req.reject(REJ_BADSECRET)
+		req.Reject(REJ_BADSECRET)
 		return nil, fmt.Errorf("passphrase is missing")
 	}
 
