@@ -252,40 +252,40 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 		return nil, REJECT, ErrListenerClosed
 	}
 
-	select {
-	case <-ln.doneChan:
-		return nil, REJECT, ln.error()
-	case p := <-ln.backlog:
-		req := newConnRequest(ln, p)
-		if req == nil {
-			break
-		}
-
-		if acceptFn == nil {
-			req.reject(REJ_PEER)
-			break
-		}
-
-		mode := acceptFn(req)
-		if mode != PUBLISH && mode != SUBSCRIBE {
-			// Figure out the reason
-			reason := REJ_PEER
-			if req.rejectionReason > 0 {
-				reason = req.rejectionReason
+	for {
+		select {
+		case <-ln.doneChan:
+			return nil, REJECT, ln.error()
+		case p := <-ln.backlog:
+			req := newConnRequest(ln, p)
+			if req == nil {
+				break
 			}
-			req.reject(reason)
-			break
-		}
 
-		conn, err := req.accept()
-		if err != nil {
-			break
-		}
+			if acceptFn == nil {
+				req.reject(REJ_PEER)
+				break
+			}
 
-		return conn, mode, nil
+			mode := acceptFn(req)
+			if mode != PUBLISH && mode != SUBSCRIBE {
+				// Figure out the reason
+				reason := REJ_PEER
+				if req.rejectionReason > 0 {
+					reason = req.rejectionReason
+				}
+				req.reject(reason)
+				break
+			}
+
+			conn, err := req.accept()
+			if err != nil {
+				break
+			}
+
+			return conn, mode, nil
+		}
 	}
-
-	return nil, REJECT, nil
 }
 
 // markDone marks the listener as done by closing
