@@ -197,7 +197,7 @@ type listener struct {
 
 	config Config
 
-	backlog chan connRequest
+	backlog chan packet.Packet
 	conns   map[uint32]*srtConn
 	lock    sync.RWMutex
 
@@ -267,7 +267,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 	ln.conns = make(map[uint32]*srtConn)
 
-	ln.backlog = make(chan connRequest, 128)
+	ln.backlog = make(chan packet.Packet, 128)
 
 	ln.rcvQueue = make(chan packet.Packet, 2048)
 
@@ -336,13 +336,18 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 	select {
 	case <-ln.doneChan:
 		return nil, REJECT, ln.error()
-	case request := <-ln.backlog:
+	case p := <-ln.backlog:
+		request := ln.requestFromHandshake(p)
+		if request == nil {
+			break
+		}
+
 		if acceptFn == nil {
 			ln.reject(request, REJ_PEER)
 			break
 		}
 
-		mode := acceptFn(&request)
+		mode := acceptFn(request)
 		if mode != PUBLISH && mode != SUBSCRIBE {
 			// Figure out the reason
 			reason := REJ_PEER
@@ -457,7 +462,7 @@ func (ln *listener) handleShutdown(socketId uint32) {
 	ln.lock.Unlock()
 }
 
-func (ln *listener) reject(request connRequest, reason RejectionReason) {
+func (ln *listener) reject(request *connRequest, reason RejectionReason) {
 	p := packet.NewPacket(request.addr)
 	p.Header().IsControlPacket = true
 
@@ -478,7 +483,7 @@ func (ln *listener) reject(request connRequest, reason RejectionReason) {
 	ln.send(p)
 }
 
-func (ln *listener) accept(request connRequest) {
+func (ln *listener) accept(request *connRequest) {
 	p := packet.NewPacket(request.addr)
 
 	p.Header().IsControlPacket = true
@@ -555,9 +560,12 @@ func (ln *listener) reader(ctx context.Context) {
 
 			if p.Header().DestinationSocketId == 0 {
 				if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
-					ln.handleHandshake(p)
+					select {
+					case ln.backlog <- p:
+					default:
+						ln.log("handshake:recv:error", func() string { return "backlog is full" })
+					}
 				}
-
 				break
 			}
 
@@ -601,7 +609,7 @@ func (ln *listener) send(p packet.Packet) {
 	}
 }
 
-func (ln *listener) handleHandshake(p packet.Packet) {
+func (ln *listener) requestFromHandshake(p packet.Packet) *connRequest {
 	cif := &packet.CIFHandshake{}
 
 	err := p.UnmarshalCIF(cif)
@@ -611,7 +619,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 
 	if err != nil {
 		ln.log("handshake:recv:error", func() string { return err.Error() })
-		return
+		return nil
 	}
 
 	// Assemble the response (4.3.1.  Caller-Listener Handshake)
@@ -654,7 +662,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
-			return
+			return nil
 		}
 
 		// Peer is advertising a too big MSS
@@ -666,7 +674,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
-			return
+			return nil
 		}
 
 		// If the peer has a smaller MTU size, adjust to it
@@ -695,7 +703,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
-				return
+				return nil
 			}
 		} else if cif.Version == 5 {
 			if cif.SRTHS == nil {
@@ -719,7 +727,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
-				return
+				return nil
 			}
 
 			// Check the required SRT flags
@@ -731,7 +739,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
-				return
+				return nil
 			}
 
 			// We only support live streaming
@@ -743,7 +751,7 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
-				return
+				return nil
 			}
 		} else {
 			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
@@ -753,12 +761,10 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 			ln.log("handshake:send:cif", func() string { return cif.String() })
 			ln.send(p)
 
-			return
+			return nil
 		}
 
-		// Fill up a connection request with all relevant data and put it into the backlog
-
-		c := connRequest{
+		c := &connRequest{
 			addr:      p.Header().Addr,
 			start:     time.Now(),
 			socketId:  cif.SRTSocketId,
@@ -778,23 +784,13 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
 
-				return
+				return nil
 			}
 
 			c.crypto = cr
 		}
 
-		// If the backlog is full, reject the connection
-		select {
-		case ln.backlog <- c:
-		default:
-			cif.HandshakeType = packet.HandshakeType(REJ_BACKLOG)
-			ln.log("handshake:recv:error", func() string { return "backlog is full" })
-			p.MarshalCIF(cif)
-			ln.log("handshake:send:dump", func() string { return p.Dump() })
-			ln.log("handshake:send:cif", func() string { return cif.String() })
-			ln.send(p)
-		}
+		return c
 	} else {
 		if cif.HandshakeType.IsRejection() {
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("connection rejected: %s", cif.HandshakeType.String()) })
@@ -802,6 +798,8 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("unsupported handshake: %s", cif.HandshakeType.String()) })
 		}
 	}
+
+	return nil
 }
 
 func (ln *listener) log(topic string, message func() string) {
