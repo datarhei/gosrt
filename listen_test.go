@@ -530,3 +530,65 @@ func TestListenHSV5MissingExtension(t *testing.T) {
 
 	ln.Close()
 }
+
+func TestListenParallelRequests(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	listenDone := make(chan struct{})
+
+	var reqReady sync.WaitGroup
+	reqReady.Add(4)
+
+	var serverSideConnReady sync.WaitGroup
+	serverSideConnReady.Add(4)
+
+	go func() {
+		defer close(listenDone)
+
+		for {
+			req, err := ln.Accept2()
+			if err != nil {
+				break
+			}
+
+			reqReady.Done()
+
+			go func() {
+				defer serverSideConnReady.Done()
+
+				// wait for all requests to be pending
+				reqReady.Wait()
+
+				conn, err := req.Accept()
+				require.NoError(t, err)
+				conn.Close()
+			}()
+		}
+	}()
+
+	var clientSideConnReady sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		clientSideConnReady.Add(1)
+
+		go func() {
+			defer clientSideConnReady.Done()
+
+			config := DefaultConfig()
+			config.StreamId = "foobar"
+
+			conn, err := Dial("srt", "127.0.0.1:6003", config)
+			require.NoError(t, err)
+
+			err = conn.Close()
+			require.NoError(t, err)
+		}()
+	}
+
+	serverSideConnReady.Wait()
+	clientSideConnReady.Wait()
+
+	ln.Close()
+	<-listenDone
+}
