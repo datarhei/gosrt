@@ -305,7 +305,12 @@ func (req *connRequest) reject(reason RejectionReason) {
 	req.ln.send(p)
 }
 
-func (req *connRequest) accept() *srtConn {
+func (req *connRequest) accept() (*srtConn, error) {
+	if req.crypto != nil && len(req.passphrase) == 0 {
+		req.reject(REJ_BADSECRET)
+		return nil, fmt.Errorf("passphrase is missing")
+	}
+
 	// Create a new socket ID
 	socketId := uint32(time.Since(req.ln.start).Microseconds())
 
@@ -384,5 +389,5 @@ func (req *connRequest) accept() *srtConn {
 	req.ln.conns[socketId] = conn
 	req.ln.lock.Unlock()
 
-	return conn
+	return conn, nil
 }

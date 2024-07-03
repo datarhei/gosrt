@@ -277,12 +277,10 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 			break
 		}
 
-		if req.crypto != nil && len(req.passphrase) == 0 {
-			req.reject(REJ_BADSECRET)
+		conn, err := req.accept()
+		if err != nil {
 			break
 		}
-
-		conn := req.accept()
 
 		return conn, mode, nil
 	}
