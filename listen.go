@@ -256,7 +256,7 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 	case <-ln.doneChan:
 		return nil, REJECT, ln.error()
 	case p := <-ln.backlog:
-		request := ln.requestFromHandshake(p)
+		request := newConnRequest(ln, p)
 		if request == nil {
 			break
 		}
@@ -632,7 +632,8 @@ func (ln *listener) requestFromHandshake(p packet.Packet) *connRequest {
 				ln.log("handshake:send:dump", func() string { return p.Dump() })
 				ln.log("handshake:send:cif", func() string { return cif.String() })
 				ln.send(p)
-				return
+
+				return nil
 			}
 
 			// Check if the peer version is sufficient
