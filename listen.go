@@ -282,73 +282,7 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 			break
 		}
 
-		// Create a new socket ID
-		socketId := uint32(time.Since(ln.start).Microseconds())
-
-		// Select the largest TSBPD delay advertised by the caller, but at least 120ms
-		recvTsbpdDelay := uint16(req.config.ReceiverLatency.Milliseconds())
-		sendTsbpdDelay := uint16(req.config.PeerLatency.Milliseconds())
-
-		if req.handshake.Version == 5 {
-			if req.handshake.SRTHS.SendTSBPDDelay > recvTsbpdDelay {
-				recvTsbpdDelay = req.handshake.SRTHS.SendTSBPDDelay
-			}
-
-			if req.handshake.SRTHS.RecvTSBPDDelay > sendTsbpdDelay {
-				sendTsbpdDelay = req.handshake.SRTHS.RecvTSBPDDelay
-			}
-
-			req.config.StreamId = req.handshake.StreamId
-		}
-
-		req.config.Passphrase = req.passphrase
-
-		// Create a new connection
-		conn := newSRTConn(srtConnConfig{
-			version:                     req.handshake.Version,
-			localAddr:                   ln.addr,
-			remoteAddr:                  req.addr,
-			config:                      req.config,
-			start:                       req.start,
-			socketId:                    socketId,
-			peerSocketId:                req.handshake.SRTSocketId,
-			tsbpdTimeBase:               uint64(req.timestamp),
-			tsbpdDelay:                  uint64(recvTsbpdDelay) * 1000,
-			peerTsbpdDelay:              uint64(sendTsbpdDelay) * 1000,
-			initialPacketSequenceNumber: req.handshake.InitialPacketSequenceNumber,
-			crypto:                      req.crypto,
-			keyBaseEncryption:           packet.EvenKeyEncrypted,
-			onSend:                      ln.send,
-			onShutdown:                  ln.handleShutdown,
-			logger:                      req.config.Logger,
-		})
-
-		ln.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s) %s", conn.SocketId(), conn.StreamId(), mode) })
-
-		req.handshake.SRTSocketId = socketId
-		req.handshake.SynCookie = 0
-
-		if req.handshake.Version == 5 {
-			//  3.2.1.1.1.  Handshake Extension Message Flags
-			req.handshake.SRTHS.SRTVersion = SRT_VERSION
-			req.handshake.SRTHS.SRTFlags.TSBPDSND = true
-			req.handshake.SRTHS.SRTFlags.TSBPDRCV = true
-			req.handshake.SRTHS.SRTFlags.CRYPT = true
-			req.handshake.SRTHS.SRTFlags.TLPKTDROP = true
-			req.handshake.SRTHS.SRTFlags.PERIODICNAK = true
-			req.handshake.SRTHS.SRTFlags.REXMITFLG = true
-			req.handshake.SRTHS.SRTFlags.STREAM = false
-			req.handshake.SRTHS.SRTFlags.PACKET_FILTER = false
-			req.handshake.SRTHS.RecvTSBPDDelay = recvTsbpdDelay
-			req.handshake.SRTHS.SendTSBPDDelay = sendTsbpdDelay
-		}
-
-		req.accept()
-
-		// Add the connection to the list of known connections
-		ln.lock.Lock()
-		ln.conns[socketId] = conn
-		ln.lock.Unlock()
+		conn := req.accept()
 
 		return conn, mode, nil
 	}
