@@ -41,11 +41,11 @@ type ConnRequest interface {
 
 // connRequest implements the ConnRequest interface
 type connRequest struct {
-	addr      net.Addr
-	start     time.Time
-	socketId  uint32
-	timestamp uint32
-
+	ln              *listener
+	addr            net.Addr
+	start           time.Time
+	socketId        uint32
+	timestamp       uint32
 	config          Config
 	handshake       *packet.CIFHandshake
 	crypto          crypto.Crypto
@@ -210,12 +210,12 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		}
 
 		c := &connRequest{
+			ln:        ln,
 			addr:      p.Header().Addr,
 			start:     time.Now(),
 			socketId:  cif.SRTSocketId,
 			timestamp: p.Header().Timestamp,
 			config:    config,
-
 			handshake: cif,
 		}
 
@@ -282,4 +282,45 @@ func (req *connRequest) SetPassphrase(passphrase string) error {
 
 func (req *connRequest) SetRejectionReason(reason RejectionReason) {
 	req.rejectionReason = reason
+}
+
+func (req *connRequest) reject(reason RejectionReason) {
+	p := packet.NewPacket(req.addr)
+	p.Header().IsControlPacket = true
+
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+
+	p.Header().Timestamp = uint32(time.Since(req.ln.start).Microseconds())
+	p.Header().DestinationSocketId = req.socketId
+
+	req.handshake.HandshakeType = packet.HandshakeType(reason)
+
+	p.MarshalCIF(req.handshake)
+
+	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
+	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
+
+	req.ln.send(p)
+}
+
+func (req *connRequest) accept() {
+	p := packet.NewPacket(req.addr)
+
+	p.Header().IsControlPacket = true
+
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+
+	p.Header().Timestamp = uint32(time.Since(req.start).Microseconds())
+	p.Header().DestinationSocketId = req.socketId
+
+	p.MarshalCIF(req.handshake)
+
+	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
+	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
+
+	req.ln.send(p)
 }

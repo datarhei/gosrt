@@ -256,29 +256,29 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 	case <-ln.doneChan:
 		return nil, REJECT, ln.error()
 	case p := <-ln.backlog:
-		request := newConnRequest(ln, p)
-		if request == nil {
+		req := newConnRequest(ln, p)
+		if req == nil {
 			break
 		}
 
 		if acceptFn == nil {
-			ln.reject(request, REJ_PEER)
+			req.reject(REJ_PEER)
 			break
 		}
 
-		mode := acceptFn(request)
+		mode := acceptFn(req)
 		if mode != PUBLISH && mode != SUBSCRIBE {
 			// Figure out the reason
 			reason := REJ_PEER
-			if request.rejectionReason > 0 {
-				reason = request.rejectionReason
+			if req.rejectionReason > 0 {
+				reason = req.rejectionReason
 			}
-			ln.reject(request, reason)
+			req.reject(reason)
 			break
 		}
 
-		if request.crypto != nil && len(request.passphrase) == 0 {
-			ln.reject(request, REJ_BADSECRET)
+		if req.crypto != nil && len(req.passphrase) == 0 {
+			req.reject(REJ_BADSECRET)
 			break
 		}
 
@@ -286,64 +286,64 @@ func (ln *listener) Accept(acceptFn AcceptFunc) (Conn, ConnType, error) {
 		socketId := uint32(time.Since(ln.start).Microseconds())
 
 		// Select the largest TSBPD delay advertised by the caller, but at least 120ms
-		recvTsbpdDelay := uint16(request.config.ReceiverLatency.Milliseconds())
-		sendTsbpdDelay := uint16(request.config.PeerLatency.Milliseconds())
+		recvTsbpdDelay := uint16(req.config.ReceiverLatency.Milliseconds())
+		sendTsbpdDelay := uint16(req.config.PeerLatency.Milliseconds())
 
-		if request.handshake.Version == 5 {
-			if request.handshake.SRTHS.SendTSBPDDelay > recvTsbpdDelay {
-				recvTsbpdDelay = request.handshake.SRTHS.SendTSBPDDelay
+		if req.handshake.Version == 5 {
+			if req.handshake.SRTHS.SendTSBPDDelay > recvTsbpdDelay {
+				recvTsbpdDelay = req.handshake.SRTHS.SendTSBPDDelay
 			}
 
-			if request.handshake.SRTHS.RecvTSBPDDelay > sendTsbpdDelay {
-				sendTsbpdDelay = request.handshake.SRTHS.RecvTSBPDDelay
+			if req.handshake.SRTHS.RecvTSBPDDelay > sendTsbpdDelay {
+				sendTsbpdDelay = req.handshake.SRTHS.RecvTSBPDDelay
 			}
 
-			request.config.StreamId = request.handshake.StreamId
+			req.config.StreamId = req.handshake.StreamId
 		}
 
-		request.config.Passphrase = request.passphrase
+		req.config.Passphrase = req.passphrase
 
 		// Create a new connection
 		conn := newSRTConn(srtConnConfig{
-			version:                     request.handshake.Version,
+			version:                     req.handshake.Version,
 			localAddr:                   ln.addr,
-			remoteAddr:                  request.addr,
-			config:                      request.config,
-			start:                       request.start,
+			remoteAddr:                  req.addr,
+			config:                      req.config,
+			start:                       req.start,
 			socketId:                    socketId,
-			peerSocketId:                request.handshake.SRTSocketId,
-			tsbpdTimeBase:               uint64(request.timestamp),
+			peerSocketId:                req.handshake.SRTSocketId,
+			tsbpdTimeBase:               uint64(req.timestamp),
 			tsbpdDelay:                  uint64(recvTsbpdDelay) * 1000,
 			peerTsbpdDelay:              uint64(sendTsbpdDelay) * 1000,
-			initialPacketSequenceNumber: request.handshake.InitialPacketSequenceNumber,
-			crypto:                      request.crypto,
+			initialPacketSequenceNumber: req.handshake.InitialPacketSequenceNumber,
+			crypto:                      req.crypto,
 			keyBaseEncryption:           packet.EvenKeyEncrypted,
 			onSend:                      ln.send,
 			onShutdown:                  ln.handleShutdown,
-			logger:                      request.config.Logger,
+			logger:                      req.config.Logger,
 		})
 
 		ln.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s) %s", conn.SocketId(), conn.StreamId(), mode) })
 
-		request.handshake.SRTSocketId = socketId
-		request.handshake.SynCookie = 0
+		req.handshake.SRTSocketId = socketId
+		req.handshake.SynCookie = 0
 
-		if request.handshake.Version == 5 {
+		if req.handshake.Version == 5 {
 			//  3.2.1.1.1.  Handshake Extension Message Flags
-			request.handshake.SRTHS.SRTVersion = SRT_VERSION
-			request.handshake.SRTHS.SRTFlags.TSBPDSND = true
-			request.handshake.SRTHS.SRTFlags.TSBPDRCV = true
-			request.handshake.SRTHS.SRTFlags.CRYPT = true
-			request.handshake.SRTHS.SRTFlags.TLPKTDROP = true
-			request.handshake.SRTHS.SRTFlags.PERIODICNAK = true
-			request.handshake.SRTHS.SRTFlags.REXMITFLG = true
-			request.handshake.SRTHS.SRTFlags.STREAM = false
-			request.handshake.SRTHS.SRTFlags.PACKET_FILTER = false
-			request.handshake.SRTHS.RecvTSBPDDelay = recvTsbpdDelay
-			request.handshake.SRTHS.SendTSBPDDelay = sendTsbpdDelay
+			req.handshake.SRTHS.SRTVersion = SRT_VERSION
+			req.handshake.SRTHS.SRTFlags.TSBPDSND = true
+			req.handshake.SRTHS.SRTFlags.TSBPDRCV = true
+			req.handshake.SRTHS.SRTFlags.CRYPT = true
+			req.handshake.SRTHS.SRTFlags.TLPKTDROP = true
+			req.handshake.SRTHS.SRTFlags.PERIODICNAK = true
+			req.handshake.SRTHS.SRTFlags.REXMITFLG = true
+			req.handshake.SRTHS.SRTFlags.STREAM = false
+			req.handshake.SRTHS.SRTFlags.PACKET_FILTER = false
+			req.handshake.SRTHS.RecvTSBPDDelay = recvTsbpdDelay
+			req.handshake.SRTHS.SendTSBPDDelay = sendTsbpdDelay
 		}
 
-		ln.accept(request)
+		req.accept()
 
 		// Add the connection to the list of known connections
 		ln.lock.Lock()
@@ -379,47 +379,6 @@ func (ln *listener) handleShutdown(socketId uint32) {
 	ln.lock.Lock()
 	delete(ln.conns, socketId)
 	ln.lock.Unlock()
-}
-
-func (ln *listener) reject(request *connRequest, reason RejectionReason) {
-	p := packet.NewPacket(request.addr)
-	p.Header().IsControlPacket = true
-
-	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
-	p.Header().SubType = 0
-	p.Header().TypeSpecific = 0
-
-	p.Header().Timestamp = uint32(time.Since(ln.start).Microseconds())
-	p.Header().DestinationSocketId = request.socketId
-
-	request.handshake.HandshakeType = packet.HandshakeType(reason)
-
-	p.MarshalCIF(request.handshake)
-
-	ln.log("handshake:send:dump", func() string { return p.Dump() })
-	ln.log("handshake:send:cif", func() string { return request.handshake.String() })
-
-	ln.send(p)
-}
-
-func (ln *listener) accept(request *connRequest) {
-	p := packet.NewPacket(request.addr)
-
-	p.Header().IsControlPacket = true
-
-	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
-	p.Header().SubType = 0
-	p.Header().TypeSpecific = 0
-
-	p.Header().Timestamp = uint32(time.Since(request.start).Microseconds())
-	p.Header().DestinationSocketId = request.socketId
-
-	p.MarshalCIF(request.handshake)
-
-	ln.log("handshake:send:dump", func() string { return p.Dump() })
-	ln.log("handshake:send:cif", func() string { return request.handshake.String() })
-
-	ln.send(p)
 }
 
 func (ln *listener) isShutdown() bool {
