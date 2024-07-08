@@ -698,6 +698,16 @@ func (ln *listener) handleHandshake(p packet.Packet) {
 				return
 			}
 		} else if cif.Version == 5 {
+			if cif.SRTHS == nil {
+				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
+				ln.log("handshake:recv:error", func() string { return "missing handshake extension" })
+				p.MarshalCIF(cif)
+				ln.log("handshake:send:dump", func() string { return p.Dump() })
+				ln.log("handshake:send:cif", func() string { return cif.String() })
+				ln.send(p)
+				return
+			}
+
 			// Check if the peer version is sufficient
 			if cif.SRTHS.SRTVersion < config.MinVersion {
 				cif.HandshakeType = packet.HandshakeType(REJ_VERSION)

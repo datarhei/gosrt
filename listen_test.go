@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datarhei/gosrt/circular"
 	"github.com/datarhei/gosrt/packet"
 
 	"github.com/stretchr/testify/require"
@@ -434,4 +435,98 @@ func TestListenAsync(t *testing.T) {
 	connectedWg.Wait()
 	ln.Close()
 	listenerWg.Wait()
+}
+
+func TestListenHSV5MissingExtension(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	listenDone := make(chan struct{})
+	defer func() { <-listenDone }()
+
+	go func() {
+		defer close(listenDone)
+		for {
+			_, _, err := ln.Accept(func(req ConnRequest) ConnType {
+				return SUBSCRIBE
+			})
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	conn, err := net.Dial("udp", "127.0.0.1:6003")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// send induction request
+	p := packet.NewPacket(conn.RemoteAddr())
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0
+	sendcif := &packet.CIFHandshake{
+		IsRequest:                   true,
+		Version:                     4,
+		EncryptionField:             0,
+		ExtensionField:              2,
+		InitialPacketSequenceNumber: circular.New(10000, packet.MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     MAX_MSS_SIZE,
+		MaxFlowWindowSize:           25600,
+		HandshakeType:               packet.HSTYPE_INDUCTION,
+		SRTSocketId:                 55555,
+		SynCookie:                   0,
+	}
+	sendcif.PeerIP.FromNetAddr(conn.LocalAddr())
+	p.MarshalCIF(sendcif)
+	var buf bytes.Buffer
+	err = p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// read induction response
+	inbuf := make([]byte, MAX_MSS_SIZE)
+	n, err := conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif := &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+
+	// send conclusion
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0 // recvcif.SRTSocketId
+	sendcif.Version = 5
+	sendcif.ExtensionField = recvcif.ExtensionField
+	sendcif.HandshakeType = packet.HSTYPE_CONCLUSION
+	sendcif.SynCookie = recvcif.SynCookie
+	sendcif.HasSID = true
+	sendcif.StreamId = "foobar"
+	p.MarshalCIF(sendcif)
+	buf.Reset()
+	err = p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// read error
+	n, err = conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif = &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+	require.Equal(t, recvcif.HandshakeType, packet.HandshakeType(REJ_ROGUE))
+
+	ln.Close()
 }
