@@ -306,8 +306,11 @@ func (req *connRequest) SetRejectionReason(reason RejectionReason) {
 
 func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.lock.Lock()
-	delete(req.ln.connReqs, req.socketId)
-	req.ln.lock.Unlock()
+	defer req.ln.lock.Unlock()
+
+	if _, hasReq := req.ln.connReqs[req.socketId]; !hasReq {
+		return
+	}
 
 	p := packet.NewPacket(req.addr)
 	p.Header().IsControlPacket = true
@@ -321,12 +324,21 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
 	req.ln.send(p)
+
+	delete(req.ln.connReqs, req.socketId)
 }
 
 func (req *connRequest) Accept() (Conn, error) {
 	if req.crypto != nil && len(req.passphrase) == 0 {
 		req.Reject(REJ_BADSECRET)
 		return nil, fmt.Errorf("passphrase is missing")
+	}
+
+	req.ln.lock.Lock()
+	defer req.ln.lock.Unlock()
+
+	if _, hasReq := req.ln.connReqs[req.socketId]; !hasReq {
+		return nil, fmt.Errorf("connection already accepted")
 	}
 
 	// Create a new socket ID
@@ -402,10 +414,8 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
 	req.ln.send(p)
 
-	req.ln.lock.Lock()
 	req.ln.conns[socketId] = conn
 	delete(req.ln.connReqs, req.socketId)
-	req.ln.lock.Unlock()
 
 	return conn, nil
 }
