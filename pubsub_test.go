@@ -53,8 +53,11 @@ func TestPubSub(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	readerWg := sync.WaitGroup{}
-	readerWg.Add(2)
+	readerReadyWg := sync.WaitGroup{}
+	readerReadyWg.Add(2)
+
+	readerDoneWg := sync.WaitGroup{}
+	readerDoneWg.Add(2)
 
 	dataReader1 := bytes.Buffer{}
 	dataReader2 := bytes.Buffer{}
@@ -70,7 +73,7 @@ func TestPubSub(t *testing.T) {
 
 		buffer := make([]byte, 2048)
 
-		readerWg.Done()
+		readerReadyWg.Done()
 
 		for {
 			n, err := conn.Read(buffer)
@@ -85,6 +88,8 @@ func TestPubSub(t *testing.T) {
 
 		err = conn.Close()
 		require.NoError(t, err)
+
+		readerDoneWg.Done()
 	}()
 
 	go func() {
@@ -98,7 +103,7 @@ func TestPubSub(t *testing.T) {
 
 		buffer := make([]byte, 2048)
 
-		readerWg.Done()
+		readerReadyWg.Done()
 
 		for {
 			n, err := conn.Read(buffer)
@@ -113,9 +118,11 @@ func TestPubSub(t *testing.T) {
 
 		err = conn.Close()
 		require.NoError(t, err)
+
+		readerDoneWg.Done()
 	}()
 
-	readerWg.Wait()
+	readerReadyWg.Wait()
 
 	writerWg := sync.WaitGroup{}
 	writerWg.Add(1)
@@ -142,6 +149,7 @@ func TestPubSub(t *testing.T) {
 	}()
 
 	writerWg.Wait()
+	readerDoneWg.Wait()
 
 	server.Shutdown()
 
