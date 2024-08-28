@@ -137,6 +137,7 @@ func TestHandshakeV4(t *testing.T) {
 		HasHS:                       false,
 		HasKM:                       false,
 		HasSID:                      false,
+		HasCongestionCtl:            false,
 	}
 
 	var buf bytes.Buffer
@@ -174,6 +175,7 @@ func TestHandshakeV5(t *testing.T) {
 		HasHS:                       true,
 		HasKM:                       true,
 		HasSID:                      true,
+		HasCongestionCtl:            true,
 		SRTHS: &CIFHandshakeExtension{
 			SRTVersion: 0x010402,
 			SRTFlags: CIFHandshakeExtensionFlags{
@@ -207,7 +209,8 @@ func TestHandshakeV5(t *testing.T) {
 			Salt:                  []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
 			Wrap:                  []byte{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
 		},
-		StreamId: "/live/stream.foobar",
+		StreamId:      "/live/stream.foobar",
+		CongestionCtl: "foob",
 	}
 
 	var buf bytes.Buffer
@@ -216,7 +219,7 @@ func TestHandshakeV5(t *testing.T) {
 
 	data := hex.EncodeToString(buf.Bytes())
 
-	require.Equal(t, "00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000020003000104020000003f006400640004000e122029010000000002000200000004040102030405060708090a0b0c0d0e0f10f0f1f2f3f4f5f6f71112131415161718191a1b1c1d1e1f200005000576696c2f74732f656d6165726f6f662e00726162", data)
+	require.Equal(t, "00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000020003000104020000003f006400640004000e122029010000000002000200000004040102030405060708090a0b0c0d0e0f10f0f1f2f3f4f5f6f71112131415161718191a1b1c1d1e1f200005000576696c2f74732f656d6165726f6f662e0072616200060001626f6f66", data)
 
 	cif2 := &CIFHandshake{}
 
@@ -245,6 +248,7 @@ func TestHandshakeString(t *testing.T) {
 		HasHS:                       true,
 		HasKM:                       false,
 		HasSID:                      true,
+		HasCongestionCtl:            false,
 		SRTHS: &CIFHandshakeExtension{
 			SRTVersion: 0x010402,
 			SRTFlags: CIFHandshakeExtensionFlags{

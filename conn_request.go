@@ -206,6 +206,18 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 
 				return nil
 			}
+
+			// We only support live congestion control
+			if cif.HasCongestionCtl && cif.CongestionCtl != "live" {
+				cif.HandshakeType = packet.HandshakeType(REJ_CONGESTION)
+				ln.log("handshake:recv:error", func() string { return "only live congestion control is supported" })
+				p.MarshalCIF(cif)
+				ln.log("handshake:send:dump", func() string { return p.Dump() })
+				ln.log("handshake:send:cif", func() string { return cif.String() })
+				ln.send(p)
+
+				return nil
+			}
 		} else {
 			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("only HSv4 and HSv5 are supported (got HSv%d)", cif.Version) })
