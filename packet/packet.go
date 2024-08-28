@@ -33,7 +33,7 @@ const (
 	CTRLTYPE_SHUTDOWN  CtrlType = 0x0005
 	CTRLTYPE_ACKACK    CtrlType = 0x0006
 	CRTLTYPE_DROPREQ   CtrlType = 0x0007 // unimplemented, sender->receiver
-	CRTLTYPE_PEERERROR CtrlType = 0x0008 // unimplemented, receiver->sender
+	CRTLTYPE_PEERERROR CtrlType = 0x0008 // unimplemented, receiver->sender (only for file transfers)
 	CTRLTYPE_USER      CtrlType = 0x7FFF
 )
 
@@ -140,9 +140,9 @@ const (
 	EXTTYPE_KMREQ      CtrlSubType = 3
 	EXTTYPE_KMRSP      CtrlSubType = 4
 	EXTTYPE_SID        CtrlSubType = 5
-	EXTTYPE_CONGESTION CtrlSubType = 6
-	EXTTYPE_FILTER     CtrlSubType = 7
-	EXTTYPE_GROUP      CtrlSubType = 8
+	EXTTYPE_CONGESTION CtrlSubType = 6 // unimplemented
+	EXTTYPE_FILTER     CtrlSubType = 7 // unimplemented
+	EXTTYPE_GROUP      CtrlSubType = 8 // unimplemented
 )
 
 func (h CtrlSubType) String() string {
