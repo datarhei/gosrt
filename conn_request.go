@@ -7,6 +7,7 @@ import (
 
 	"github.com/datarhei/gosrt/crypto"
 	"github.com/datarhei/gosrt/packet"
+	"github.com/datarhei/gosrt/rand"
 )
 
 // ConnRequest is an incoming connection request
@@ -340,6 +341,23 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	delete(req.ln.connReqs, req.socketId)
 }
 
+// generateSocketId generates an SRT SocketID that can be used for this connection
+func (req *connRequest) generateSocketId() (uint32, error) {
+	for i := 0; i < 10; i++ {
+		socketId, err := rand.Uint32()
+		if err != nil {
+			return 0, fmt.Errorf("could not generate random socket id")
+		}
+
+		// check that the socket id is not already in use
+		if _, found := req.ln.conns[socketId]; !found {
+			return socketId, nil
+		}
+	}
+
+	return 0, fmt.Errorf("could not generate unused socketid")
+}
+
 func (req *connRequest) Accept() (Conn, error) {
 	if req.crypto != nil && len(req.passphrase) == 0 {
 		req.Reject(REJ_BADSECRET)
@@ -354,7 +372,10 @@ func (req *connRequest) Accept() (Conn, error) {
 	}
 
 	// Create a new socket ID
-	socketId := uint32(time.Since(req.ln.start).Microseconds())
+	socketId, err := req.generateSocketId()
+	if err != nil {
+		return nil, fmt.Errorf("could not generate socket id")
+	}
 
 	// Select the largest TSBPD delay advertised by the caller, but at least 120ms
 	recvTsbpdDelay := uint16(req.config.ReceiverLatency.Milliseconds())
