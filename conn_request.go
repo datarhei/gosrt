@@ -374,7 +374,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	// Create a new socket ID
 	socketId, err := req.generateSocketId()
 	if err != nil {
-		return nil, fmt.Errorf("could not generate socket id")
+		return nil, fmt.Errorf("could not generate socket id: %w", err)
 	}
 
 	// Select the largest TSBPD delay advertised by the caller, but at least 120ms
