@@ -169,6 +169,9 @@ type Config struct {
 
 	// An implementation of the Logger interface
 	Logger Logger
+
+	// if a new IP starts sending data on an existing socket id, allow it
+	AllowPeerIpChange bool
 }
 
 // DefaultConfig is the default configuration for a SRT connection
@@ -209,6 +212,7 @@ var defaultConfig Config = Config{
 	TooLatePacketDrop:     true,
 	TransmissionType:      "live",
 	TSBPDMode:             true,
+	AllowPeerIpChange:     false,
 }
 
 // DefaultConfig returns the default configuration for Dial and Listen.
