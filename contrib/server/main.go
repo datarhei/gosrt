@@ -147,6 +147,8 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 
 	channel := ""
 
+	attrs := srt.GetRequestAttributes(req)
+
 	if req.Version() == 4 {
 		mode = srt.PUBLISH
 		channel = "/" + client.String()
@@ -212,6 +214,9 @@ func (s *server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		return srt.REJECT
 	}
 
+	attrs.Set("channel", channel)
+	attrs.Set("address", client)
+
 	return mode
 }
 
@@ -222,6 +227,9 @@ func (s *server) handlePublish(conn srt.Conn) {
 		conn.Close()
 		return
 	}
+
+	attrs := srt.GetRequestAttributes(conn)
+	s.log("PUBLISH", "PUBLISH", attrs.GetValue("channel").(string), "client will publish", attrs.GetValue("address").(net.Addr))
 
 	if conn.Version() == 4 {
 		channel = "/" + client.String()
