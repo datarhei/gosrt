@@ -50,16 +50,17 @@ type ConnRequest interface {
 
 // connRequest implements the ConnRequest interface
 type connRequest struct {
-	ln              *listener
-	addr            net.Addr
-	start           time.Time
-	socketId        uint32
-	timestamp       uint32
-	config          Config
-	handshake       *packet.CIFHandshake
-	crypto          crypto.Crypto
-	passphrase      string
-	rejectionReason RejectionReason
+	ln                *listener
+	addr              net.Addr
+	start             time.Time
+	socketId          uint32
+	timestamp         uint32
+	config            Config
+	handshake         *packet.CIFHandshake
+	crypto            crypto.Crypto
+	passphrase        string
+	rejectionReason   RejectionReason
+	requestAttributes *connRequestAttributes
 }
 
 func newConnRequest(ln *listener, p packet.Packet) *connRequest {
@@ -231,13 +232,14 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		}
 
 		req := &connRequest{
-			ln:        ln,
-			addr:      p.Header().Addr,
-			start:     time.Now(),
-			socketId:  cif.SRTSocketId,
-			timestamp: p.Header().Timestamp,
-			config:    config,
-			handshake: cif,
+			ln:                ln,
+			addr:              p.Header().Addr,
+			start:             time.Now(),
+			socketId:          cif.SRTSocketId,
+			timestamp:         p.Header().Timestamp,
+			config:            config,
+			handshake:         cif,
+			requestAttributes: new(connRequestAttributes),
 		}
 
 		if cif.SRTKM != nil {
@@ -278,6 +280,10 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 	}
 
 	return nil
+}
+
+func (req *connRequest) GetRequestAttributes() RequestAttributes {
+	return req.requestAttributes
 }
 
 func (req *connRequest) RemoteAddr() net.Addr {
@@ -413,6 +419,7 @@ func (req *connRequest) Accept() (Conn, error) {
 		onSend:                      req.ln.send,
 		onShutdown:                  req.ln.handleShutdown,
 		logger:                      req.config.Logger,
+		attrs:                       req.requestAttributes, // forward the attributes
 	})
 
 	req.ln.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s)", conn.SocketId(), conn.StreamId()) })

@@ -216,6 +216,8 @@ type srtConn struct {
 	// HSv4
 	stopHSRequests context.CancelFunc
 	stopKMRequests context.CancelFunc
+
+	requestAttributes RequestAttributes
 }
 
 type srtConnConfig struct {
@@ -236,6 +238,7 @@ type srtConnConfig struct {
 	onSend                      func(p packet.Packet)
 	onShutdown                  func(socketId uint32)
 	logger                      Logger
+	attrs                       RequestAttributes
 }
 
 func newSRTConn(config srtConnConfig) *srtConn {
@@ -257,6 +260,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		onSend:                      config.onSend,
 		onShutdown:                  config.onShutdown,
 		logger:                      config.logger,
+		requestAttributes:           config.attrs,
 	}
 
 	if c.onSend == nil {
@@ -360,6 +364,10 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	}
 
 	return c
+}
+
+func (c *srtConn) GetRequestAttributes() RequestAttributes {
+	return c.requestAttributes
 }
 
 func (c *srtConn) LocalAddr() net.Addr {
