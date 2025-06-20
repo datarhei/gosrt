@@ -265,13 +265,18 @@ func TestEncryptionRetransmit(t *testing.T) {
 			panic(err.Error())
 		}
 
+		counter := 0
+
 		dialer, _ := conn.(*dialer)
 		originalOnSend := dialer.conn.onSend
 		dialer.conn.onSend = func(p packet.Packet) {
 			if !p.Header().IsControlPacket {
 				// Drop every 2nd original packet
-				if !p.Header().RetransmittedPacketFlag && p.Header().PacketSequenceNumber.Val()%2 == 1 {
-					return
+				if !p.Header().RetransmittedPacketFlag {
+					counter++
+					if counter%2 == 0 {
+						return
+					}
 				}
 			}
 
