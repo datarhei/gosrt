@@ -347,6 +347,9 @@ func (ln *listener) Close() {
 
 		ln.lock.RLock()
 		for _, conn := range ln.conns {
+			if conn == nil {
+				continue
+			}
 			conn.close()
 		}
 		ln.lock.RUnlock()
@@ -402,7 +405,7 @@ func (ln *listener) reader(ctx context.Context) {
 			conn, ok := ln.conns[p.Header().DestinationSocketId]
 			ln.lock.RUnlock()
 
-			if !ok {
+			if !ok || conn == nil {
 				// ignore the packet, we don't know the destination
 				break
 			}
