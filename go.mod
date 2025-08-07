@@ -6,8 +6,8 @@ require (
 	github.com/benburkert/openpgp v0.0.0-20160410205803-c2471f86866c
 	github.com/pkg/profile v1.7.0
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/crypto v0.40.0
-	golang.org/x/sys v0.34.0
+	golang.org/x/crypto v0.41.0
+	golang.org/x/sys v0.35.0
 )
 
 require (
