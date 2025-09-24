@@ -103,16 +103,17 @@ func TestRecvTSBPD(t *testing.T) {
 
 func TestRecvNAK(t *testing.T) {
 	seqACK := uint32(0)
-	seqNAKFrom := uint32(0)
-	seqNAKTo := uint32(0)
+	seqNAK := []uint32{}
 	numbers := []uint32{}
 	recv := mockLiveRecv(
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
 		func(list []circular.Number) {
-			seqNAKFrom = list[0].Val()
-			seqNAKTo = list[1].Val()
+			seqNAK = []uint32{}
+			for _, sn := range list {
+				seqNAK = append(seqNAK, sn.Val())
+			}
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -130,8 +131,7 @@ func TestRecvNAK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(0), seqNAKFrom)
-	require.Equal(t, uint32(0), seqNAKTo)
+	require.Equal(t, []uint32{}, seqNAK)
 	require.Equal(t, uint32(4), recv.maxSeenSequenceNumber.Val())
 
 	for i := 7; i < 10; i++ {
@@ -143,30 +143,29 @@ func TestRecvNAK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 
 	recv.Tick(10) // ACK period
 
 	require.Equal(t, uint32(10), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 }
 
 func TestRecvPeriodicNAK(t *testing.T) {
 	seqACK := uint32(0)
-	seqNAKFrom := uint32(0)
-	seqNAKTo := uint32(0)
+	seqNAK := []uint32{}
 	numbers := []uint32{}
 	recv := mockLiveRecv(
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
 		func(list []circular.Number) {
-			seqNAKFrom = list[0].Val()
-			seqNAKTo = list[1].Val()
+			seqNAK = []uint32{}
+			for _, sn := range list {
+				seqNAK = append(seqNAK, sn.Val())
+			}
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -184,8 +183,7 @@ func TestRecvPeriodicNAK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(0), seqNAKFrom)
-	require.Equal(t, uint32(0), seqNAKTo)
+	require.Equal(t, []uint32{}, seqNAK)
 	require.Equal(t, uint32(4), recv.maxSeenSequenceNumber.Val())
 
 	for i := 7; i < 10; i++ {
@@ -197,40 +195,35 @@ func TestRecvPeriodicNAK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 
 	recv.Tick(10) // ACK period
 
 	require.Equal(t, uint32(5), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
-
-	seqNAKFrom = 0
-	seqNAKTo = 0
 
 	recv.Tick(20) // ACK period, NAK period
 
 	require.Equal(t, uint32(5), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 }
 
 func TestRecvACK(t *testing.T) {
 	seqACK := uint32(0)
-	seqNAKFrom := uint32(0)
-	seqNAKTo := uint32(0)
+	seqNAK := []uint32{}
 	numbers := []uint32{}
 	recv := mockLiveRecv(
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
 		func(list []circular.Number) {
-			seqNAKFrom = list[0].Val()
-			seqNAKTo = list[1].Val()
+			seqNAK = []uint32{}
+			for _, sn := range list {
+				seqNAK = append(seqNAK, sn.Val())
+			}
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -248,8 +241,7 @@ func TestRecvACK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(0), seqNAKFrom)
-	require.Equal(t, uint32(0), seqNAKTo)
+	require.Equal(t, []uint32{}, seqNAK)
 	require.Equal(t, uint32(4), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(0), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(0), recv.lastDeliveredSequenceNumber.Inc().Val())
@@ -264,8 +256,7 @@ func TestRecvACK(t *testing.T) {
 	}
 
 	require.Equal(t, uint32(0), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(0), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(0), recv.lastDeliveredSequenceNumber.Inc().Val())
@@ -274,8 +265,7 @@ func TestRecvACK(t *testing.T) {
 	recv.Tick(10)
 
 	require.Equal(t, uint32(5), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(5), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(0), recv.lastDeliveredSequenceNumber.Inc().Val())
@@ -284,8 +274,7 @@ func TestRecvACK(t *testing.T) {
 	recv.Tick(20)
 
 	require.Equal(t, uint32(5), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(5), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(5), recv.lastDeliveredSequenceNumber.Inc().Val())
@@ -294,8 +283,7 @@ func TestRecvACK(t *testing.T) {
 	recv.Tick(30)
 
 	require.Equal(t, uint32(5), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(5), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(5), recv.lastDeliveredSequenceNumber.Inc().Val())
@@ -312,8 +300,7 @@ func TestRecvACK(t *testing.T) {
 	recv.Tick(40)
 
 	require.Equal(t, uint32(10), seqACK)
-	require.Equal(t, uint32(5), seqNAKFrom)
-	require.Equal(t, uint32(6), seqNAKTo)
+	require.Equal(t, []uint32{5, 6}, seqNAK)
 	require.Equal(t, uint32(9), recv.maxSeenSequenceNumber.Val())
 	require.Equal(t, uint32(10), recv.lastACKSequenceNumber.Inc().Val())
 	require.Equal(t, uint32(10), recv.lastDeliveredSequenceNumber.Inc().Val())
