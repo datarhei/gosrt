@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mockLiveRecv(onSendACK func(seq circular.Number, light bool), onSendNAK func(from, to circular.Number), onDeliver func(p packet.Packet)) *receiver {
+func mockLiveRecv(onSendACK func(seq circular.Number, light bool), onSendNAK func(list []circular.Number), onDeliver func(p packet.Packet)) *receiver {
 	recv := NewReceiver(ReceiveConfig{
 		InitialSequenceNumber: circular.New(0, packet.MAX_SEQUENCENUMBER),
 		PeriodicACKInterval:   10,
@@ -30,7 +30,7 @@ func TestRecvSequence(t *testing.T) {
 		func(seq circular.Number, light bool) {
 			nACK++
 		},
-		func(from, to circular.Number) {
+		func(list []circular.Number) {
 			nNAK++
 		},
 		func(p packet.Packet) {
@@ -110,9 +110,9 @@ func TestRecvNAK(t *testing.T) {
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
-		func(from, to circular.Number) {
-			seqNAKFrom = from.Val()
-			seqNAKTo = to.Val()
+		func(list []circular.Number) {
+			seqNAKFrom = list[0].Val()
+			seqNAKTo = list[1].Val()
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -164,9 +164,9 @@ func TestRecvPeriodicNAK(t *testing.T) {
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
-		func(from, to circular.Number) {
-			seqNAKFrom = from.Val()
-			seqNAKTo = to.Val()
+		func(list []circular.Number) {
+			seqNAKFrom = list[0].Val()
+			seqNAKTo = list[1].Val()
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -228,9 +228,9 @@ func TestRecvACK(t *testing.T) {
 		func(seq circular.Number, light bool) {
 			seqACK = seq.Val()
 		},
-		func(from, to circular.Number) {
-			seqNAKFrom = from.Val()
-			seqNAKTo = to.Val()
+		func(list []circular.Number) {
+			seqNAKFrom = list[0].Val()
+			seqNAKTo = list[1].Val()
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())
@@ -556,8 +556,8 @@ func TestIssue67(t *testing.T) {
 		func(seq circular.Number, light bool) {
 			ackNumbers = append(ackNumbers, seq.Val())
 		},
-		func(from, to circular.Number) {
-			nakNumbers = append(nakNumbers, [2]uint32{from.Val(), to.Val()})
+		func(list []circular.Number) {
+			nakNumbers = append(nakNumbers, [2]uint32{list[0].Val(), list[1].Val()})
 		},
 		func(p packet.Packet) {
 			numbers = append(numbers, p.Header().PacketSequenceNumber.Val())

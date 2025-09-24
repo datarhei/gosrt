@@ -1201,7 +1201,7 @@ func (c *srtConn) sendShutdown() {
 }
 
 // sendNAK sends a NAK to the peer with the given range of sequence numbers.
-func (c *srtConn) sendNAK(from, to circular.Number) {
+func (c *srtConn) sendNAK(list []circular.Number) {
 	p := packet.NewPacket(c.remoteAddr)
 
 	p.Header().IsControlPacket = true
@@ -1211,8 +1211,7 @@ func (c *srtConn) sendNAK(from, to circular.Number) {
 
 	cif := packet.CIFNAK{}
 
-	cif.LostPacketSequenceNumber = append(cif.LostPacketSequenceNumber, from)
-	cif.LostPacketSequenceNumber = append(cif.LostPacketSequenceNumber, to)
+	cif.LostPacketSequenceNumber = append(cif.LostPacketSequenceNumber, list...)
 
 	p.MarshalCIF(&cif)
 
