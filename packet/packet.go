@@ -1289,7 +1289,7 @@ func (c CIFNAK) String() string {
 
 func (c *CIFNAK) Unmarshal(data []byte) error {
 	if len(data)%4 != 0 {
-		return fmt.Errorf("data too short to unmarshal")
+		return fmt.Errorf("data has wrong length to unmarshal")
 	}
 
 	// Appendix A
@@ -1337,15 +1337,24 @@ func (c *CIFNAK) Marshal(w io.Writer) {
 	// Appendix A
 
 	var buffer [8]byte
+	bytesWritten := 0
 
 	for i := 0; i < len(c.LostPacketSequenceNumber); i += 2 {
 		if c.LostPacketSequenceNumber[i] == c.LostPacketSequenceNumber[i+1] {
 			binary.BigEndian.PutUint32(buffer[0:], c.LostPacketSequenceNumber[i].Val())
 			w.Write(buffer[0:4])
+
+			bytesWritten += 4
 		} else {
 			binary.BigEndian.PutUint32(buffer[0:], c.LostPacketSequenceNumber[i].Val()|0b10000000_00000000_00000000_00000000)
 			binary.BigEndian.PutUint32(buffer[4:], c.LostPacketSequenceNumber[i+1].Val())
 			w.Write(buffer[0:])
+
+			bytesWritten += 8
+		}
+
+		if bytesWritten >= MAX_PAYLOAD_SIZE-4 {
+			break
 		}
 	}
 }

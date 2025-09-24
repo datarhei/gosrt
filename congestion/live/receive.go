@@ -334,8 +334,8 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 
 	ackSequenceNumber := r.lastACKSequenceNumber
 
-	// Send a NAK only for the first gap.
-	// Alternatively send a NAK for max. X gaps because the size of the NAK packet is limited.
+	// Send a NAK for all gaps.
+	// Not all gaps might get announced because the size of the NAK packet is limited.
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 
@@ -350,8 +350,6 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 
 			list = append(list, nackSequenceNumber)
 			list = append(list, p.Header().PacketSequenceNumber.Dec())
-
-			break
 		}
 
 		ackSequenceNumber = p.Header().PacketSequenceNumber
