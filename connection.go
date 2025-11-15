@@ -159,7 +159,7 @@ var (
 			},
 			MaxAge: summaryVecMaxAge,
 		},
-		[]string{"SocketId"},
+		[]string{"type", "SocketId"},
 	)
 
 	// channel blocked count
@@ -887,13 +887,15 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	// Calculate one-way latency: time from when packet was sent to when we received it
 	// Only calculate for non-retransmitted data packets to get accurate one-way latency
 	// This will not be perfect, because of clock drift, but hopefully sender/receivers have roughly the same clock
-	if !header.RetransmittedPacketFlag {
-		unwrappedTimestampMicroseconds := tsbpdTimeBaseOffset + uint64(header.Timestamp)
-		packetSendTime := c.start.Add(time.Duration(unwrappedTimestampMicroseconds) * time.Microsecond)
-
-		receiveTime := time.Now()
-		oneWayLatency := receiveTime.Sub(packetSendTime)
-		pOWL.WithLabelValues(c.socketIdString()).Observe(oneWayLatency.Seconds())
+	unwrappedTimestampMicroseconds := tsbpdTimeBaseOffset + uint64(header.Timestamp)
+	packetSendTime := c.start.Add(time.Duration(unwrappedTimestampMicroseconds) * time.Microsecond)
+	receiveTime := time.Now()
+	oneWayLatency := receiveTime.Sub(packetSendTime)
+	pOWL.WithLabelValues(c.socketIdString()).Observe(oneWayLatency.Seconds())
+	if header.RetransmittedPacketFlag {
+		pOWL.WithLabelValues("retransmitted", c.socketIdString()).Observe(oneWayLatency.Seconds())
+	} else {
+		pOWL.WithLabelValues("original", c.socketIdString()).Observe(oneWayLatency.Seconds())
 	}
 
 	c.log("data:recv:dump", func() string { return p.Dump() })
