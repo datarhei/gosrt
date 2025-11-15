@@ -10,6 +10,19 @@ import (
 	"github.com/datarhei/gosrt/circular"
 	"github.com/datarhei/gosrt/congestion"
 	"github.com/datarhei/gosrt/packet"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	rC = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "congestion_receiver",
+			Name:      "counts",
+			Help:      "gosrt congestion receiver counts",
+		},
+		[]string{"function", "variable", "type"},
+	)
 )
 
 // ReceiveConfig is the configuration for the liveRecv congestion control
@@ -132,6 +145,8 @@ func (r *receiver) Flush() {
 }
 
 func (r *receiver) Push(pkt packet.Packet) {
+	rC.WithLabelValues("Push", "count", "start").Inc()
+
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -147,12 +162,14 @@ func (r *receiver) Push(pkt packet.Packet) {
 		if probe == 0 {
 			r.probeTime = time.Now()
 			r.probeNextSeq = pkt.Header().PacketSequenceNumber.Inc()
+			rC.WithLabelValues("Push", "link_capacity_probe", "start").Inc()
 		} else if probe == 1 && pkt.Header().PacketSequenceNumber.Equals(r.probeNextSeq) && !r.probeTime.IsZero() && pkt.Len() != 0 {
 			// The time between packets scaled to a fully loaded packet
 			diff := float64(time.Since(r.probeTime).Microseconds()) * (packet.MAX_PAYLOAD_SIZE / float64(pkt.Len()))
 			if diff != 0 {
 				// Here we're doing an average of the measurements.
 				r.avgLinkCapacity = 0.875*r.avgLinkCapacity + 0.125*1_000_000/diff
+				rC.WithLabelValues("Push", "link_capacity_probe", "measured").Inc()
 			}
 		} else {
 			r.probeTime = time.Time{}
@@ -189,6 +206,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 
 		r.statistics.PktDrop++
 		r.statistics.ByteDrop += pktLen
+		rC.WithLabelValues("Push", "packets_belated", "count").Inc()
 
 		return
 	}
@@ -197,6 +215,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 		// Already acknowledged, ignoring
 		r.statistics.PktDrop++
 		r.statistics.ByteDrop += pktLen
+		rC.WithLabelValues("Push", "packets_already_acked", "count").Inc()
 
 		return
 	}
@@ -204,6 +223,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 	if pkt.Header().PacketSequenceNumber.Equals(r.maxSeenSequenceNumber.Inc()) {
 		// In order, the packet we expected
 		r.maxSeenSequenceNumber = pkt.Header().PacketSequenceNumber
+		rC.WithLabelValues("Push", "packets_in_order", "count").Inc()
 	} else if pkt.Header().PacketSequenceNumber.Lte(r.maxSeenSequenceNumber) {
 		// Out of order, is it a missing piece? put it in the correct position
 		for e := r.packetList.Front(); e != nil; e = e.Next() {
@@ -213,6 +233,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 				// Already received (has been sent more than once), ignoring
 				r.statistics.PktDrop++
 				r.statistics.ByteDrop += pktLen
+				rC.WithLabelValues("Push", "packets_duplicate", "count").Inc()
 
 				break
 			} else if p.Header().PacketSequenceNumber.Gt(pkt.Header().PacketSequenceNumber) {
@@ -224,6 +245,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 				r.statistics.ByteUnique += pktLen
 
 				r.packetList.InsertBefore(pkt, e)
+				rC.WithLabelValues("Push", "packets_out_of_order", "count").Inc()
 
 				break
 			}
@@ -241,6 +263,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber))
 		r.statistics.PktLoss += len
 		r.statistics.ByteLoss += len * uint64(r.avgPayloadSize)
+		rC.WithLabelValues("Push", "packets_gap_detected", "count").Add(float64(len))
 
 		r.maxSeenSequenceNumber = pkt.Header().PacketSequenceNumber
 	}
@@ -255,6 +278,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 }
 
 func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Number, lite bool) {
+
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -262,10 +286,12 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 	if now-r.lastPeriodicACK < r.periodicACKInterval {
 		if r.nPackets >= 64 {
 			lite = true // Send light ACK
+			rC.WithLabelValues("periodicACK", "light_ack", "count").Inc()
 		} else {
 			return
 		}
 	}
+	rC.WithLabelValues("periodicACK", "count", "start").Inc()
 
 	minPktTsbpdTime, maxPktTsbpdTime := uint64(0), uint64(0)
 	ackSequenceNumber := r.lastACKSequenceNumber
@@ -321,6 +347,7 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 }
 
 func (r *receiver) periodicNAK(now uint64) []circular.Number {
+
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
@@ -336,6 +363,7 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 
 	// Send a NAK for all gaps.
 	// Not all gaps might get announced because the size of the NAK packet is limited.
+	gapsDetected := 0
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 
@@ -350,9 +378,14 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 
 			list = append(list, nackSequenceNumber)
 			list = append(list, p.Header().PacketSequenceNumber.Dec())
+			gapsDetected++
 		}
 
 		ackSequenceNumber = p.Header().PacketSequenceNumber
+	}
+
+	if gapsDetected > 0 {
+		rC.WithLabelValues("periodicNAK", "gaps_detected", "count").Add(float64(gapsDetected))
 	}
 
 	r.lastPeriodicNAK = now
@@ -361,17 +394,23 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 }
 
 func (r *receiver) Tick(now uint64) {
+
+	rC.WithLabelValues("Tick", "count", "start").Inc()
+
 	if ok, sequenceNumber, lite := r.periodicACK(now); ok {
 		r.sendACK(sequenceNumber, lite)
+		rC.WithLabelValues("Tick", "ack_sent", "count").Inc()
 	}
 
 	if list := r.periodicNAK(now); len(list) != 0 {
 		r.sendNAK(list)
+		rC.WithLabelValues("Tick", "nak_sent", "count").Inc()
 	}
 
 	// Deliver packets whose PktTsbpdTime is ripe
 	r.lock.Lock()
 	removeList := make([]*list.Element, 0, r.packetList.Len())
+	packetsDelivered := 0
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 
@@ -383,9 +422,13 @@ func (r *receiver) Tick(now uint64) {
 
 			r.deliver(p)
 			removeList = append(removeList, e)
+			packetsDelivered++
 		} else {
 			break
 		}
+	}
+	if packetsDelivered > 0 {
+		rC.WithLabelValues("Tick", "packets_delivered", "count").Add(float64(packetsDelivered))
 	}
 
 	for _, e := range removeList {

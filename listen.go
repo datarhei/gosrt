@@ -12,6 +12,59 @@ import (
 
 	srtnet "github.com/datarhei/gosrt/net"
 	"github.com/datarhei/gosrt/packet"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	lC = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "listen",
+			Name:      "counts",
+			Help:      "gosrt listener counts",
+		},
+		[]string{"function", "variable", "type"},
+	)
+
+	lH = promauto.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Subsystem: "listen",
+			Name:      "durations_seconds",
+			Help:      "gosrt listener function durations in seconds",
+			Objectives: map[float64]float64{
+				0.1:  quantileError,
+				0.5:  quantileError,
+				0.99: quantileError,
+			},
+			MaxAge: summaryVecMaxAge,
+		},
+		[]string{"function", "variable", "type"},
+	)
+
+	// Listener channel blocking metrics
+	listenerChannelBlockedDuration = promauto.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Subsystem: "listen",
+			Name:      "channel_blocked_duration_seconds",
+			Help:      "Duration that listener channels were blocked (when send was not immediate)",
+			Objectives: map[float64]float64{
+				0.1:  quantileError,
+				0.5:  quantileError,
+				0.99: quantileError,
+			},
+			MaxAge: summaryVecMaxAge,
+		},
+		[]string{"channel"},
+	)
+
+	listenerChannelBlockedCount = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "listen",
+			Name:      "channel_blocked_total",
+			Help:      "Total number of times listener channels were blocked",
+		},
+		[]string{"channel"},
+	)
 )
 
 // ConnType represents the kind of connection as returned
@@ -157,6 +210,13 @@ type listener struct {
 //
 // In case of an error, the returned Listener is nil and the error is non-nil.
 func Listen(network, address string, config Config) (Listener, error) {
+
+	startTime := time.Now()
+	defer func() {
+		lH.WithLabelValues("Listen", "duration", "complete").Observe(time.Since(startTime).Seconds())
+	}()
+	lC.WithLabelValues("Listen", "count", "start").Inc()
+
 	if network != "srt" {
 		return nil, fmt.Errorf("listen: the network must be 'srt'")
 	}
@@ -239,22 +299,34 @@ func Listen(network, address string, config Config) (Listener, error) {
 
 			p, err := packet.NewPacketFromData(addr, buffer[:n])
 			if err != nil {
+				lC.WithLabelValues("Listen", "packet_parse_error", "count").Inc()
 				continue
 			}
 
 			// non-blocking
 			select {
 			case ln.rcvQueue <- p:
+				lC.WithLabelValues("Listen", "packets_received", "count").Inc()
 			default:
+				// Blocked - measure blocking duration
+				lC.WithLabelValues("Listen", "receive_queue_full", "count").Inc()
 				ln.log("listen", func() string { return "receive queue is full" })
 			}
 		}
 	}()
 
+	lC.WithLabelValues("Listen", "listener_created", "count").Inc()
 	return ln, nil
 }
 
 func (ln *listener) Accept2() (ConnRequest, error) {
+
+	startTime := time.Now()
+	defer func() {
+		lH.WithLabelValues("Accept2", "duration", "complete").Observe(time.Since(startTime).Seconds())
+	}()
+	lC.WithLabelValues("Accept2", "count", "start").Inc()
+
 	if ln.isShutdown() {
 		return nil, ErrListenerClosed
 	}
@@ -267,9 +339,11 @@ func (ln *listener) Accept2() (ConnRequest, error) {
 		case p := <-ln.backlog:
 			req := newConnRequest(ln, p)
 			if req == nil {
+				lC.WithLabelValues("Accept2", "connection_request_failed", "count").Inc()
 				break
 			}
 
+			lC.WithLabelValues("Accept2", "connection_request_accepted", "count").Inc()
 			return req, nil
 		}
 	}
@@ -392,9 +466,13 @@ func (ln *listener) reader(ctx context.Context) {
 
 			if p.Header().DestinationSocketId == 0 {
 				if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
+					// non-blocking
 					select {
 					case ln.backlog <- p:
+						lC.WithLabelValues("reader", "handshake_packets", "count").Inc()
 					default:
+						// Blocked - measure blocking duration
+						lC.WithLabelValues("reader", "backlog_full", "count").Inc()
 						ln.log("handshake:recv:error", func() string { return "backlog is full" })
 					}
 				}
@@ -407,6 +485,7 @@ func (ln *listener) reader(ctx context.Context) {
 
 			if !ok || conn == nil {
 				// ignore the packet, we don't know the destination
+				lC.WithLabelValues("reader", "packets_unknown_destination", "count").Inc()
 				break
 			}
 
@@ -414,17 +493,25 @@ func (ln *listener) reader(ctx context.Context) {
 				if p.Header().Addr.String() != conn.RemoteAddr().String() {
 					// ignore the packet, it's not from the expected peer
 					// https://haivision.github.io/srt-rfc/draft-sharabayko-srt.html#name-security-considerations
+					lC.WithLabelValues("reader", "packets_peer_ip_mismatch", "count").Inc()
 					break
 				}
 			}
 
 			conn.push(p)
+			lC.WithLabelValues("reader", "packets_routed", "count").Inc()
 		}
 	}
 }
 
 // Send a packet to the wire. This function must be synchronous in order to allow to safely call Packet.Decommission() afterward.
 func (ln *listener) send(p packet.Packet) {
+
+	startTime := time.Now()
+	defer func() {
+		lH.WithLabelValues("send", "duration", "complete").Observe(time.Since(startTime).Seconds())
+	}()
+
 	ln.sndMutex.Lock()
 	defer ln.sndMutex.Unlock()
 
@@ -433,6 +520,7 @@ func (ln *listener) send(p packet.Packet) {
 	if err := p.Marshal(&ln.sndData); err != nil {
 		p.Decommission()
 		ln.log("packet:send:error", func() string { return "marshalling packet failed" })
+		lC.WithLabelValues("send", "marshal_error", "count").Inc()
 		return
 	}
 
@@ -443,10 +531,13 @@ func (ln *listener) send(p packet.Packet) {
 	// Write the packet's contents to the wire
 	ln.pc.WriteTo(buffer, p.Header().Addr)
 
+	packetType := "data"
 	if p.Header().IsControlPacket {
+		packetType = "control"
 		// Control packets can be decommissioned because they will not be sent again (data packets might be retransferred)
 		p.Decommission()
 	}
+	lC.WithLabelValues("send", "packets_sent", packetType).Inc()
 }
 
 func (ln *listener) log(topic string, message func() string) {

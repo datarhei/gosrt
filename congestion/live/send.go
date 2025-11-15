@@ -8,6 +8,24 @@ import (
 	"github.com/datarhei/gosrt/circular"
 	"github.com/datarhei/gosrt/congestion"
 	"github.com/datarhei/gosrt/packet"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+const (
+	quantileError    = 0.05
+	summaryVecMaxAge = 5 * time.Minute
+)
+
+var (
+	sC = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "congestion_sender",
+			Name:      "counts",
+			Help:      "gosrt congestion sender counts",
+		},
+		[]string{"function", "variable", "type"},
+	)
 )
 
 // SendConfig is the configuration for the liveSend congestion control
@@ -118,6 +136,9 @@ func (s *sender) Flush() {
 }
 
 func (s *sender) Push(p packet.Packet) {
+
+	sC.WithLabelValues("Push", "count", "start").Inc()
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -152,8 +173,10 @@ func (s *sender) Push(p packet.Packet) {
 	probe := p.Header().PacketSequenceNumber.Val() & 0xF
 	if probe == 0 {
 		s.probeTime = p.Header().PktTsbpdTime
+		sC.WithLabelValues("Push", "link_capacity_probe", "start").Inc()
 	} else if probe == 1 {
 		p.Header().PktTsbpdTime = s.probeTime
+		sC.WithLabelValues("Push", "link_capacity_probe", "paired").Inc()
 	}
 
 	s.packetList.PushBack(p)
@@ -162,14 +185,19 @@ func (s *sender) Push(p packet.Packet) {
 }
 
 func (s *sender) Tick(now uint64) {
+
+	sC.WithLabelValues("Tick", "count", "start").Inc()
+
 	// Deliver packets whose PktTsbpdTime is ripe
 	s.lock.Lock()
 	removeList := make([]*list.Element, 0, s.packetList.Len())
+	packetsSent := 0
 	for e := s.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
 		if p.Header().PktTsbpdTime <= now {
 			s.statistics.Pkt++
 			s.statistics.PktUnique++
+			packetsSent++
 
 			pktLen := p.Len()
 
@@ -189,6 +217,9 @@ func (s *sender) Tick(now uint64) {
 			break
 		}
 	}
+	if packetsSent > 0 {
+		sC.WithLabelValues("Tick", "packets_sent", "count").Add(float64(packetsSent))
+	}
 
 	for _, e := range removeList {
 		s.lossList.PushBack(e.Value)
@@ -207,6 +238,7 @@ func (s *sender) Tick(now uint64) {
 			s.statistics.PktLoss++
 			s.statistics.ByteDrop += p.Len()
 			s.statistics.ByteLoss += p.Len()
+			sC.WithLabelValues("Tick", "packets_dropped", "count").Inc()
 
 			removeList = append(removeList, e)
 		}
@@ -248,6 +280,9 @@ func (s *sender) Tick(now uint64) {
 }
 
 func (s *sender) ACK(sequenceNumber circular.Number) {
+
+	sC.WithLabelValues("ACK", "count", "start").Inc()
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -263,6 +298,7 @@ func (s *sender) ACK(sequenceNumber circular.Number) {
 	}
 
 	// These packets are not needed anymore (ACK'd)
+	packetsAcked := len(removeList)
 	for _, e := range removeList {
 		p := e.Value.(packet.Packet)
 
@@ -275,10 +311,17 @@ func (s *sender) ACK(sequenceNumber circular.Number) {
 		p.Decommission()
 	}
 
+	if packetsAcked > 0 {
+		sC.WithLabelValues("ACK", "packets_acked", "count").Add(float64(packetsAcked))
+	}
+
 	s.pktSndPeriod = (s.avgPayloadSize + 16) * 1000000 / s.maxBW
 }
 
 func (s *sender) NAK(sequenceNumbers []circular.Number) {
+
+	sC.WithLabelValues("NAK", "count", "start").Inc()
+
 	if len(sequenceNumbers) == 0 {
 		return
 	}
@@ -286,6 +329,7 @@ func (s *sender) NAK(sequenceNumbers []circular.Number) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	packetsRetransmitted := 0
 	for e := s.lossList.Back(); e != nil; e = e.Prev() {
 		p := e.Value.(packet.Packet)
 
@@ -294,6 +338,7 @@ func (s *sender) NAK(sequenceNumbers []circular.Number) {
 				s.statistics.PktRetrans++
 				s.statistics.Pkt++
 				s.statistics.PktLoss++
+				packetsRetransmitted++
 
 				s.statistics.ByteRetrans += p.Len()
 				s.statistics.Byte += p.Len()
@@ -309,6 +354,9 @@ func (s *sender) NAK(sequenceNumbers []circular.Number) {
 				s.deliver(p)
 			}
 		}
+	}
+	if packetsRetransmitted > 0 {
+		sC.WithLabelValues("NAK", "packets_retransmitted", "count").Add(float64(packetsRetransmitted))
 	}
 }
 

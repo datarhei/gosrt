@@ -2,6 +2,9 @@ package srt
 
 import (
 	"errors"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // Server is a framework for a SRT server
@@ -29,6 +32,18 @@ type Server struct {
 
 // ErrServerClosed is returned when the server is about to shutdown.
 var ErrServerClosed = errors.New("srt: server closed")
+
+var (
+	// Server-level Prometheus metrics
+	serverCounts = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "server",
+			Name:      "counts",
+			Help:      "gosrt serve counts",
+		},
+		[]string{"variable"},
+	)
+)
 
 // ListenAndServe starts the SRT server. It blocks until an error happens.
 // If the error is ErrServerClosed the server has shutdown normally.
@@ -66,6 +81,10 @@ func (s *Server) Listen() error {
 
 	s.ln = ln
 
+	// Initialize Prometheus HTTP listener
+	promListen, promPath := environmentOverrideProm()
+	initPromHandler(promPath, promListen)
+
 	return err
 }
 
@@ -85,6 +104,7 @@ func (s *Server) Serve() error {
 		}
 
 		if s.HandleConnect == nil {
+			serverCounts.WithLabelValues("nil").Inc()
 			req.Reject(REJ_PEER)
 			continue
 		}
@@ -92,6 +112,7 @@ func (s *Server) Serve() error {
 		go func(req ConnRequest) {
 			mode := s.HandleConnect(req)
 			if mode == REJECT {
+				serverCounts.WithLabelValues("reject").Inc()
 				req.Reject(REJ_PEER)
 				return
 			}
@@ -99,14 +120,21 @@ func (s *Server) Serve() error {
 			conn, err := req.Accept()
 			if err != nil {
 				// rejected connection, ignore
+				serverCounts.WithLabelValues("rejected").Inc()
 				return
 			}
 
+			// Track active connection
+			serverCounts.WithLabelValues("accepted").Inc()
+
 			if mode == PUBLISH {
+				serverCounts.WithLabelValues("publish").Inc()
 				s.HandlePublish(conn)
 			} else {
+				serverCounts.WithLabelValues("subscribe").Inc()
 				s.HandleSubscribe(conn)
 			}
+
 		}(req)
 	}
 }

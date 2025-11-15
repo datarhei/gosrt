@@ -15,10 +15,38 @@ import (
 	"github.com/datarhei/gosrt/crypto"
 	"github.com/datarhei/gosrt/packet"
 	"github.com/datarhei/gosrt/rand"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	dC = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "dial",
+			Name:      "counts",
+			Help:      "gosrt dialer counts",
+		},
+		[]string{"function", "variable"},
+	)
+
+	dH = promauto.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Subsystem: "dial",
+			Name:      "durations_seconds",
+			Help:      "gosrt dialer function durations in seconds",
+			Objectives: map[float64]float64{
+				0.1:  quantileError,
+				0.5:  quantileError,
+				0.99: quantileError,
+			},
+			MaxAge: summaryVecMaxAge,
+		},
+		[]string{"function"},
+	)
 )
 
 // ErrClientClosed is returned when the client connection has
-// been voluntarily closed.
+// been voluntarily closed
 var ErrClientClosed = errors.New("srt: client closed")
 
 // dialer implements the Conn interface
@@ -73,6 +101,13 @@ type connResponse struct {
 //
 // In case of an error the returned Conn is nil and the error is non-nil.
 func Dial(network, address string, config Config) (Conn, error) {
+
+	startTime := time.Now()
+	defer func() {
+		dH.WithLabelValues("Dial").Observe(time.Since(startTime).Seconds())
+	}()
+	dC.WithLabelValues("Dial", "start").Inc()
+
 	if network != "srt" {
 		return nil, fmt.Errorf("the network must be 'srt'")
 	}
@@ -159,13 +194,17 @@ func Dial(network, address string, config Config) (Conn, error) {
 
 			p, err := packet.NewPacketFromData(dl.remoteAddr, buffer[:n])
 			if err != nil {
+				dC.WithLabelValues("Dial", "packet_parse_error").Inc()
 				continue
 			}
 
 			// non-blocking
 			select {
 			case dl.rcvQueue <- p:
+				//dC.WithLabelValues("Dial", "packets_received").Inc()
 			default:
+				// blocked
+				dC.WithLabelValues("Dial", "rcvQueueBlocked").Inc()
 				dl.log("dial", func() string { return "receive queue is full" })
 			}
 		}
@@ -191,6 +230,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 	response := <-dl.connChan
 	if response.err != nil {
 		dl.Close()
+		dC.WithLabelValues("Dial", "connection_failed").Inc()
 		return nil, response.err
 	}
 
@@ -200,6 +240,7 @@ func Dial(network, address string, config Config) (Conn, error) {
 	dl.conn = response.conn
 	dl.connLock.Unlock()
 
+	dC.WithLabelValues("Dial", "connection_established").Inc()
 	return dl, nil
 }
 
@@ -216,6 +257,9 @@ func (dl *dialer) checkConnection() error {
 
 // reader reads packets from the receive queue and pushes them into the connection
 func (dl *dialer) reader(ctx context.Context) {
+
+	dC.WithLabelValues("reader", "start").Inc()
+
 	defer func() {
 		dl.log("dial", func() string { return "left reader loop" })
 	}()
@@ -234,28 +278,36 @@ func (dl *dialer) reader(ctx context.Context) {
 			dl.log("packet:recv:dump", func() string { return p.Dump() })
 
 			if p.Header().DestinationSocketId != dl.socketId {
+				dC.WithLabelValues("reader", "packets_wrong_socket_id").Inc()
 				break
 			}
 
 			if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
 				dl.handleHandshake(p)
+				dC.WithLabelValues("reader", "handshake_packets").Inc()
 				break
 			}
 
 			dl.connLock.RLock()
 			if dl.conn == nil {
 				dl.connLock.RUnlock()
+				dC.WithLabelValues("reader", "packets_no_connection").Inc()
 				break
 			}
 
 			dl.conn.push(p)
 			dl.connLock.RUnlock()
+			dC.WithLabelValues("reader", "packets_routed").Inc()
 		}
 	}
 }
 
-// Send a packet to the wire. This function must be synchronous in order to allow to safely call Packet.Decommission() afterward.
+// Send a packet to the wire. This function must be synchronous in order
+// to allow to safely call Packet.Decommission() afterward
 func (dl *dialer) send(p packet.Packet) {
+
+	dC.WithLabelValues("send", "start").Inc()
+
 	dl.sndMutex.Lock()
 	defer dl.sndMutex.Unlock()
 
@@ -264,6 +316,7 @@ func (dl *dialer) send(p packet.Packet) {
 	if err := p.Marshal(&dl.sndData); err != nil {
 		p.Decommission()
 		dl.log("packet:send:error", func() string { return "marshalling packet failed" })
+		dC.WithLabelValues("send", "marshal_error").Inc()
 		return
 	}
 
@@ -275,12 +328,21 @@ func (dl *dialer) send(p packet.Packet) {
 	dl.pc.Write(buffer)
 
 	if p.Header().IsControlPacket {
-		// Control packets can be decommissioned because they will not be sent again (data packets might be retransferred)
+		dC.WithLabelValues("send", "control").Inc()
+		// Control packets can be decommissioned because they will not be sent again
+		// (data packets might be retransferred)
 		p.Decommission()
 	}
 }
 
 func (dl *dialer) handleHandshake(p packet.Packet) {
+
+	startTime := time.Now()
+	defer func() {
+		dH.WithLabelValues("handleHandshake").Observe(time.Since(startTime).Seconds())
+	}()
+	dC.WithLabelValues("handleHandshake", "start").Inc()
+
 	cif := &packet.CIFHandshake{}
 
 	err := p.UnmarshalCIF(cif)
@@ -290,6 +352,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 
 	if err != nil {
 		dl.log("handshake:recv:error", func() string { return err.Error() })
+		dC.WithLabelValues("handleHandshake", "unmarshal_error").Inc()
 		return
 	}
 
@@ -303,6 +366,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 
 	if cif.HandshakeType == packet.HSTYPE_INDUCTION {
 		if cif.Version < 4 || cif.Version > 5 {
+			dC.WithLabelValues("handleHandshake", "unsupported_version").Inc()
 			dl.connChan <- connResponse{
 				conn: nil,
 				err:  fmt.Errorf("peer responded with unsupported handshake version (%d)", cif.Version),
@@ -411,8 +475,10 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 		dl.log("handshake:send:cif", func() string { return cif.String() })
 
 		dl.send(p)
+		dC.WithLabelValues("handleHandshake", "induction_response_sent").Inc()
 	} else if cif.HandshakeType == packet.HSTYPE_CONCLUSION {
 		if cif.Version < 4 || cif.Version > 5 {
+			dC.WithLabelValues("handleHandshake", "unsupported_version").Inc()
 			dl.connChan <- connResponse{
 				conn: nil,
 				err:  fmt.Errorf("peer responded with unsupported handshake version (%d)", cif.Version),
@@ -519,6 +585,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 
 		dl.log("connection:new", func() string { return fmt.Sprintf("%#08x (%s)", conn.SocketId(), conn.StreamId()) })
 
+		dC.WithLabelValues("handleHandshake", "conclusion_success").Inc()
 		dl.connChan <- connResponse{
 			conn: conn,
 			err:  nil,
@@ -528,8 +595,10 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 
 		if cif.HandshakeType.IsRejection() {
 			err = fmt.Errorf("connection rejected: %s", cif.HandshakeType.String())
+			dC.WithLabelValues("handleHandshake", "connection_rejected").Inc()
 		} else {
 			err = fmt.Errorf("unsupported handshake: %s", cif.HandshakeType.String())
+			dC.WithLabelValues("handleHandshake", "unsupported_handshake").Inc()
 		}
 
 		dl.connChan <- connResponse{
@@ -540,6 +609,12 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 }
 
 func (dl *dialer) sendInduction() {
+	startTime := time.Now()
+	defer func() {
+		dH.WithLabelValues("sendInduction").Observe(time.Since(startTime).Seconds())
+	}()
+	dC.WithLabelValues("sendInduction", "start").Inc()
+
 	p := packet.NewPacket(dl.remoteAddr)
 
 	p.Header().IsControlPacket = true
@@ -575,6 +650,9 @@ func (dl *dialer) sendInduction() {
 }
 
 func (dl *dialer) sendShutdown(peerSocketId uint32) {
+
+	dC.WithLabelValues("sendShutdown", "start").Inc()
+
 	p := packet.NewPacket(dl.remoteAddr)
 
 	data := [4]byte{}

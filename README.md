@@ -442,3 +442,16 @@ You can run `make logtopics` in order to extract the list of topics.
 
 The docker image you can build with `docker build -t srt .` provides the example SRT client and server as mentioned in the paragraph above.
 E.g. run the server with `docker run -it --rm -p 6001:6001/udp srt srt-server -addr :6001`.
+
+## Prometheus metrics
+
+goSRT server starts a promtheus exporter on 127.0.0.1:9000/metrics ( https://www.youtube.com/watch?v=1V7eJ0jN8-E )
+
+Environment variables PROM_LISTEN and PROM_PATH can be used to change the defaults
+
+e.g. PROM_LISTEN=":9000" to listen on all interfaces
+
+The metrics expose general go processes monitoring, as well as visibility of blocked channels, for example.
+
+The histograms keep a rolling 5 minute period
+

@@ -45,6 +45,16 @@ client:
 server:
 	cd contrib/server && CGO_ENABLED=0 go build -o server -ldflags="-s -w" -a
 
+## run-server: Start the SRT server (default: :6001)
+run-server:
+	@echo "Starting SRT server on :6001..."
+	@./contrib/server/server -addr :6001
+
+## metrics: Query Prometheus metrics endpoint (default: http://localhost:9000/metrics)
+metrics:
+	@echo "Querying Prometheus metrics endpoint..."
+	@curl -s http://localhost:9000/metrics
+
 ## coverage: Generate code coverage analysis
 coverage:
 	go test -race -coverprofile=cover.out -timeout 60s -v ./...
@@ -62,7 +72,7 @@ docker:
 logtopics:
 	grep -ERho 'log\("([^"]+)' *.go | sed -E -e 's/log\("//' | sort -u
 
-.PHONY: help test fuzz vet fmt vendor commit coverage lint client server update logtopics
+.PHONY: help test fuzz vet fmt vendor commit coverage lint client server update logtopics run-server metrics
 
 ## help: Show all commands
 help: Makefile
