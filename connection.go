@@ -146,6 +146,22 @@ var (
 		[]string{"variable", "SocketId"},
 	)
 
+	// One-way latency metric
+	pOWL = promauto.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Subsystem: "connection",
+			Name:      "one_way_latency_seconds",
+			Help:      "gosrt one-way latency from sender to receiver in seconds",
+			Objectives: map[float64]float64{
+				0.1:  quantileError,
+				0.5:  quantileError,
+				0.99: quantileError,
+			},
+			MaxAge: summaryVecMaxAge,
+		},
+		[]string{"SocketId"},
+	)
+
 	// channel blocked count
 	cBC = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -867,6 +883,18 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	}
 
 	header.PktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.Timestamp) + c.tsbpdDelay + c.tsbpdDrift
+
+	// Calculate one-way latency: time from when packet was sent to when we received it
+	// Only calculate for non-retransmitted data packets to get accurate one-way latency
+	// This will not be perfect, because of clock drift, but hopefully sender/receivers have roughly the same clock
+	if !header.RetransmittedPacketFlag {
+		unwrappedTimestampMicroseconds := tsbpdTimeBaseOffset + uint64(header.Timestamp)
+		packetSendTime := c.start.Add(time.Duration(unwrappedTimestampMicroseconds) * time.Microsecond)
+
+		receiveTime := time.Now()
+		oneWayLatency := receiveTime.Sub(packetSendTime)
+		pOWL.WithLabelValues(c.socketIdString()).Observe(oneWayLatency.Seconds())
+	}
 
 	c.log("data:recv:dump", func() string { return p.Dump() })
 
