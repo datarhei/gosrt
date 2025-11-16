@@ -276,13 +276,11 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		}
 
 		// Already reserve a socketId for this connection
-		ln.lock.Lock()
 		socketId, err := req.generateSocketId()
 		if err == nil {
-			ln.conns[socketId] = nil
+			ln.conns.Store(socketId, (*srtConn)(nil))
 			req.socketId = socketId
 		}
-		ln.lock.Unlock()
 
 		// We couldn't create a socketId: reject silently
 		if err != nil {
@@ -368,7 +366,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.send(p)
 
 	delete(req.ln.connReqs, req.peerSocketId)
-	delete(req.ln.conns, req.socketId)
+	req.ln.conns.Delete(req.socketId)
 }
 
 // generateSocketId generates an SRT SocketID that can be used for this connection
@@ -380,7 +378,7 @@ func (req *connRequest) generateSocketId() (uint32, error) {
 		}
 
 		// check that the socket id is not already in use
-		if _, found := req.ln.conns[socketId]; !found {
+		if _, found := req.ln.conns.Load(socketId); !found {
 			return socketId, nil
 		}
 	}
@@ -471,7 +469,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
 	req.ln.send(p)
 
-	req.ln.conns[req.socketId] = conn
+	req.ln.conns.Store(req.socketId, conn)
 	delete(req.ln.connReqs, req.peerSocketId)
 
 	return conn, nil

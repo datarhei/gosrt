@@ -14,6 +14,11 @@ import (
 	"github.com/datarhei/gosrt/packet"
 )
 
+const (
+	CHANNEL_SIZE_BACKLOG  = 128
+	CHANNEL_SIZE_RCVQUEUE = 2048
+)
+
 // ConnType represents the kind of connection as returned
 // from the AcceptFunc. It is one of REJECT, PUBLISH, or SUBSCRIBE.
 type ConnType int
@@ -123,8 +128,10 @@ type listener struct {
 
 	backlog  chan packet.Packet
 	connReqs map[uint32]*connRequest
-	conns    map[uint32]*srtConn
-	lock     sync.RWMutex
+	// Map of socket IDs to connection objects, which is read heavy because all
+	// packets are routed to the correct connection
+	conns sync.Map     // key: uint32 (socketId), value: *srtConn
+	lock  sync.RWMutex // protects connReqs and doneErr
 
 	start time.Time
 
@@ -191,11 +198,11 @@ func Listen(network, address string, config Config) (Listener, error) {
 	}
 
 	ln.connReqs = make(map[uint32]*connRequest)
-	ln.conns = make(map[uint32]*srtConn)
+	// conns sync.Map zero value is ready to use, no initialization needed
 
-	ln.backlog = make(chan packet.Packet, 128)
+	ln.backlog = make(chan packet.Packet, CHANNEL_SIZE_BACKLOG)
 
-	ln.rcvQueue = make(chan packet.Packet, 2048)
+	ln.rcvQueue = make(chan packet.Packet, CHANNEL_SIZE_RCVQUEUE)
 
 	syncookie, err := srtnet.NewSYNCookie(ln.addr.String(), nil)
 	if err != nil {
@@ -327,9 +334,7 @@ func (ln *listener) error() error {
 }
 
 func (ln *listener) handleShutdown(socketId uint32) {
-	ln.lock.Lock()
-	delete(ln.conns, socketId)
-	ln.lock.Unlock()
+	ln.conns.Delete(socketId)
 }
 
 func (ln *listener) isShutdown() bool {
@@ -345,14 +350,14 @@ func (ln *listener) Close() {
 		ln.shutdown = true
 		ln.shutdownLock.Unlock()
 
-		ln.lock.RLock()
-		for _, conn := range ln.conns {
+		ln.conns.Range(func(key, value interface{}) bool {
+			conn := value.(*srtConn)
 			if conn == nil {
-				continue
+				return true // continue iteration
 			}
 			conn.close()
-		}
-		ln.lock.RUnlock()
+			return true // continue iteration
+		})
 
 		ln.stopReader()
 
@@ -401,9 +406,11 @@ func (ln *listener) reader(ctx context.Context) {
 				break
 			}
 
-			ln.lock.RLock()
-			conn, ok := ln.conns[p.Header().DestinationSocketId]
-			ln.lock.RUnlock()
+			val, ok := ln.conns.Load(p.Header().DestinationSocketId)
+			var conn *srtConn
+			if ok {
+				conn = val.(*srtConn)
+			}
 
 			if !ok || conn == nil {
 				// ignore the packet, we don't know the destination
