@@ -597,15 +597,15 @@ func TestListenDiscardRepeatedHandshakes(t *testing.T) {
 	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
 
+	singleReqReceived := make(chan struct{})
+
 	listenDone := make(chan struct{})
 	defer func() { <-listenDone }()
 
-	singleReqReceived := make(chan struct{})
+	defer ln.Close()
 
 	go func() {
 		defer close(listenDone)
-
-		var onlyRequest ConnRequest
 
 		for {
 			req, err := ln.Accept2()
@@ -614,10 +614,8 @@ func TestListenDiscardRepeatedHandshakes(t *testing.T) {
 			}
 
 			close(singleReqReceived)
-			onlyRequest = req
+			defer req.Reject(REJ_CLOSE)
 		}
-
-		onlyRequest.Reject(REJ_CLOSE)
 	}()
 
 	for i := 0; i < 4; i++ {
@@ -701,5 +699,132 @@ func TestListenDiscardRepeatedHandshakes(t *testing.T) {
 	}
 
 	<-singleReqReceived
-	ln.Close()
+}
+
+func TestListenAcceptAndDiscardRepeatedHandshakes(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	singleReqAccepted := make(chan struct{})
+
+	listenDone := make(chan struct{})
+	defer func() { <-listenDone }()
+
+	defer ln.Close()
+
+	go func() {
+		defer close(listenDone)
+
+		for {
+			req, err := ln.Accept2()
+			if err != nil {
+				break
+			}
+
+			conn, err := req.Accept()
+			require.NoError(t, err)
+			defer conn.Close()
+
+			close(singleReqAccepted)
+		}
+	}()
+
+	conn, err := net.Dial("udp", "127.0.0.1:6003")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// write induction request
+	p := packet.NewPacket(conn.RemoteAddr())
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0
+	sendcif := &packet.CIFHandshake{
+		IsRequest:                   true,
+		Version:                     4,
+		EncryptionField:             0,
+		ExtensionField:              2,
+		InitialPacketSequenceNumber: circular.New(10000, packet.MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     MAX_MSS_SIZE,
+		MaxFlowWindowSize:           25600,
+		HandshakeType:               packet.HSTYPE_INDUCTION,
+		SRTSocketId:                 55555,
+		SynCookie:                   0,
+	}
+	sendcif.PeerIP.FromNetAddr(conn.LocalAddr())
+	p.MarshalCIF(sendcif)
+	var buf bytes.Buffer
+	err = p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// read induction response
+	inbuf := make([]byte, MAX_MSS_SIZE)
+	n, err := conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif := &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+
+	// write conclusion request
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0
+	sendcif.Version = 5
+	sendcif.ExtensionField = recvcif.ExtensionField
+	sendcif.HandshakeType = packet.HSTYPE_CONCLUSION
+	sendcif.SRTSocketId = 234425644
+	sendcif.SynCookie = recvcif.SynCookie
+	sendcif.HasHS = true
+	sendcif.SRTHS = &packet.CIFHandshakeExtension{
+		SRTVersion: SRT_VERSION,
+		SRTFlags: packet.CIFHandshakeExtensionFlags{
+			TSBPDSND:      true,
+			TSBPDRCV:      true,
+			CRYPT:         true,
+			TLPKTDROP:     true,
+			PERIODICNAK:   true,
+			REXMITFLG:     true,
+			STREAM:        false,
+			PACKET_FILTER: false,
+		},
+		RecvTSBPDDelay: uint16(120),
+		SendTSBPDDelay: uint16(120),
+	}
+	sendcif.HasSID = true
+	sendcif.StreamId = "foobar"
+	p.MarshalCIF(sendcif)
+	buf.Reset()
+	err = p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// read conclusion response
+	n, err = conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif = &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+	require.Equal(t, packet.HSTYPE_CONCLUSION, recvcif.HandshakeType)
+	require.False(t, recvcif.IsRequest)
+
+	<-singleReqAccepted
+
+	// write conclusion request, again
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// wait some time to make sure that close(singleReqAccepted) is not triggered
+	time.Sleep(500 * time.Millisecond)
 }
