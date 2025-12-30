@@ -264,24 +264,24 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		}
 
 		ln.lock.Lock()
-		_, exists := ln.connReqs[cif.SRTSocketId]
-		if !exists {
-			ln.connReqs[cif.SRTSocketId] = req
-		}
-		ln.lock.Unlock()
 
 		// We received a duplicate request: reject silently
+		_, exists := ln.connsByPeer[cif.SRTSocketId]
 		if exists {
+			ln.lock.Unlock()
 			return nil
 		}
 
+		// Already fill connsByPeer for this connection
+		ln.connsByPeer[cif.SRTSocketId] = nil
+
 		// Already reserve a socketId for this connection
-		ln.lock.Lock()
 		socketId, err := req.generateSocketId()
 		if err == nil {
 			ln.conns[socketId] = nil
 			req.socketId = socketId
 		}
+
 		ln.lock.Unlock()
 
 		// We couldn't create a socketId: reject silently
@@ -350,7 +350,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.lock.Lock()
 	defer req.ln.lock.Unlock()
 
-	if _, hasReq := req.ln.connReqs[req.peerSocketId]; !hasReq {
+	if cr, hasReq := req.ln.connsByPeer[req.peerSocketId]; !hasReq || cr != nil {
 		return
 	}
 
@@ -367,8 +367,8 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
 	req.ln.send(p)
 
-	delete(req.ln.connReqs, req.peerSocketId)
 	delete(req.ln.conns, req.socketId)
+	delete(req.ln.connsByPeer, req.peerSocketId)
 }
 
 // generateSocketId generates an SRT SocketID that can be used for this connection
@@ -397,7 +397,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.lock.Lock()
 	defer req.ln.lock.Unlock()
 
-	if _, hasReq := req.ln.connReqs[req.peerSocketId]; !hasReq {
+	if cr, hasReq := req.ln.connsByPeer[req.peerSocketId]; !hasReq || cr != nil {
 		return nil, fmt.Errorf("connection already accepted")
 	}
 
@@ -472,7 +472,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.send(p)
 
 	req.ln.conns[req.socketId] = conn
-	delete(req.ln.connReqs, req.peerSocketId)
+	req.ln.connsByPeer[req.peerSocketId] = conn
 
 	return conn, nil
 }
