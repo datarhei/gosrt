@@ -192,7 +192,7 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 			}
 
 			// Check the required SRT flags
-			if !cif.SRTHS.SRTFlags.TSBPDSND || !cif.SRTHS.SRTFlags.TSBPDRCV || !cif.SRTHS.SRTFlags.TLPKTDROP || !cif.SRTHS.SRTFlags.PERIODICNAK || !cif.SRTHS.SRTFlags.REXMITFLG {
+			if !cif.SRTHS.SRTFlags.TSBPDSND || !cif.SRTHS.SRTFlags.TSBPDRCV || !cif.SRTHS.SRTFlags.TLPKTDROP || !cif.SRTHS.SRTFlags.PERIODICNAK {
 				cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 				ln.log("handshake:recv:error", func() string { return "not all required flags are set" })
 				p.MarshalCIF(cif)

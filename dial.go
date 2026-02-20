@@ -446,7 +446,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 			}
 
 			// Check the required SRT flags
-			if !cif.SRTHS.SRTFlags.TSBPDSND || !cif.SRTHS.SRTFlags.TSBPDRCV || !cif.SRTHS.SRTFlags.TLPKTDROP || !cif.SRTHS.SRTFlags.PERIODICNAK || !cif.SRTHS.SRTFlags.REXMITFLG {
+			if !cif.SRTHS.SRTFlags.TSBPDSND || !cif.SRTHS.SRTFlags.TSBPDRCV || !cif.SRTHS.SRTFlags.TLPKTDROP || !cif.SRTHS.SRTFlags.PERIODICNAK {
 				dl.sendShutdown(cif.SRTSocketId)
 
 				dl.connChan <- connResponse{
