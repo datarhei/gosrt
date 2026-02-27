@@ -57,7 +57,6 @@ type receiver struct {
 	// Adaptive reorder tolerance state (mirrors libsrt m_iReorderTolerance)
 	maxReorderTolerance   int
 	reorderTolerance      int
-	reorderSupport        bool
 	consecOrderedDelivery int
 	consecEarlyDelivery   int
 	freshLoss            []freshLossEntry
@@ -97,7 +96,6 @@ func NewReceiver(config ReceiveConfig) congestion.Receiver {
 
 		maxReorderTolerance: config.MaxReorderTolerance,
 		reorderTolerance:    config.MaxReorderTolerance,
-		reorderSupport:      false,
 
 		sendACK: config.OnSendACK,
 		sendNAK: config.OnSendNAK,
@@ -277,9 +275,9 @@ func (r *receiver) Push(pkt packet.Packet) {
 		r.statistics.PktLoss += lossLen
 		r.statistics.ByteLoss += lossLen * uint64(r.avgPayloadSize)
 
-		// Determine initial loss TTL based on reorder support
+		// Determine initial loss TTL based on adaptive reorder tolerance support
 		initialLossTTL := 0
-		if r.reorderSupport {
+		if r.maxReorderTolerance > 0 {
 			initialLossTTL = r.reorderTolerance
 		}
 
@@ -512,28 +510,12 @@ func (r *receiver) ReorderTolerance() int {
 	return r.reorderTolerance
 }
 
-func (r *receiver) SetReorderSupport(enabled bool) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	r.reorderSupport = enabled
-	if enabled {
-		r.reorderTolerance = r.maxReorderTolerance
-	} else {
-		r.reorderTolerance = 0
-		r.consecOrderedDelivery = 0
-		r.consecEarlyDelivery = 0
-		r.freshLoss = nil
-		r.traceReorderDistance = 0
-	}
-}
-
 // unlose adjusts reorder tolerance for a belated packet. Mirrors libsrt CUDT::unlose().
 func (r *receiver) unlose(pkt packet.Packet) {
 	hasIncreasedTolerance := false
 	wasReordered := false
 
-	if r.reorderSupport {
+	if r.maxReorderTolerance > 0 {
 		// Original (not retransmitted) belated packet means reordering
 		wasReordered = !pkt.Header().RetransmittedPacketFlag
 		if wasReordered {
@@ -553,7 +535,7 @@ func (r *receiver) unlose(pkt packet.Packet) {
 	}
 
 	// Early return if adaptive reorder is not active (mirrors libsrt)
-	if !r.reorderSupport || r.reorderTolerance == 0 {
+	if r.maxReorderTolerance == 0 || r.reorderTolerance == 0 {
 		return
 	}
 
@@ -578,7 +560,7 @@ func (r *receiver) unlose(pkt packet.Packet) {
 
 // updateOrderedDelivery tracks in-order delivery and decays tolerance after 50 consecutive.
 func (r *receiver) updateOrderedDelivery(wasSentInOrder bool) {
-	if !r.reorderSupport {
+	if r.maxReorderTolerance == 0 {
 		return
 	}
 

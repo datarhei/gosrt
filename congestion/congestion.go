@@ -56,9 +56,6 @@ type Receiver interface {
 
 	// ReorderTolerance returns the current dynamic reorder tolerance value.
 	ReorderTolerance() int
-
-	// SetReorderSupport enables or disables adaptive reorder tolerance based on peer REXMIT capability.
-	SetReorderSupport(enabled bool)
 }
 
 // SendStats are collected statistics from a sender

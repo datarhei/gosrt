@@ -918,13 +918,6 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 		return
 	}
 
-	if cif.SRTFlags.REXMITFLG {
-		// Peer supports REXMIT flag, enable adaptive reorder tolerance
-		c.recv.SetReorderSupport(true)
-	} else {
-		c.log("control:recv:HSRes:warn", func() string { return "peer does not support REXMITFLG, adaptive reorder tolerance disabled" })
-	}
-
 	// we as receiver don't need this
 	cif.SRTFlags.TSBPDSND = false
 
@@ -1011,13 +1004,6 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 			c.close()
 
 			return
-		}
-
-		if cif.SRTFlags.REXMITFLG {
-			// Peer supports REXMIT flag, enable adaptive reorder tolerance
-			c.recv.SetReorderSupport(true)
-		} else {
-			c.log("control:recv:HSRes:warn", func() string { return "peer does not support REXMITFLG, adaptive reorder tolerance disabled" })
 		}
 
 		// These flag was introduced in HSv5 and should not be set in HSv4
