@@ -308,6 +308,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
 		PeriodicACKInterval:   10_000,
 		PeriodicNAKInterval:   20_000,
+		MaxReorderTolerance:   int(c.config.LossMaxTTL),
 		OnSendACK:             c.sendACK,
 		OnSendNAK:             c.sendNAK,
 		OnDeliver:             c.deliver,
@@ -917,11 +918,11 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 		return
 	}
 
-	if !cif.SRTFlags.REXMITFLG {
-		c.log("control:recv:HSRes:error", func() string { return "REXMITFLG flag must be set" })
-		c.close()
-
-		return
+	if cif.SRTFlags.REXMITFLG {
+		// Peer supports REXMIT flag, enable adaptive reorder tolerance
+		c.recv.SetReorderSupport(true)
+	} else {
+		c.log("control:recv:HSRes:warn", func() string { return "peer does not support REXMITFLG, adaptive reorder tolerance disabled" })
 	}
 
 	// we as receiver don't need this
@@ -1012,11 +1013,11 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 			return
 		}
 
-		if !cif.SRTFlags.REXMITFLG {
-			c.log("control:recv:HSRes:error", func() string { return "REXMITFLG flag must be set" })
-			c.close()
-
-			return
+		if cif.SRTFlags.REXMITFLG {
+			// Peer supports REXMIT flag, enable adaptive reorder tolerance
+			c.recv.SetReorderSupport(true)
+		} else {
+			c.log("control:recv:HSRes:warn", func() string { return "peer does not support REXMITFLG, adaptive reorder tolerance disabled" })
 		}
 
 		// These flag was introduced in HSv5 and should not be set in HSv4
@@ -1494,7 +1495,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		MbpsSendRate:       float64(s.Accumulated.ByteSent-previous.ByteSent) * 8 / 1024 / 1024 / (float64(interval) / 1000),
 		MbpsRecvRate:       float64(s.Accumulated.ByteRecv-previous.ByteRecv) * 8 / 1024 / 1024 / (float64(interval) / 1000),
 		UsSndDuration:      s.Accumulated.UsSndDuration - previous.UsSndDuration,
-		PktReorderDistance: 0,
+		PktReorderDistance: uint64(recv.PktReorderDistance),
 		PktRecvBelated:     s.Accumulated.PktRecvBelated - previous.PktRecvBelated,
 		PktSndDrop:         s.Accumulated.PktSendDrop - previous.PktSendDrop,
 		PktRecvDrop:        s.Accumulated.PktRecvDrop - previous.PktRecvDrop,
@@ -1533,7 +1534,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		ByteRecvBuf:           recv.ByteBuf,
 		MsRecvBuf:             recv.MsBuf,
 		MsRecvTsbPdDelay:      c.tsbpdDelay / 1000,
-		PktReorderTolerance:   uint64(c.config.LossMaxTTL),
+		PktReorderTolerance:   uint64(recv.PktReorderTolerance),
 		PktRecvAvgBelatedTime: 0,
 		PktSendLossRate:       send.PktLossRate,
 		PktRecvLossRate:       recv.PktLossRate,

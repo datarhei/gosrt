@@ -180,3 +180,7 @@ func (r *fakeLiveReceive) SetNAKInterval(nakInterval uint64) {
 
 	r.periodicNAKInterval = nakInterval
 }
+
+func (r *fakeLiveReceive) ReorderTolerance() int { return 0 }
+
+func (r *fakeLiveReceive) SetReorderSupport(enabled bool) {}

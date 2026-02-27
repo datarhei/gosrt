@@ -53,6 +53,12 @@ type Receiver interface {
 
 	// SetNAKInterval sets the interval between two periodic NAK messages to the sender in microseconds.
 	SetNAKInterval(nakInterval uint64)
+
+	// ReorderTolerance returns the current dynamic reorder tolerance value.
+	ReorderTolerance() int
+
+	// SetReorderSupport enables or disables adaptive reorder tolerance based on peer REXMIT capability.
+	SetReorderSupport(enabled bool)
 }
 
 // SendStats are collected statistics from a sender
@@ -121,4 +127,7 @@ type ReceiveStats struct {
 	MbpsEstimatedLinkCapacity  float64
 
 	PktLossRate float64
+
+	PktReorderTolerance int
+	PktReorderDistance  int
 }
