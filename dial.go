@@ -235,7 +235,12 @@ func (dl *dialer) reader(ctx context.Context) {
 			dl.log("packet:recv:dump", func() string { return p.Dump() })
 
 			if p.Header().DestinationSocketId != dl.socketId {
-				break
+				// libsrt <= 1.3.0 sends the CONCLUSION response with DestinationSocketId = 0
+				if !(p.Header().IsControlPacket &&
+					p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE &&
+					p.Header().DestinationSocketId == 0) {
+					break
+				}
 			}
 
 			if p.Header().IsControlPacket && p.Header().ControlType == packet.CTRLTYPE_HANDSHAKE {
