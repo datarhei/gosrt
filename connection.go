@@ -537,6 +537,7 @@ func (c *srtConn) getTimestampForPacket() uint32 {
 // The packet will be encrypted if required.
 func (c *srtConn) pop(p packet.Packet) {
 	p.Header().Addr = c.remoteAddr
+	p.Header().LocalAddr = c.localAddr
 	p.Header().DestinationSocketId = c.peerSocketId
 
 	if !p.Header().IsControlPacket {
