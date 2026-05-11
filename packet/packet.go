@@ -683,11 +683,15 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 
 			c.CongestionCtl = strings.TrimRight(b.String(), "\x00")
 		} else if extensionType == EXTTYPE_FILTER || extensionType == EXTTYPE_GROUP {
+			// Skip unimplemented extensions
 			if len(pivot) < extensionLength {
 				return fmt.Errorf("invalid extension length of %d bytes (%s)", extensionLength, extensionType.String())
 			}
 		} else {
-			return fmt.Errorf("unknown extension (%d)", extensionType)
+			// Skip unknown extensions
+			if len(pivot) < extensionLength {
+				return fmt.Errorf("invalid extension length of %d bytes (%s)", extensionLength, extensionType.String())
+			}
 		}
 
 		if len(pivot) > extensionLength {
