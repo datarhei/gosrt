@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"time"
@@ -177,7 +178,27 @@ func Listen(network, address string, config Config) (Listener, error) {
 		Control: ListenControl(config),
 	}
 
-	lp, err := lc.ListenPacket(context.Background(), "udp", address)
+	network = "udp"
+
+	ip, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("listen: invalid address: %w", err)
+	}
+
+	if len(ip) != 0 {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil {
+			return nil, fmt.Errorf("listen: invalid address: %w", err)
+		}
+
+		if addr.Is4() {
+			network = "udp4"
+		} else if addr.Is6() {
+			network = "udp6"
+		}
+	}
+
+	lp, err := lc.ListenPacket(context.Background(), network, address)
 	if err != nil {
 		return nil, fmt.Errorf("listen: %w", err)
 	}

@@ -705,6 +705,8 @@ func TestListenMultipleIPs(t *testing.T) {
 	serverDone := make(chan struct{})
 
 	go func() {
+		defer close(serverDone)
+
 		req, err := ln.Accept2()
 		require.NoError(t, err)
 
@@ -715,8 +717,6 @@ func TestListenMultipleIPs(t *testing.T) {
 		localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
 		require.True(t, ok)
 		require.Equal(t, "127.0.0.2", localAddr.IP.String())
-
-		close(serverDone)
 	}()
 
 	// Dial to the secondary loopback address. Without the fix the listener
