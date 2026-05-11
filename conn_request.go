@@ -58,6 +58,7 @@ type ConnRequest interface {
 type connRequest struct {
 	ln              *listener
 	addr            net.Addr
+	localAddr       net.Addr
 	start           time.Time
 	socketId        uint32
 	peerSocketId    uint32
@@ -240,6 +241,7 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		req := &connRequest{
 			ln:           ln,
 			addr:         p.Header().Addr,
+			localAddr:    p.Header().LocalAddr,
 			start:        time.Now(),
 			peerSocketId: cif.SRTSocketId,
 			timestamp:    p.Header().Timestamp,
@@ -361,6 +363,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	p.Header().TypeSpecific = 0
 	p.Header().Timestamp = uint32(time.Since(req.ln.start).Microseconds())
 	p.Header().DestinationSocketId = req.peerSocketId
+	p.Header().LocalAddr = req.localAddr
 	req.handshake.HandshakeType = packet.HandshakeType(reason)
 	p.MarshalCIF(req.handshake)
 	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -419,10 +422,15 @@ func (req *connRequest) Accept() (Conn, error) {
 
 	req.config.Passphrase = req.passphrase
 
+	localAddr := req.localAddr
+	if localAddr == nil {
+		localAddr = req.ln.addr
+	}
+
 	// Create a new connection
 	conn := newSRTConn(srtConnConfig{
 		version:                     req.handshake.Version,
-		localAddr:                   req.ln.addr,
+		localAddr:                   localAddr,
 		remoteAddr:                  req.addr,
 		config:                      req.config,
 		start:                       req.start,
@@ -466,6 +474,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	p.Header().TypeSpecific = 0
 	p.Header().Timestamp = uint32(time.Since(req.start).Microseconds())
 	p.Header().DestinationSocketId = req.peerSocketId
+	p.Header().LocalAddr = req.localAddr
 	p.MarshalCIF(req.handshake)
 	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
 	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })

@@ -220,6 +220,7 @@ type Packet interface {
 
 type PacketHeader struct {
 	Addr            net.Addr
+	LocalAddr       net.Addr
 	IsControlPacket bool
 	PktTsbpdTime    uint64 // microseconds
 
