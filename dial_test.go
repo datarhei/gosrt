@@ -395,6 +395,133 @@ func TestDialV5(t *testing.T) {
 	ln.Close()
 }
 
+// test support for servers based on libsrt <= 1.3.0
+// in which DestinationSocketId of the CONCLUSION response is always zero.
+func TestDialV5Pre130(t *testing.T) {
+	ln, err := net.ListenPacket("udp", "127.0.0.1:6003")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	serverDone := make(chan error, 1)
+
+	go func() {
+		buf := make([]byte, MAX_MSS_SIZE)
+
+		// Receive INDUCTION request.
+		n, addr, err := ln.ReadFrom(buf)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		p, err := packet.NewPacketFromData(addr, buf[:n])
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		recvcif := &packet.CIFHandshake{}
+		if err = p.UnmarshalCIF(recvcif); err != nil {
+			serverDone <- err
+			return
+		}
+		callerSocketId := recvcif.SRTSocketId
+
+		p.Header().IsControlPacket = true
+		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+		p.Header().SubType = 0
+		p.Header().TypeSpecific = 0
+		p.Header().Timestamp = 0
+		p.Header().DestinationSocketId = callerSocketId
+		inductionResp := &packet.CIFHandshake{
+			IsRequest:                   false,
+			Version:                     5,
+			EncryptionField:             0,
+			ExtensionField:              0x4A17,
+			InitialPacketSequenceNumber: recvcif.InitialPacketSequenceNumber,
+			MaxTransmissionUnitSize:     recvcif.MaxTransmissionUnitSize,
+			MaxFlowWindowSize:           recvcif.MaxFlowWindowSize,
+			HandshakeType:               packet.HSTYPE_INDUCTION,
+			SRTSocketId:                 9876,
+			SynCookie:                   0xdeadbeef,
+		}
+		inductionResp.PeerIP.FromNetAddr(ln.LocalAddr())
+		p.MarshalCIF(inductionResp)
+		var outbuf bytes.Buffer
+		if err = p.Marshal(&outbuf); err != nil {
+			serverDone <- err
+			return
+		}
+		ln.WriteTo(outbuf.Bytes(), p.Header().Addr)
+
+		// Receive CONCLUSION request.
+		n, addr, err = ln.ReadFrom(buf)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		p, err = packet.NewPacketFromData(addr, buf[:n])
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		recvcif = &packet.CIFHandshake{}
+		if err = p.UnmarshalCIF(recvcif); err != nil {
+			serverDone <- err
+			return
+		}
+
+		// Send CONCLUSION response with DestinationSocketId = 0
+		p.Header().IsControlPacket = true
+		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+		p.Header().SubType = 0
+		p.Header().TypeSpecific = 0
+		p.Header().Timestamp = 0
+		p.Header().DestinationSocketId = 0
+		conclusionResp := &packet.CIFHandshake{
+			IsRequest:                   false,
+			Version:                     5,
+			EncryptionField:             0,
+			ExtensionField:              1,
+			InitialPacketSequenceNumber: recvcif.InitialPacketSequenceNumber,
+			MaxTransmissionUnitSize:     recvcif.MaxTransmissionUnitSize,
+			MaxFlowWindowSize:           recvcif.MaxFlowWindowSize,
+			HandshakeType:               packet.HSTYPE_CONCLUSION,
+			SRTSocketId:                 9876,
+			SynCookie:                   0,
+			HasHS:                       true,
+			SRTHS: &packet.CIFHandshakeExtension{
+				SRTVersion: SRT_VERSION,
+				SRTFlags: packet.CIFHandshakeExtensionFlags{
+					TSBPDSND:    true,
+					TSBPDRCV:    true,
+					CRYPT:       true,
+					TLPKTDROP:   true,
+					PERIODICNAK: true,
+					REXMITFLG:   true,
+				},
+				RecvTSBPDDelay: uint16(DefaultConfig().ReceiverLatency.Milliseconds()),
+				SendTSBPDDelay: uint16(DefaultConfig().PeerLatency.Milliseconds()),
+			},
+		}
+		conclusionResp.PeerIP.FromNetAddr(ln.LocalAddr())
+		p.MarshalCIF(conclusionResp)
+		outbuf.Reset()
+		if err = p.Marshal(&outbuf); err != nil {
+			serverDone <- err
+			return
+		}
+		ln.WriteTo(outbuf.Bytes(), p.Header().Addr)
+		serverDone <- nil
+	}()
+
+	cfg := DefaultConfig()
+	cfg.ConnectionTimeout = 3 * time.Second
+	conn, err := Dial("srt", "127.0.0.1:6003", cfg)
+	require.NoError(t, err)
+	conn.Close()
+
+	require.NoError(t, <-serverDone)
+}
+
 func TestDialV5MissingExtension(t *testing.T) {
 	ln, err := net.ListenPacket("udp", "127.0.0.1:6003")
 	require.NoError(t, err)
