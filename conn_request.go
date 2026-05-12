@@ -58,6 +58,7 @@ type ConnRequest interface {
 type connRequest struct {
 	ln              *listener
 	addr            net.Addr
+	localAddr       net.Addr
 	start           time.Time
 	socketId        uint32
 	peerSocketId    uint32
@@ -89,7 +90,7 @@ func cloneCIFHandshake(cif *packet.CIFHandshake) *packet.CIFHandshake {
 	return &clone
 }
 
-func (ln *listener) sendHandshakeResponse(addr net.Addr, started time.Time, peerSocketId uint32, cif *packet.CIFHandshake) {
+func (ln *listener) sendHandshakeResponse(addr net.Addr, localAddr net.Addr, started time.Time, peerSocketId uint32, cif *packet.CIFHandshake) {
 	if cif == nil {
 		return
 	}
@@ -101,6 +102,7 @@ func (ln *listener) sendHandshakeResponse(addr net.Addr, started time.Time, peer
 	p.Header().TypeSpecific = 0
 	p.Header().Timestamp = uint32(time.Since(started).Microseconds())
 	p.Header().DestinationSocketId = peerSocketId
+	p.Header().LocalAddr = localAddr
 	p.MarshalCIF(cloneCIFHandshake(cif))
 	ln.log("handshake:send:dump", func() string { return p.Dump() })
 	ln.log("handshake:send:cif", func() string { return cif.String() })
@@ -278,6 +280,7 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 		req := &connRequest{
 			ln:           ln,
 			addr:         p.Header().Addr,
+			localAddr:    p.Header().LocalAddr,
 			start:        time.Now(),
 			peerSocketId: cif.SRTSocketId,
 			timestamp:    p.Header().Timestamp,
@@ -310,7 +313,7 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 			ln.lock.Unlock()
 
 			if existingConn != nil {
-				ln.sendHandshakeResponse(p.Header().Addr, existingConn.start, cif.SRTSocketId, existingConn.handshakeResp)
+				ln.sendHandshakeResponse(p.Header().Addr, p.Header().LocalAddr, existingConn.start, cif.SRTSocketId, existingConn.handshakeResp)
 			}
 
 			return nil
@@ -405,6 +408,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	p.Header().TypeSpecific = 0
 	p.Header().Timestamp = uint32(time.Since(req.ln.start).Microseconds())
 	p.Header().DestinationSocketId = req.peerSocketId
+	p.Header().LocalAddr = req.localAddr
 	req.handshake.HandshakeType = packet.HandshakeType(reason)
 	p.MarshalCIF(req.handshake)
 	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
@@ -463,10 +467,15 @@ func (req *connRequest) Accept() (Conn, error) {
 
 	req.config.Passphrase = req.passphrase
 
+	localAddr := req.localAddr
+	if localAddr == nil {
+		localAddr = req.ln.addr
+	}
+
 	// Create a new connection
 	conn := newSRTConn(srtConnConfig{
 		version:                     req.handshake.Version,
-		localAddr:                   req.ln.addr,
+		localAddr:                   localAddr,
 		remoteAddr:                  req.addr,
 		config:                      req.config,
 		start:                       req.start,
@@ -505,7 +514,7 @@ func (req *connRequest) Accept() (Conn, error) {
 
 	conn.handshakeResp = cloneCIFHandshake(req.handshake)
 
-	req.ln.sendHandshakeResponse(req.addr, req.start, req.peerSocketId, conn.handshakeResp)
+	req.ln.sendHandshakeResponse(req.addr, req.localAddr, req.start, req.peerSocketId, conn.handshakeResp)
 
 	req.ln.conns[req.socketId] = conn
 	req.ln.connsByPeer[req.peerSocketId] = conn

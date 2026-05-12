@@ -697,6 +697,38 @@ func TestListenDiscardRepeatedHandshakes(t *testing.T) {
 	<-singleReqReceived
 }
 
+func TestListenMultipleIPs(t *testing.T) {
+	ln, err := Listen("srt", "0.0.0.0:6003", DefaultConfig())
+	require.NoError(t, err)
+	defer ln.Close()
+
+	serverDone := make(chan struct{})
+
+	go func() {
+		defer close(serverDone)
+
+		req, err := ln.Accept2()
+		require.NoError(t, err)
+
+		conn, err := req.Accept()
+		require.NoError(t, err)
+		defer conn.Close()
+
+		localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+		require.True(t, ok)
+		require.Equal(t, "127.0.0.2", localAddr.IP.String())
+	}()
+
+	// Dial to the secondary loopback address. Without the fix the listener
+	// responds from 127.0.0.1 (kernel routing choice), which the client's
+	// connected socket discards, causing Dial to time out.
+	clientConn, err := Dial("srt", "127.0.0.2:6003", DefaultConfig())
+	require.NoError(t, err)
+	defer clientConn.Close()
+
+	<-serverDone
+}
+
 func TestListenAcceptAndDiscardRepeatedHandshakes(t *testing.T) {
 	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
 	require.NoError(t, err)
