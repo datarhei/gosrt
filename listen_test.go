@@ -821,6 +821,14 @@ func TestListenAcceptAndDiscardRepeatedHandshakes(t *testing.T) {
 	_, err = conn.Write(buf.Bytes())
 	require.NoError(t, err)
 
-	// wait some time to make sure that close(singleReqAccepted) is not triggered
-	time.Sleep(500 * time.Millisecond)
+	_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	n, err = conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif = &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+	require.Equal(t, packet.HSTYPE_CONCLUSION, recvcif.HandshakeType)
+	require.False(t, recvcif.IsRequest)
 }
