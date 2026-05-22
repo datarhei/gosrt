@@ -299,6 +299,7 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 		if p.Header().PacketSequenceNumber.Equals(ackSequenceNumber.Inc()) {
 			ackSequenceNumber = p.Header().PacketSequenceNumber
 			maxPktTsbpdTime = p.Header().PktTsbpdTime
+			r.statistics.MsBuf = (maxPktTsbpdTime - minPktTsbpdTime) / 1_000
 			continue
 		}
 
@@ -314,8 +315,6 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 
 	r.lastPeriodicACK = now
 	r.nPackets = 0
-
-	r.statistics.MsBuf = (maxPktTsbpdTime - minPktTsbpdTime) / 1_000
 
 	return
 }
