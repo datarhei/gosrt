@@ -154,6 +154,7 @@ type srtConn struct {
 	config Config
 
 	crypto                 crypto.Crypto
+	handshakeResp          *packet.CIFHandshake
 	keyBaseEncryption      packet.PacketEncryption
 	kmPreAnnounceCountdown uint64
 	kmRefreshCountdown     uint64
