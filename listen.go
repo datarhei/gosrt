@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	srtnet "github.com/datarhei/gosrt/net"
@@ -175,7 +176,15 @@ func Listen(network, address string, config Config) (Listener, error) {
 	}
 
 	lc := net.ListenConfig{
-		Control: ListenControl(config),
+		Control: func(network, address string, c syscall.RawConn) error {
+			if err := ListenControl(config)(network, address, c); err != nil {
+				return err
+			}
+			if config.ListenerControl != nil {
+				return config.ListenerControl(network, address, c)
+			}
+			return nil
+		},
 	}
 
 	network = "udp"
