@@ -498,6 +498,7 @@ type CIFHandshake struct {
 	HasKM            bool
 	HasSID           bool
 	HasCongestionCtl bool
+	HasFilter        bool
 
 	// 3.2.1.1.  Handshake Extension Message
 	SRTHS *CIFHandshakeExtension
@@ -510,6 +511,9 @@ type CIFHandshake struct {
 
 	// ??? Congestion Control Extension message (handshake.md #### Congestion controller)
 	CongestionCtl string
+
+	// Packet Filter Extension
+	PacketFilter string
 }
 
 func (c CIFHandshake) String() string {
@@ -547,6 +551,12 @@ func (c CIFHandshake) String() string {
 			fmt.Fprintf(&b, "--- CongestionExt ---\n")
 			fmt.Fprintf(&b, "   congestion : %s\n", c.CongestionCtl)
 			fmt.Fprintf(&b, "--- /CongestionExt ---\n")
+		}
+
+		if c.HasFilter {
+			fmt.Fprintf(&b, "--- FilterExt ---\n")
+			fmt.Fprintf(&b, "   filter : %s\n", c.PacketFilter)
+			fmt.Fprintf(&b, "--- /FilterExt ---\n")
 		}
 	}
 
@@ -682,7 +692,24 @@ func (c *CIFHandshake) Unmarshal(data []byte) error {
 			}
 
 			c.CongestionCtl = strings.TrimRight(b.String(), "\x00")
-		} else if extensionType == EXTTYPE_FILTER || extensionType == EXTTYPE_GROUP {
+		} else if extensionType == EXTTYPE_FILTER {
+			if extensionLength > 512 || len(pivot) < extensionLength {
+				return fmt.Errorf("invalid extension length of %d bytes (%s)", extensionLength, extensionType.String())
+			}
+
+			c.HasFilter = true
+
+			var b strings.Builder
+
+			for i := 0; i < extensionLength; i += 4 {
+				b.WriteByte(pivot[i+3])
+				b.WriteByte(pivot[i+2])
+				b.WriteByte(pivot[i+1])
+				b.WriteByte(pivot[i+0])
+			}
+
+			c.PacketFilter = strings.TrimRight(b.String(), "\x00")
+		} else if extensionType == EXTTYPE_GROUP {
 			// Skip unimplemented extensions
 			if len(pivot) < extensionLength {
 				return fmt.Errorf("invalid extension length of %d bytes (%s)", extensionLength, extensionType.String())
@@ -734,6 +761,10 @@ func (c *CIFHandshake) Marshal(w io.Writer) error {
 		}
 
 		if c.HasCongestionCtl {
+			c.ExtensionField = c.ExtensionField | 4
+		}
+
+		if c.HasFilter {
 			c.ExtensionField = c.ExtensionField | 4
 		}
 	} else {
@@ -831,6 +862,33 @@ func (c *CIFHandshake) Marshal(w io.Writer) error {
 		w.Write(buffer[:4])
 
 		b := congestion.Bytes()
+
+		for i := 0; i < len(b); i += 4 {
+			buffer[0] = b[i+3]
+			buffer[1] = b[i+2]
+			buffer[2] = b[i+1]
+			buffer[3] = b[i+0]
+
+			w.Write(buffer[:4])
+		}
+	}
+
+	if c.HasFilter && len(c.PacketFilter) > 0 {
+		filter := bytes.NewBufferString(c.PacketFilter)
+
+		missing := (4 - filter.Len()%4)
+		if missing < 4 {
+			for range missing {
+				filter.WriteByte(0)
+			}
+		}
+
+		binary.BigEndian.PutUint16(buffer[0:], EXTTYPE_FILTER.Value())
+		binary.BigEndian.PutUint16(buffer[2:], uint16(filter.Len()/4))
+
+		w.Write(buffer[:4])
+
+		b := filter.Bytes()
 
 		for i := 0; i < len(b); i += 4 {
 			buffer[0] = b[i+3]
