@@ -876,14 +876,12 @@ func TestListenDualStackWildcardAcceptsIPv4(t *testing.T) {
 	serverDone := make(chan struct{})
 	go func() {
 		defer close(serverDone)
+
 		req, err := ln.Accept2()
-		if err != nil {
-			return
-		}
+		require.NoError(t, err)
+
 		conn, err := req.Accept()
-		if err != nil {
-			return
-		}
+		require.NoError(t, err)
 		conn.Close()
 	}()
 
