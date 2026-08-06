@@ -13,6 +13,7 @@ import (
 
 // LossyProxy simulates a network with packet loss and delay.
 type LossyProxy struct {
+	mu         sync.RWMutex
 	clientAddr *net.UDPAddr
 	serverAddr *net.UDPAddr
 	conn       *net.UDPConn
@@ -60,12 +61,17 @@ func (p *LossyProxy) Start(listenAddr string, forwardAddr string) error {
 				time.Sleep(p.delay)
 				if fromAddr.String() == p.serverAddr.String() {
 					// from server, forward to client
-					if p.clientAddr != nil {
-						p.conn.WriteToUDP(data, p.clientAddr)
+					p.mu.RLock()
+					clientAddr := p.clientAddr
+					p.mu.RUnlock()
+					if clientAddr != nil {
+						p.conn.WriteToUDP(data, clientAddr)
 					}
 				} else {
 					// from client, forward to server
+					p.mu.Lock()
 					p.clientAddr = fromAddr
+					p.mu.Unlock()
 					p.conn.WriteToUDP(data, p.serverAddr)
 				}
 			}(packetCopy, addr)

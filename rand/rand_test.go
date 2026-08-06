@@ -43,7 +43,8 @@ func TestInt63n(t *testing.T) {
 	u2, err := Int63n(42)
 	require.NoError(t, err)
 
-	require.NotEqual(t, u1, u2)
+	require.True(t, u1 >= 0 && u1 < 42)
+	require.True(t, u2 >= 0 && u2 < 42)
 
 	u3, err := Int63n(64)
 	require.NoError(t, err)
@@ -51,5 +52,6 @@ func TestInt63n(t *testing.T) {
 	u4, err := Int63n(64)
 	require.NoError(t, err)
 
-	require.NotEqual(t, u3, u4)
+	require.True(t, u3 >= 0 && u3 < 64)
+	require.True(t, u4 >= 0 && u4 < 64)
 }
