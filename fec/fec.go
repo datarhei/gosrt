@@ -40,13 +40,13 @@ func ParseConfig(filterStr string) (Config, error) {
 		switch key {
 		case "cols":
 			cols, err := strconv.Atoi(val)
-			if err != nil || cols < 2 {
+			if err != nil || cols < 2 || cols > 65535 {
 				return cfg, fmt.Errorf("invalid cols: %s", val)
 			}
 			cfg.Cols = cols
 		case "rows":
 			rows, err := strconv.Atoi(val)
-			if err != nil {
+			if err != nil || rows < 1 || rows > 65535 {
 				return cfg, fmt.Errorf("invalid rows: %s", val)
 			}
 			cfg.Rows = rows
