@@ -2,6 +2,7 @@ package srt
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -75,6 +76,45 @@ func TestDialOK(t *testing.T) {
 	require.NoError(t, err)
 
 	ln.Close()
+}
+
+func TestDialWithContextCancel(t *testing.T) {
+	ln, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	inductionSeen := make(chan struct{})
+	go func() {
+		buf := make([]byte, MAX_MSS_SIZE)
+		_, _, err := ln.ReadFrom(buf)
+		if err == nil {
+			close(inductionSeen)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := DialWithContext(ctx, "srt", ln.LocalAddr().String(), DefaultConfig())
+		result <- err
+	}()
+
+	select {
+	case <-inductionSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for induction packet")
+	}
+
+	cancel()
+
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for canceled dial")
+	}
 }
 
 func TestDialV4(t *testing.T) {
