@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,6 +26,22 @@ func TestListenReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	ln.Close()
+}
+
+func TestListenerControl(t *testing.T) {
+	called := false
+
+	config := DefaultConfig()
+	config.ListenerControl = func(network, address string, c syscall.RawConn) error {
+		called = true
+		return nil
+	}
+
+	ln, err := Listen("srt", "127.0.0.1:6003", config)
+	require.NoError(t, err)
+	defer ln.Close()
+
+	require.True(t, called, "ListenerControl callback was not invoked")
 }
 
 func TestListen(t *testing.T) {
