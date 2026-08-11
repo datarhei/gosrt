@@ -32,7 +32,7 @@ type StatisticsAccumulated struct {
 	PktSentKM        uint64 // The total number of sent KM (Key Material) control packets
 	PktRecvKM        uint64 // The total number of received KM (Key Material) control packets
 	UsSndDuration    uint64 // The total accumulated time in microseconds, during which the SRT sender has some data to transmit, including packets that have been sent, but not yet acknowledged
-	PktRecvBelated   uint64
+	PktRecvBelated   uint64 // The total number of packets that arrived too late
 	PktSendDrop      uint64 // The total number of dropped by the SRT sender DATA packets that have no chance to be delivered in time
 	PktRecvDrop      uint64 // The total number of dropped by the SRT receiver and, as a result, not delivered to the upstream application DATA packets
 	PktRecvUndecrypt uint64 // The total number of packets that failed to be decrypted at the receiver side
@@ -44,7 +44,7 @@ type StatisticsAccumulated struct {
 	ByteRecvLoss      uint64 // Same as pktRecvLoss, but expressed in bytes, including payload and all the headers (IP, TCP, SRT), bytes for the presently missing (either reordered or lost) packets' payloads are estimated based on the average packet size
 	ByteRetrans       uint64 // Same as pktRetrans, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRecvRetrans   uint64 // Same as pktRecvRetrans, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
-	ByteRecvBelated   uint64
+	ByteRecvBelated   uint64 // Same as pktRecvBelated, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteSendDrop      uint64 // Same as pktSendDrop, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRecvDrop      uint64 // Same as pktRecvDrop, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
 	ByteRecvUndecrypt uint64 // Same as pktRecvUndecrypt, but expressed in bytes, including payload and all the headers (IP, TCP, SRT)
@@ -72,7 +72,7 @@ type StatisticsInterval struct {
 	UsSndDuration uint64 // Accumulated time in microseconds, during which the SRT sender has some data to transmit, including packets that have been sent, but not yet acknowledged
 
 	PktReorderDistance uint64
-	PktRecvBelated     uint64 // Number of packets that arrive too late
+	PktRecvBelated     uint64 // Number of packets that arrived too late
 	PktSndDrop         uint64 // Number of dropped by the SRT sender DATA packets that have no chance to be delivered in time
 	PktRecvDrop        uint64 // Number of dropped by the SRT receiver and, as a result, not delivered to the upstream application DATA packets
 	PktRecvUndecrypt   uint64 // Number of packets that failed to be decrypted at the receiver side
