@@ -624,3 +624,98 @@ func TestIssue67(t *testing.T) {
 
 	require.Equal(t, []uint32{1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 13, 13}, ackNumbers)
 }
+
+func TestRecvBelated(t *testing.T) {
+	recv := mockLiveRecv(
+		func(seq circular.Number, light bool) {},
+		func(list []circular.Number) {},
+		func(p packet.Packet) {},
+	)
+
+	addr, _ := net.ResolveIPAddr("ip", "127.0.0.1")
+
+	for i := range 3 {
+		p := packet.NewPacket(addr)
+		p.Header().PacketSequenceNumber = circular.New(uint32(i), packet.MAX_SEQUENCENUMBER)
+		p.Header().PktTsbpdTime = uint64(i + 1)
+
+		recv.Push(p)
+	}
+
+	require.Equal(t, uint64(3), recv.statistics.Pkt)
+	require.Equal(t, uint64(3), recv.statistics.PktBuf)
+	require.Equal(t, uint64(0), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktBelated)
+
+	p := packet.NewPacket(addr)
+	p.Header().PacketSequenceNumber = circular.New(uint32(4), packet.MAX_SEQUENCENUMBER)
+	p.Header().PktTsbpdTime = uint64(4 + 1)
+
+	recv.Push(p)
+
+	require.Equal(t, uint64(4), recv.statistics.Pkt)
+	require.Equal(t, uint64(4), recv.statistics.PktBuf)
+	require.Equal(t, uint64(1), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktBelated)
+
+	recv.Tick(10) // ACK period
+
+	p = packet.NewPacket(addr)
+	p.Header().PacketSequenceNumber = circular.New(uint32(3), packet.MAX_SEQUENCENUMBER)
+	p.Header().PktTsbpdTime = uint64(3 + 1)
+
+	recv.Push(p)
+
+	require.Equal(t, uint64(5), recv.statistics.Pkt)
+	require.Equal(t, uint64(0), recv.statistics.PktBuf)
+	require.Equal(t, uint64(1), recv.statistics.PktLoss)
+	require.Equal(t, uint64(1), recv.statistics.PktBelated)
+}
+
+func TestRecvLate(t *testing.T) {
+	recv := mockLiveRecv(
+		func(seq circular.Number, light bool) {},
+		func(list []circular.Number) {},
+		func(p packet.Packet) {},
+	)
+
+	addr, _ := net.ResolveIPAddr("ip", "127.0.0.1")
+
+	for i := range 3 {
+		p := packet.NewPacket(addr)
+		p.Header().PacketSequenceNumber = circular.New(uint32(i), packet.MAX_SEQUENCENUMBER)
+		p.Header().PktTsbpdTime = uint64(i + 1)
+
+		recv.Push(p)
+	}
+
+	require.Equal(t, uint64(3), recv.statistics.Pkt)
+	require.Equal(t, uint64(3), recv.statistics.PktBuf)
+	require.Equal(t, uint64(0), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktBelated)
+	require.Equal(t, uint64(0), recv.statistics.PktLate)
+
+	p := packet.NewPacket(addr)
+	p.Header().PacketSequenceNumber = circular.New(uint32(4), packet.MAX_SEQUENCENUMBER)
+	p.Header().PktTsbpdTime = uint64(4 + 1)
+
+	recv.Push(p)
+
+	require.Equal(t, uint64(4), recv.statistics.Pkt)
+	require.Equal(t, uint64(4), recv.statistics.PktBuf)
+	require.Equal(t, uint64(1), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktBelated)
+	require.Equal(t, uint64(0), recv.statistics.PktLate)
+
+	p = packet.NewPacket(addr)
+	p.Header().PacketSequenceNumber = circular.New(uint32(3), packet.MAX_SEQUENCENUMBER)
+	p.Header().PktTsbpdTime = uint64(3 + 1)
+
+	recv.Push(p)
+
+	require.Equal(t, uint64(5), recv.statistics.Pkt)
+	require.Equal(t, uint64(5), recv.statistics.PktBuf)
+	require.Equal(t, uint64(1), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktBelated)
+	require.Equal(t, uint64(1), recv.statistics.PktLate)
+}

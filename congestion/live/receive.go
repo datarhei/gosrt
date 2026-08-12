@@ -219,9 +219,11 @@ func (r *receiver) Push(pkt packet.Packet) {
 				// Late arrival, this fills a gap
 				r.statistics.PktBuf++
 				r.statistics.PktUnique++
+				r.statistics.PktLate++
 
 				r.statistics.ByteBuf += pktLen
 				r.statistics.ByteUnique += pktLen
+				r.statistics.ByteLate += pktLen
 
 				r.packetList.InsertBefore(pkt, e)
 
@@ -232,13 +234,14 @@ func (r *receiver) Push(pkt packet.Packet) {
 		return
 	} else {
 		// Too far ahead, there are some missing sequence numbers, immediate NAK report
-		// here we can prevent a possibly unnecessary NAK with SRTO_LOXXMAXTTL
+		// here we can prevent a possibly unnecessary NAK with implementing SRTO_LOSSMAXTTL
 		r.sendNAK([]circular.Number{
 			r.maxSeenSequenceNumber.Inc(),
 			pkt.Header().PacketSequenceNumber.Dec(),
 		})
 
-		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber))
+		// The distance is one more than the actual lost packets
+		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber)) - 1
 		r.statistics.PktLoss += len
 		r.statistics.ByteLoss += len * uint64(r.avgPayloadSize)
 
