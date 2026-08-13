@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,6 +26,22 @@ func TestListenReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	ln.Close()
+}
+
+func TestListenerControl(t *testing.T) {
+	called := false
+
+	config := DefaultConfig()
+	config.ListenerControl = func(network, address string, c syscall.RawConn) error {
+		called = true
+		return nil
+	}
+
+	ln, err := Listen("srt", "127.0.0.1:6003", config)
+	require.NoError(t, err)
+	defer ln.Close()
+
+	require.True(t, called, "ListenerControl callback was not invoked")
 }
 
 func TestListen(t *testing.T) {
@@ -855,4 +872,39 @@ func TestListenAcceptAndDiscardRepeatedHandshakes(t *testing.T) {
 
 	// wait some time to make sure that close(singleReqAccepted) is not triggered
 	time.Sleep(500 * time.Millisecond)
+}
+
+func TestListenDualStackWildcardAcceptsIPv4(t *testing.T) {
+	// A bare ":port" listener is a dual-stack AF_INET6 socket. An IPv4 caller
+	// must still complete the handshake.
+	//
+	// It did not on Darwin: the reply is sent with an ancillary control message
+	// to pin the source address, and sendmsg rejects that for an IPv4
+	// destination on an AF_INET6 socket with EINVAL. The error was discarded, so
+	// the caller saw only "connection timeout. server didn't respond" and the
+	// server logged nothing at all -- HandleConnect was never reached.
+	//
+	// Passes on Linux before and after; this is the platform-independent
+	// assertion that catches it where it happens.
+	ln, err := Listen("srt", ":6004", DefaultConfig())
+	require.NoError(t, err)
+	defer ln.Close()
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+
+		req, err := ln.Accept2()
+		require.NoError(t, err)
+
+		conn, err := req.Accept()
+		require.NoError(t, err)
+		conn.Close()
+	}()
+
+	clientConn, err := Dial("srt", "127.0.0.1:6004", DefaultConfig())
+	require.NoError(t, err)
+	clientConn.Close()
+
+	<-serverDone
 }
