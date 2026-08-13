@@ -104,6 +104,9 @@ type ReceiveStats struct {
 	PktLoss  uint64
 	ByteLoss uint64
 
+	// The total number of SRT DATA packets that were actually lost, i.e. not delivered.
+	PktLost uint64
+
 	// The total number of retransmitted packets registered at the receiver side.
 	PktRetrans  uint64
 	ByteRetrans uint64

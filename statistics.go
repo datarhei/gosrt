@@ -27,6 +27,7 @@ type StatisticsAccumulated struct {
 	PktRecvUnique    uint64 // The total number of unique original, retransmitted or recovered by the packet filter DATA packets received in time, decrypted without errors and, as a result, scheduled for delivery to the upstream application by the SRT receiver.
 	PktSendLoss      uint64 // The total number of data packets considered or reported as lost at the sender side. Does not correspond to the packets detected as lost at the receiver side.
 	PktRecvLoss      uint64 // The total number of SRT DATA packets detected as presently missing (either reordered or lost) at the receiver side
+	PktRecvLost      uint64 // The total number of actually lost (not delivered) SRT DATA packets
 	PktRetrans       uint64 // The total number of retransmitted packets sent by the SRT sender
 	PktRecvRetrans   uint64 // The total number of retransmitted packets registered at the receiver side
 	PktSentACK       uint64 // The total number of sent ACK (Acknowledgement) control packets
@@ -65,6 +66,7 @@ type StatisticsInterval struct {
 	PktRecvUnique  uint64 // Number of unique original, retransmitted or recovered by the packet filter DATA packets received in time, decrypted without errors and, as a result, scheduled for delivery to the upstream application by the SRT receiver.
 	PktSendLoss    uint64 // Number of data packets considered or reported as lost at the sender side. Does not correspond to the packets detected as lost at the receiver side.
 	PktRecvLoss    uint64 // Number of SRT DATA packets detected as presently missing (either reordered or lost) at the receiver side
+	PktRecvLost    uint64 // Number of actually lost (not delivered) SRT DATA packets
 	PktRetrans     uint64 // Number of retransmitted packets sent by the SRT sender
 	PktRecvRetrans uint64 // Number of retransmitted packets registered at the receiver side
 	PktSentACK     uint64 // Number of sent ACK (Acknowledgement) control packets
@@ -148,6 +150,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		PktRecvUnique:     recv.PktUnique,
 		PktSendLoss:       send.PktLoss,
 		PktRecvLoss:       recv.PktLoss,
+		PktRecvLost:       recv.PktLost,
 		PktRecvBelated:    recv.PktBelated,
 		PktRecvLate:       recv.PktLate,
 		PktRetrans:        send.PktRetrans,
@@ -185,6 +188,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		PktRecvUnique:      s.Accumulated.PktRecvUnique - previous.PktRecvUnique,
 		PktSendLoss:        s.Accumulated.PktSendLoss - previous.PktSendLoss,
 		PktRecvLoss:        s.Accumulated.PktRecvLoss - previous.PktRecvLoss,
+		PktRecvLost:        s.Accumulated.PktRecvLost - previous.PktRecvLost,
 		PktRetrans:         s.Accumulated.PktRetrans - previous.PktRetrans,
 		PktRecvRetrans:     s.Accumulated.PktRecvRetrans - previous.PktRecvRetrans,
 		PktSentACK:         s.Accumulated.PktSentACK - previous.PktSentACK,

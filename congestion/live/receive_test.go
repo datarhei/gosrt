@@ -719,3 +719,46 @@ func TestRecvLate(t *testing.T) {
 	require.Equal(t, uint64(0), recv.statistics.PktBelated)
 	require.Equal(t, uint64(1), recv.statistics.PktLate)
 }
+
+func TestRecvLost(t *testing.T) {
+	recv := mockLiveRecv(
+		func(seq circular.Number, light bool) {},
+		func(list []circular.Number) {},
+		func(p packet.Packet) {},
+	)
+
+	addr, _ := net.ResolveIPAddr("ip", "127.0.0.1")
+
+	for i := 1; i < 5; i++ {
+		p := packet.NewPacket(addr)
+		p.Header().PacketSequenceNumber = circular.New(uint32(i), packet.MAX_SEQUENCENUMBER)
+		p.Header().PktTsbpdTime = uint64(i + 1)
+
+		recv.Push(p)
+	}
+
+	require.Equal(t, uint64(4), recv.statistics.Pkt)
+	require.Equal(t, uint64(4), recv.statistics.PktBuf)
+	require.Equal(t, uint64(1), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktLost)
+
+	for i := 7; i < 10; i++ {
+		p := packet.NewPacket(addr)
+		p.Header().PacketSequenceNumber = circular.New(uint32(i), packet.MAX_SEQUENCENUMBER)
+		p.Header().PktTsbpdTime = uint64(i + 1)
+
+		recv.Push(p)
+	}
+
+	require.Equal(t, uint64(7), recv.statistics.Pkt)
+	require.Equal(t, uint64(7), recv.statistics.PktBuf)
+	require.Equal(t, uint64(3), recv.statistics.PktLoss)
+	require.Equal(t, uint64(0), recv.statistics.PktLost)
+
+	recv.Tick(10) // ACK period
+
+	require.Equal(t, uint64(7), recv.statistics.Pkt)
+	require.Equal(t, uint64(0), recv.statistics.PktBuf)
+	require.Equal(t, uint64(3), recv.statistics.PktLoss)
+	require.Equal(t, uint64(3), recv.statistics.PktLost)
+}

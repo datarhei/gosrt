@@ -373,6 +373,7 @@ func (r *receiver) Tick(now uint64) {
 
 	// Deliver packets whose PktTsbpdTime is ripe
 	r.lock.Lock()
+	lastDeliveredSequenceNumber := r.lastDeliveredSequenceNumber
 	removeList := make([]*list.Element, 0, r.packetList.Len())
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
@@ -390,8 +391,25 @@ func (r *receiver) Tick(now uint64) {
 		}
 	}
 
-	for _, e := range removeList {
-		r.packetList.Remove(e)
+	if len(removeList) != 0 {
+		// Remove packets from buffer and count the number of actually lost packets
+		for _, e := range removeList {
+			p := e.Value.(packet.Packet)
+
+			distance := lastDeliveredSequenceNumber.Distance(p.Header().PacketSequenceNumber)
+			if distance > 1 {
+				r.statistics.PktLost += uint64(distance - 1)
+			}
+
+			lastDeliveredSequenceNumber = p.Header().PacketSequenceNumber
+
+			r.packetList.Remove(e)
+		}
+
+		distance := lastDeliveredSequenceNumber.Distance(r.lastDeliveredSequenceNumber)
+		if distance > 1 {
+			r.statistics.PktLost += uint64(distance - 1)
+		}
 	}
 	r.lock.Unlock()
 
