@@ -15,6 +15,7 @@ import (
 	"github.com/datarhei/gosrt/congestion"
 	"github.com/datarhei/gosrt/congestion/live"
 	"github.com/datarhei/gosrt/crypto"
+	"github.com/datarhei/gosrt/fec"
 	"github.com/datarhei/gosrt/packet"
 )
 
@@ -198,6 +199,10 @@ type srtConn struct {
 	// Congestion control
 	recv congestion.Receiver
 	snd  congestion.Sender
+	
+	// FEC
+	fecGen *fec.Generator
+	fecRec *fec.Reconstructor
 
 	// context of all channels and routines
 	ctx       context.Context
@@ -327,6 +332,16 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		OverheadBW:            c.config.OverheadBW,
 		OnDeliver:             c.pop,
 	})
+
+	if len(c.config.PacketFilter) > 0 {
+		fecCfg, err := fec.ParseConfig(c.config.PacketFilter)
+		if err == nil {
+			c.fecGen = fec.NewGenerator(fecCfg)
+			c.fecRec = fec.NewReconstructor(fecCfg)
+		} else {
+			c.log("connection:error", func() string { return fmt.Sprintf("invalid FEC config: %s", err) })
+		}
+	}
 
 	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
 
@@ -581,6 +596,14 @@ func (c *srtConn) pop(p packet.Packet) {
 
 	// Send the packet on the wire
 	c.onSend(p)
+
+	if c.fecGen != nil && !p.Header().IsControlPacket {
+		fecPkts := c.fecGen.AddPacket(p)
+		for _, fecPkt := range fecPkts {
+			c.log("fec:send:dump", func() string { return fecPkt.Dump() })
+			c.onSend(fecPkt)
+		}
+	}
 }
 
 // networkQueueReader reads the packets from the network queue in order to process them.
@@ -689,7 +712,24 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	// "An FEC control packet is distinguished from a regular data packet by having
 	// its message number equal to 0. This value isn't normally used in SRT (message
 	// numbers start from 1, increment to a maximum, and then roll back to 1)."
-	if header.MessageNumber == 0 {
+	// Process FEC filter
+	if c.fecRec != nil {
+		recoveredPkts := c.fecRec.AddPacket(p)
+		
+		if header.MessageNumber == 0 {
+			c.log("connection:filter", func() string { return "processed FEC filter control packet" })
+			for _, recPkt := range recoveredPkts {
+				c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", recPkt.Header().PacketSequenceNumber.Val()) })
+				c.handlePacket(recPkt)
+			}
+			return
+		}
+		
+		for _, recPkt := range recoveredPkts {
+			c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", recPkt.Header().PacketSequenceNumber.Val()) })
+			c.handlePacket(recPkt)
+		}
+	} else if header.MessageNumber == 0 {
 		c.log("connection:filter", func() string { return "dropped FEC filter control packet" })
 		return
 	}
@@ -936,8 +976,12 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 		return
 	}
 
-	if cif.SRTFlags.PACKET_FILTER {
-		c.log("control:recv:HSReq:error", func() string { return "PACKET_FILTER flag is set" })
+	if cif.SRTFlags.PACKET_FILTER && len(c.config.PacketFilter) == 0 {
+		c.log("control:recv:HSReq:error", func() string { return "Peer set PACKET_FILTER but local does not support it" })
+		c.close()
+		return
+	} else if !cif.SRTFlags.PACKET_FILTER && len(c.config.PacketFilter) > 0 {
+		c.log("control:recv:HSReq:error", func() string { return "Local requires PACKET_FILTER but peer did not set it" })
 		c.close()
 		return
 	}
@@ -1020,8 +1064,12 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 			return
 		}
 
-		if cif.SRTFlags.PACKET_FILTER {
-			c.log("control:recv:HSReq:error", func() string { return "PACKET_FILTER flag is set" })
+		if cif.SRTFlags.PACKET_FILTER && len(c.config.PacketFilter) == 0 {
+			c.log("control:recv:HSRes:error", func() string { return "Peer set PACKET_FILTER but local does not support it" })
+			c.close()
+			return
+		} else if !cif.SRTFlags.PACKET_FILTER && len(c.config.PacketFilter) > 0 {
+			c.log("control:recv:HSRes:error", func() string { return "Local requires PACKET_FILTER but peer did not set it" })
 			c.close()
 			return
 		}
@@ -1305,8 +1353,8 @@ func (c *srtConn) sendHSRequest() {
 			TLPKTDROP:     true,  // must be set in live mode
 			PERIODICNAK:   false, // not relevant for us as sender
 			REXMITFLG:     true,  // must alwasy be set
-			STREAM:        false, // has been introducet in HSv5
-			PACKET_FILTER: false, // has been introducet in HSv5
+			STREAM:        false,
+			PACKET_FILTER: len(c.config.PacketFilter) > 0,
 		},
 		RecvTSBPDDelay: 0,
 		SendTSBPDDelay: uint16(c.config.ReceiverLatency.Milliseconds()),

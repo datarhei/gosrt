@@ -409,7 +409,7 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 					PERIODICNAK:   true,
 					REXMITFLG:     true,
 					STREAM:        false,
-					PACKET_FILTER: false,
+					PACKET_FILTER: len(dl.config.PacketFilter) > 0,
 				},
 				RecvTSBPDDelay: uint16(dl.config.ReceiverLatency.Milliseconds()),
 				SendTSBPDDelay: uint16(dl.config.PeerLatency.Milliseconds()),
@@ -417,6 +417,11 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 
 			cif.HasSID = true
 			cif.StreamId = dl.config.StreamId
+
+			if len(dl.config.PacketFilter) > 0 {
+				cif.HasFilter = true
+				cif.PacketFilter = dl.config.PacketFilter
+			}
 
 			if dl.crypto != nil {
 				cif.HasKM = true

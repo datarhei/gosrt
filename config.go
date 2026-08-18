@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -700,7 +701,9 @@ func (c *Config) Validate() error {
 	}
 
 	if len(c.PacketFilter) != 0 {
-		return fmt.Errorf("config: PacketFilter are not supported")
+		if !strings.HasPrefix(strings.ToLower(c.PacketFilter), "fec") {
+			return fmt.Errorf("config: PacketFilter %s is not supported", c.PacketFilter)
+		}
 	}
 
 	if len(c.Passphrase) != 0 {
