@@ -490,7 +490,7 @@ func TestLowRateACKOverhead(t *testing.T) {
 
 	payload := make([]byte, 1316)
 	start := time.Now()
-	for i := 0; i < packets; i++ {
+	for range packets {
 		_, err := conn.Write(payload)
 		require.True(t, err == nil || err == io.EOF)
 		time.Sleep(interval)
