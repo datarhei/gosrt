@@ -30,7 +30,7 @@ func BenchmarkHasTopicNil(b *testing.B) {
 	l := NewLogger(nil)
 
 	var r bool
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		r = l.HasTopic("foobar")
 	}
 
@@ -43,7 +43,7 @@ func BenchmarkHasTopicD1(b *testing.B) {
 	})
 
 	var r bool
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		r = l.HasTopic("packet")
 	}
 
@@ -56,7 +56,7 @@ func BenchmarkHasTopicD2(b *testing.B) {
 	})
 
 	var r bool
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		r = l.HasTopic("packet:recv")
 	}
 
@@ -69,7 +69,7 @@ func BenchmarkHasTopicD3(b *testing.B) {
 	})
 
 	var r bool
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		r = l.HasTopic("packet:recv:dump")
 	}
 
