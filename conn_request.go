@@ -70,6 +70,45 @@ type connRequest struct {
 	rejectionReason RejectionReason
 }
 
+func cloneCIFHandshake(cif *packet.CIFHandshake) *packet.CIFHandshake {
+	if cif == nil {
+		return nil
+	}
+
+	clone := *cif
+
+	if cif.SRTHS != nil {
+		srths := *cif.SRTHS
+		clone.SRTHS = &srths
+	}
+
+	if cif.SRTKM != nil {
+		srtkm := *cif.SRTKM
+		clone.SRTKM = &srtkm
+	}
+
+	return &clone
+}
+
+func (ln *listener) sendHandshakeResponse(addr net.Addr, localAddr net.Addr, started time.Time, peerSocketId uint32, cif *packet.CIFHandshake) {
+	if cif == nil {
+		return
+	}
+
+	p := packet.NewPacket(addr)
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = uint32(time.Since(started).Microseconds())
+	p.Header().DestinationSocketId = peerSocketId
+	p.Header().LocalAddr = localAddr
+	p.MarshalCIF(cloneCIFHandshake(cif))
+	ln.log("handshake:send:dump", func() string { return p.Dump() })
+	ln.log("handshake:send:cif", func() string { return cif.String() })
+	ln.send(p)
+}
+
 func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 	cif := &packet.CIFHandshake{}
 
@@ -267,10 +306,16 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 
 		ln.lock.Lock()
 
-		// We received a duplicate request: reject silently
-		_, exists := ln.connsByPeer[cif.SRTSocketId]
+		// We received a duplicate request: resend the conclusion response if the
+		// connection has already been accepted, otherwise ignore it.
+		existingConn, exists := ln.connsByPeer[cif.SRTSocketId]
 		if exists {
 			ln.lock.Unlock()
+
+			if existingConn != nil {
+				ln.sendHandshakeResponse(p.Header().Addr, p.Header().LocalAddr, existingConn.start, cif.SRTSocketId, existingConn.handshakeResp)
+			}
+
 			return nil
 		}
 
@@ -467,18 +512,9 @@ func (req *connRequest) Accept() (Conn, error) {
 		req.handshake.SRTHS.SendTSBPDDelay = sendTsbpdDelay
 	}
 
-	p := packet.NewPacket(req.addr)
-	p.Header().IsControlPacket = true
-	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
-	p.Header().SubType = 0
-	p.Header().TypeSpecific = 0
-	p.Header().Timestamp = uint32(time.Since(req.start).Microseconds())
-	p.Header().DestinationSocketId = req.peerSocketId
-	p.Header().LocalAddr = req.localAddr
-	p.MarshalCIF(req.handshake)
-	req.ln.log("handshake:send:dump", func() string { return p.Dump() })
-	req.ln.log("handshake:send:cif", func() string { return req.handshake.String() })
-	req.ln.send(p)
+	conn.handshakeResp = cloneCIFHandshake(req.handshake)
+
+	req.ln.sendHandshakeResponse(req.addr, req.localAddr, req.start, req.peerSocketId, conn.handshakeResp)
 
 	req.ln.conns[req.socketId] = conn
 	req.ln.connsByPeer[req.peerSocketId] = conn
