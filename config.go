@@ -62,6 +62,12 @@ type Config struct {
 	// SRTO_IPTTL
 	IPTTL int
 
+	// BindToDevice binds the underlying UDP socket to a specific network
+	// interface (Linux SO_BINDTODEVICE), so this connection's traffic egresses
+	// via that interface regardless of the routing table. Empty means no
+	// binding. Requires CAP_NET_RAW (typically root). No effect on non-Linux.
+	BindToDevice string
+
 	// Allow only IPv6.
 	// SRTO_IPV6ONLY
 	IPv6Only int
