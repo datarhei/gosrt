@@ -121,6 +121,48 @@ func TestHandshakeV5(t *testing.T) {
 	require.Equal(t, cif, cif2)
 }
 
+func TestInvalidHandshake(t *testing.T) {
+	data, err := hex.DecodeString("00000005000200070000002a000005dc00000064ffffffff")
+	require.NoError(t, err)
+
+	cif := &CIFHandshake{}
+
+	err = cif.Unmarshal(data)
+	require.Error(t, err)
+
+	data, err = hex.DecodeString("00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000")
+	require.NoError(t, err)
+
+	cif = &CIFHandshake{}
+
+	err = cif.Unmarshal(data)
+	require.Error(t, err)
+}
+
+func FuzzHandshake(f *testing.F) {
+	f.Add("00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000020003000104020000003f006400640004000e122029010000000002000200000004040102030405060708090a0b0c0d0e0f10f0f1f2f3f4f5f6f71112131415161718191a1b1c1d1e1f200005000576696c2f74732f656d6165726f6f662e0072616200060001626f6f66")
+	f.Add("00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f000000000000000000000000")
+	f.Add("00000005000200070000002a000005dc00000064ffffffff00274921001234560100007f00000000000000000000000000")
+
+	f.Fuzz(func(t *testing.T, orig string) {
+		data, err := hex.DecodeString(orig)
+		if err != nil {
+			return
+		}
+
+		if len(data) == 0 {
+			return
+		}
+
+		cif := &CIFHandshake{}
+
+		err = cif.Unmarshal(data)
+		if err != nil {
+			return
+		}
+	})
+}
+
 func TestHandshakeV5UnsupportedExtension(t *testing.T) {
 	ip := srtnet.IP{}
 	ip.Parse("127.0.0.1")
