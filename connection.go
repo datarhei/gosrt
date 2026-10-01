@@ -968,7 +968,9 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 
 	recvTsbpdDelay := max(cif.SendTSBPDDelay, uint16(c.config.ReceiverLatency.Milliseconds()))
 
+	c.statisticsLock.Lock()
 	c.tsbpdDelay = uint64(recvTsbpdDelay) * 1000
+	c.statisticsLock.Unlock()
 
 	cif.RecvTSBPDDelay = 0
 	cif.SendTSBPDDelay = recvTsbpdDelay
