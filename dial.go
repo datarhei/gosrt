@@ -132,7 +132,7 @@ func DialWithContext(ctx context.Context, network, address string, config Config
 
 	dl.rcvQueue = make(chan packet.Packet, 2048)
 
-	dl.doneChan = make(chan error)
+	dl.doneChan = make(chan error, 1)
 
 	dl.start = time.Now()
 
