@@ -910,6 +910,11 @@ func (c *srtConn) handleHSRequest(p packet.Packet) {
 
 	c.log("control:recv:HSReq:cif", func() string { return cif.String() })
 
+	if c.version != 4 {
+		// Ignore such requests if this is not a v4 connection
+		return
+	}
+
 	// Check for version
 	if cif.SRTVersion < 0x010200 || cif.SRTVersion >= 0x010300 {
 		c.log("control:recv:HSReq:error", func() string { return fmt.Sprintf("unsupported version: %#08x", cif.SRTVersion) })
@@ -999,68 +1004,71 @@ func (c *srtConn) handleHSResponse(p packet.Packet) {
 
 	c.log("control:recv:HSRes:cif", func() string { return cif.String() })
 
-	if c.version == 4 {
-		// Check for version
-		if cif.SRTVersion < 0x010200 || cif.SRTVersion >= 0x010300 {
-			c.log("control:recv:HSRes:error", func() string { return fmt.Sprintf("unsupported version: %#08x", cif.SRTVersion) })
-			c.close()
-			return
-		}
-
-		// TSBPDSND is not relevant from the receiver
-		// PERIODICNAK is the sender's decision, we don't care, but will handle them
-
-		// Check the required SRT flags
-		if !cif.SRTFlags.TSBPDRCV {
-			c.log("control:recv:HSRes:error", func() string { return "TSBPDRCV flag must be set" })
-			c.close()
-
-			return
-		}
-
-		if !cif.SRTFlags.TLPKTDROP {
-			c.log("control:recv:HSRes:error", func() string { return "TLPKTDROP flag must be set" })
-			c.close()
-
-			return
-		}
-
-		if !cif.SRTFlags.CRYPT {
-			c.log("control:recv:HSRes:error", func() string { return "CRYPT flag must be set" })
-			c.close()
-
-			return
-		}
-
-		if !cif.SRTFlags.REXMITFLG {
-			c.log("control:recv:HSRes:error", func() string { return "REXMITFLG flag must be set" })
-			c.close()
-
-			return
-		}
-
-		// These flag was introduced in HSv5 and should not be set in HSv4
-		if cif.SRTFlags.STREAM {
-			c.log("control:recv:HSReq:error", func() string { return "STREAM flag is set" })
-			c.close()
-			return
-		}
-
-		if cif.SRTFlags.PACKET_FILTER {
-			c.log("control:recv:HSReq:error", func() string { return "PACKET_FILTER flag is set" })
-			c.close()
-			return
-		}
-
-		sendTsbpdDelay := max(cif.SendTSBPDDelay, uint16(c.config.PeerLatency.Milliseconds()))
-
-		c.dropThreshold = max(uint64(float64(sendTsbpdDelay)*1.25)+uint64(c.config.SendDropDelay.Microseconds()), uint64(time.Second.Microseconds()))
-		c.dropThreshold += 20_000
-
-		c.snd.SetDropThreshold(c.dropThreshold)
-
-		c.stopHSRequests()
+	if c.version != 4 {
+		// Ignore such responses if this is not a v4 connection
+		return
 	}
+
+	// Check for version
+	if cif.SRTVersion < 0x010200 || cif.SRTVersion >= 0x010300 {
+		c.log("control:recv:HSRes:error", func() string { return fmt.Sprintf("unsupported version: %#08x", cif.SRTVersion) })
+		c.close()
+		return
+	}
+
+	// TSBPDSND is not relevant from the receiver
+	// PERIODICNAK is the sender's decision, we don't care, but will handle them
+
+	// Check the required SRT flags
+	if !cif.SRTFlags.TSBPDRCV {
+		c.log("control:recv:HSRes:error", func() string { return "TSBPDRCV flag must be set" })
+		c.close()
+
+		return
+	}
+
+	if !cif.SRTFlags.TLPKTDROP {
+		c.log("control:recv:HSRes:error", func() string { return "TLPKTDROP flag must be set" })
+		c.close()
+
+		return
+	}
+
+	if !cif.SRTFlags.CRYPT {
+		c.log("control:recv:HSRes:error", func() string { return "CRYPT flag must be set" })
+		c.close()
+
+		return
+	}
+
+	if !cif.SRTFlags.REXMITFLG {
+		c.log("control:recv:HSRes:error", func() string { return "REXMITFLG flag must be set" })
+		c.close()
+
+		return
+	}
+
+	// These flag was introduced in HSv5 and should not be set in HSv4
+	if cif.SRTFlags.STREAM {
+		c.log("control:recv:HSReq:error", func() string { return "STREAM flag is set" })
+		c.close()
+		return
+	}
+
+	if cif.SRTFlags.PACKET_FILTER {
+		c.log("control:recv:HSReq:error", func() string { return "PACKET_FILTER flag is set" })
+		c.close()
+		return
+	}
+
+	sendTsbpdDelay := max(cif.SendTSBPDDelay, uint16(c.config.PeerLatency.Milliseconds()))
+
+	c.dropThreshold = max(uint64(float64(sendTsbpdDelay)*1.25)+uint64(c.config.SendDropDelay.Microseconds()), uint64(time.Second.Microseconds()))
+	c.dropThreshold += 20_000
+
+	c.snd.SetDropThreshold(c.dropThreshold)
+
+	c.stopHSRequests()
 }
 
 // handleKMRequest checks if the key material is valid and responds with a KM response.
