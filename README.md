@@ -154,7 +154,7 @@ known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/b
 | `mode`               | `listener` or `caller` | Enforce listener or caller mode.                                        |
 | `congestion`         | `live`                 | Congestion control. Currently only `live` is supported.                 |
 | `conntimeo`          | `ms`                   | Connection timeout.                                                     |
-| `drifttracer`        | `bool`                 | Enable drift tracer. Not implemented.                                   |
+| `drifttracer`        | `bool`                 | Enable drift tracer. Corrects the delivery time for the clock drift between the peers. |
 | `enforcedencryption` | `bool`                 | Accept connection only if both parties have encryption enabled.         |
 | `fc`                 | `bytes`                | Flow control window size.                                               |
 | `inputbw`            | `bytes`                | Input bandwidth. Ignored.                                               |
