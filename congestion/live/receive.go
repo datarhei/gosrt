@@ -194,11 +194,24 @@ func (r *receiver) Push(pkt packet.Packet) {
 	}
 
 	if pkt.Header().PacketSequenceNumber.Lt(r.lastACKSequenceNumber) {
-		// Already acknowledged, ignoring
-		r.statistics.PktDrop++
-		r.statistics.ByteDrop += pktLen
+		if !pkt.Header().RetransmittedPacketFlag {
+			// Already acknowledged, ignoring
+			r.statistics.PktDrop++
+			r.statistics.ByteDrop += pktLen
 
-		return
+			return
+		}
+		// Retransmission for a sequence number that was ACKed past but
+		// not yet delivered. periodicACK and the delivery loop are
+		// separate critical sections within Tick: lastACKSequenceNumber
+		// can advance past a gap (e.g. when packets after the gap have
+		// ripe PktTsbpdTime) before lastDeliveredSequenceNumber catches
+		// up. A retransmission may legitimately arrive in that window.
+		// Allow it to flow into the out-of-order branch below, where
+		// it will either fill the gap or be detected as a duplicate.
+		// TLPKTDROP semantics are still enforced by the earlier
+		// Lte(lastDeliveredSequenceNumber) check, which drops anything
+		// already delivered or skipped past.
 	}
 
 	if pkt.Header().PacketSequenceNumber.Equals(r.maxSeenSequenceNumber.Inc()) {
