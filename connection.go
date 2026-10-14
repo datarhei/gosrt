@@ -190,7 +190,9 @@ type srtConn struct {
 	tsbpdWrapPeriod     bool
 	tsbpdTimeBaseOffset uint64 // microseconds
 	tsbpdDelay          uint64 // microseconds
-	tsbpdDrift          int64  // microseconds
+	tsbpdPeerOffset     int64  // microseconds
+	havePeerOffset      bool
+	tsbpdDrift          int64 // microseconds
 	driftTracer         *driftTracer
 	peerTsbpdDelay      uint64 // microseconds
 	dropThreshold       uint64 // microseconds
@@ -731,7 +733,19 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 
 	tsbpdTimeBaseOffset := c.getTsbpdTimeBaseOffset(header.Timestamp)
 
-	header.PktTsbpdTime = uint64(int64(c.tsbpdTimeBase+tsbpdTimeBaseOffset+uint64(header.Timestamp)+c.tsbpdDelay) + c.tsbpdDrift)
+	// The offset between the clock of the peer and the local clock is taken from the first original data packet,
+	// such that it is delivered after the TSBPD delay from its arrival. The time of the handshake can't be used for
+	// that, because the peer may use a different clock for the timestamps of the handshake and the data packets.
+	if !c.havePeerOffset && !header.RetransmittedPacketFlag {
+		c.tsbpdPeerOffset = int64(c.getTimestamp()) - int64(tsbpdTimeBaseOffset+uint64(header.Timestamp))
+		c.havePeerOffset = true
+
+		c.log("connection:tsbpd", func() string {
+			return fmt.Sprintf("peer clock offset=%dus", c.tsbpdPeerOffset)
+		})
+	}
+
+	header.PktTsbpdTime = uint64(int64(c.tsbpdTimeBase+tsbpdTimeBaseOffset+uint64(header.Timestamp)+c.tsbpdDelay) + c.tsbpdPeerOffset + c.tsbpdDrift)
 
 	c.log("data:recv:dump", func() string { return p.Dump() })
 
@@ -774,10 +788,15 @@ func (c *srtConn) getTsbpdTimeBaseOffset(timestamp uint32) uint64 {
 // the RTT measured with it. If the drift has been updated, the TSBPD time of the following packets
 // will be corrected accordingly.
 func (c *srtConn) addDriftSample(timestamp uint32, rtt time.Duration) {
-	arrival := c.tsbpdTimeBase + c.getTimestamp()
-	pktBaseTime := c.tsbpdTimeBase + c.getTsbpdTimeBaseOffset(timestamp) + uint64(timestamp)
+	// The drift is relative to the offset of the peer's clock, which is known with the first data packet.
+	if !c.havePeerOffset {
+		return
+	}
 
-	if !c.driftTracer.addSample(int64(arrival), int64(pktBaseTime), rtt.Microseconds()) {
+	arrival := c.tsbpdTimeBase + c.getTimestamp()
+	pktBaseTime := int64(c.tsbpdTimeBase+c.getTsbpdTimeBaseOffset(timestamp)+uint64(timestamp)) + c.tsbpdPeerOffset
+
+	if !c.driftTracer.addSample(int64(arrival), pktBaseTime, rtt.Microseconds()) {
 		return
 	}
 
