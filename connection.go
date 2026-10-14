@@ -1353,6 +1353,28 @@ func (c *srtConn) sendACKACK(ackSequence uint32) {
 
 	p.Header().TypeSpecific = ackSequence
 
+	// Four bytes of zero padding, to match libsrt.
+	//
+	// An ACKACK carries no control information of its own — the ACK
+	// sequence number travels in the header's Type-specific Information
+	// field above — so by the RFC it needs no payload. libsrt, however,
+	// rejects a control packet with a zero-length payload and logs an
+	// error for every ACKACK it receives:
+	//
+	//	EPE: incoming UMSG: 6 INVALID SIZE: 0
+	//	     (expected > 0 and aligned to 4 bytes)
+	//
+	// At one ACK every 10 ms that is several error lines a second in the
+	// log of every libsrt peer, which buries real transport errors.
+	//
+	// libsrt pads its own ACKACK, KEEPALIVE and SHUTDOWN with a 4-byte
+	// m_extra_pad for the same reason (srtcore/packet.cpp: "control info
+	// field should be none but writev does not allow this"), and this
+	// package already does exactly this for SHUTDOWN, where
+	// CIFShutdown.Marshal writes four zero bytes. This brings ACKACK in
+	// line with both.
+	p.SetData(make([]byte, 4))
+
 	c.log("control:send:ACKACK:dump", func() string { return p.Dump() })
 
 	c.statisticsLock.Lock()
