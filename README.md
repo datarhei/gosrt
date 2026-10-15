@@ -33,6 +33,7 @@ Congestion Control (FileCC) are not implemented.
 | ✅  | Live Congestion Control (LiveCC)          |
 | ✅  | NAK and Peridoc NAK                       |
 | ✅  | Encryption                                |
+| ✅  | Packet Filtering (FEC)                    |
 | ❌  | Buffer mode                               |
 | ❌  | Rendezvous Handshake                      |
 | ❌  | File Transfer Congestion Control (FileCC) |
@@ -77,6 +78,36 @@ conn.Close()
 ```
 
 In the `contrib/client` directory you'll find a complete example of a SRT client.
+
+## Forward Error Correction (FEC)
+
+Forward Error Correction (FEC) adds redundancy to the data stream, allowing the receiver to rebuild lost packets without needing them to be retransmitted. This is especially useful in high-latency or extremely lossy networks (such as satellite or microwave links) where traditional ARQ (retransmission) would take too long or be inefficient.
+
+GoSRT implements FEC based on the [SMPTE 2022-1-2007 standard](https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md) via the SRT Packet Filtering framework. Both parties (sender and receiver) must configure FEC for it to be successfully negotiated.
+
+You can enable FEC by providing a `PacketFilter` configuration string. The syntax is:
+`fec,cols:<N>,rows:<N>,layout:<even|staircase>`
+
+- **`cols`**: The number of columns in the FEC matrix (e.g., number of data packets before an FEC packet).
+- **`rows`**: The number of rows in the FEC matrix.
+- **`layout`**: The arrangement of packets (`even` or `staircase`).
+
+### Example
+
+```go
+import "github.com/datarhei/gosrt"
+
+config := srt.DefaultConfig()
+
+// Enable FEC with 5 columns, 1 row, and an even layout.
+// This means for every 5 data packets, 1 redundant FEC packet is sent.
+config.PacketFilter = "fec,cols:5,rows:1,layout:even"
+
+conn, err := srt.Dial("srt", "golang.org:6000", config)
+if err != nil {
+    // handle error
+}
+```
 
 ## Listener example
 
