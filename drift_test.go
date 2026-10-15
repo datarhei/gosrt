@@ -70,3 +70,20 @@ func TestDriftTracerRTTChange(t *testing.T) {
 
 	require.InDelta(t, 0, d.correction(), 2)
 }
+
+func TestDriftTracerInflatedFirstRTT(t *testing.T) {
+	d := newDriftTracer()
+
+	// The first RTT sample is inflated, all others are steady. There's no drift.
+	for i := uint(1); i <= d.maxSpan; i++ {
+		rtt := int64(2000)
+		if i == 1 {
+			rtt = 9500
+		}
+
+		pktBaseTime := int64(i) * 10_000
+		d.addSample(pktBaseTime, pktBaseTime, rtt)
+	}
+
+	require.InDelta(t, 0, d.correction(), 10)
+}
