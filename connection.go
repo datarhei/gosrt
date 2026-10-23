@@ -1351,8 +1351,7 @@ func (c *srtConn) sendNAK(list []circular.Number) {
 }
 
 // sendACK sends an ACK to the peer with the given sequence number. A full ACK
-// that would only repeat what the peer has already confirmed is dropped, see
-// dropRepeatedACK.
+// that repeats an unchanged sequence is deferred according to dropRepeatedACK.
 func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 	c.ackLock.Lock()
 	defer c.ackLock.Unlock()
@@ -1414,20 +1413,23 @@ func (c *srtConn) sendACK(seq circular.Number, lite bool) {
 	c.pop(p)
 }
 
-// dropRepeatedACK reports whether a full ACK for seq would tell the peer only
-// what it already knows, in which case it is not worth a packet.
+// dropRepeatedACK reports whether a full ACK for seq can be deferred without
+// removing the bounded control traffic that keeps an idle peer reachable.
 //
 // The periodic ACK is paced by a 10 ms timer rather than by traffic, so a
 // connection carrying a couple of packets per second still produces ~100 ACKs
 // per second. Each is 72 bytes on the wire once IPv4 and UDP are counted, and
 // each obliges the sender to answer with a 44 byte ACKACK. On a low bitrate
-// live link — a 1 fps camera on a cellular or satellite uplink, say — that
+// live link (a 1 fps camera on a cellular or satellite uplink, for example) that
 // exchange costs several times what the media does, in both directions.
 //
 // libsrt suppresses the repeats: CUDT::sendCtrlAck() returns early when the
 // sequence number has not advanced since the last ACKACK, and lets the
 // remaining repeats through no more than once per RTT + 4 RTTVar. This is the
-// same rule. Anything that acknowledges new data is always sent.
+// same rule for unconfirmed ACKs. A confirmed repeat is sent at most once per
+// second: gosrt does not initiate idle KEEPALIVE packets, so suppressing every
+// confirmed repeat lets two idle gosrt peers reach their peer-idle deadlines.
+// Anything that acknowledges new data is always sent.
 //
 // The caller must hold ackLock.
 func (c *srtConn) dropRepeatedACK(seq circular.Number) bool {
@@ -1436,11 +1438,11 @@ func (c *srtConn) dropRepeatedACK(seq circular.Number) bool {
 	}
 
 	if c.haveACKedACK && seq.Equals(c.lastACKedACK) {
-		return true // the peer has already confirmed exactly this
+		return time.Since(c.lastSentACKTime) < time.Second
 	}
 
 	// Unconfirmed: either the ACK or its ACKACK may have been lost, so keep
-	// repeating — but at the RTT, not at the 10 ms tick.
+	// repeating at the RTT instead of the 10 ms tick.
 	repeatAfter := time.Duration(c.rtt.RTT()+4*c.rtt.RTTVar()) * time.Microsecond
 
 	return time.Since(c.lastSentACKTime) < repeatAfter
