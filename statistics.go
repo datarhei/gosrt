@@ -36,6 +36,7 @@ type StatisticsAccumulated struct {
 	PktRecvNAK       uint64 // The total number of received NAK (Negative Acknowledgement) control packets
 	PktSentKM        uint64 // The total number of sent KM (Key Material) control packets
 	PktRecvKM        uint64 // The total number of received KM (Key Material) control packets
+	PktRecvShutdown  uint64 // The total number of received SHUTDOWN control packets: the peer closed the connection on purpose
 	UsSndDuration    uint64 // The total accumulated time in microseconds, during which the SRT sender has some data to transmit, including packets that have been sent, but not yet acknowledged
 	PktRecvBelated   uint64 // The total number of packets that arrived too late
 	PktRecvLate      uint64 // The total number of packets that arrived late (out of order) but in time
@@ -161,6 +162,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		PktRecvNAK:        c.statistics.pktRecvNAK,
 		PktSentKM:         c.statistics.pktSentKM,
 		PktRecvKM:         c.statistics.pktRecvKM,
+		PktRecvShutdown:   c.statistics.pktRecvShutdown,
 		UsSndDuration:     send.UsSndDuration,
 		PktSendDrop:       send.PktDrop,
 		PktRecvDrop:       recv.PktDrop,
