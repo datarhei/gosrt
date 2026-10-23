@@ -191,7 +191,10 @@ type srtConn struct {
 	tsbpdWrapPeriod     bool
 	tsbpdTimeBaseOffset uint64 // microseconds
 	tsbpdDelay          uint64 // microseconds
-	tsbpdDrift          uint64 // microseconds
+	tsbpdPeerOffset     int64  // microseconds
+	havePeerOffset      bool
+	tsbpdDrift          int64 // microseconds
+	driftTracer         *driftTracer
 	peerTsbpdDelay      uint64 // microseconds
 	dropThreshold       uint64 // microseconds
 
@@ -313,6 +316,10 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	}
 
 	c.readQueue = make(chan packet.Packet, 1024)
+
+	if c.config.DriftTracer {
+		c.driftTracer = newDriftTracer()
+	}
 
 	c.peerIdleTimeout = time.AfterFunc(c.config.PeerIdleTimeout, func() {
 		c.log("connection:close", func() string {
@@ -764,14 +771,21 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 		}
 	}
 
-	tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
-	if c.tsbpdWrapPeriod {
-		if header.Timestamp < (30 * 1000000) {
-			tsbpdTimeBaseOffset += uint64(packet.MAX_TIMESTAMP) + 1
-		}
+	tsbpdTimeBaseOffset := c.getTsbpdTimeBaseOffset(header.Timestamp)
+
+	// The offset between the clock of the peer and the local clock is taken from the first original data packet,
+	// such that it is delivered after the TSBPD delay from its arrival. The time of the handshake can't be used for
+	// that, because the peer may use a different clock for the timestamps of the handshake and the data packets.
+	if !c.havePeerOffset && !header.RetransmittedPacketFlag {
+		c.tsbpdPeerOffset = int64(c.getTimestamp()) - int64(tsbpdTimeBaseOffset+uint64(header.Timestamp))
+		c.havePeerOffset = true
+
+		c.log("connection:tsbpd", func() string {
+			return fmt.Sprintf("peer clock offset=%dus", c.tsbpdPeerOffset)
+		})
 	}
 
-	header.PktTsbpdTime = c.tsbpdTimeBase + tsbpdTimeBaseOffset + uint64(header.Timestamp) + c.tsbpdDelay + c.tsbpdDrift
+	header.PktTsbpdTime = uint64(int64(c.tsbpdTimeBase+tsbpdTimeBaseOffset+uint64(header.Timestamp)+c.tsbpdDelay) + c.tsbpdPeerOffset + c.tsbpdDrift)
 
 	c.log("data:recv:dump", func() string { return p.Dump() })
 
@@ -795,6 +809,42 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 
 	// Put the packet into receive congestion control
 	c.recv.Push(p)
+}
+
+// getTsbpdTimeBaseOffset returns the offset to the TSBPD time base for a packet with the given timestamp,
+// taking into account the wrapping of the timestamp.
+func (c *srtConn) getTsbpdTimeBaseOffset(timestamp uint32) uint64 {
+	tsbpdTimeBaseOffset := c.tsbpdTimeBaseOffset
+	if c.tsbpdWrapPeriod {
+		if timestamp < (30 * 1000000) {
+			tsbpdTimeBaseOffset += uint64(packet.MAX_TIMESTAMP) + 1
+		}
+	}
+
+	return tsbpdTimeBaseOffset
+}
+
+// addDriftSample adds a sample to the drift tracer from an ACKACK with the given timestamp and
+// the RTT measured with it. If the drift has been updated, the TSBPD time of the following packets
+// will be corrected accordingly.
+func (c *srtConn) addDriftSample(timestamp uint32, rtt time.Duration) {
+	// The drift is relative to the offset of the peer's clock, which is known with the first data packet.
+	if !c.havePeerOffset {
+		return
+	}
+
+	arrival := c.tsbpdTimeBase + c.getTimestamp()
+	pktBaseTime := int64(c.tsbpdTimeBase+c.getTsbpdTimeBaseOffset(timestamp)+uint64(timestamp)) + c.tsbpdPeerOffset
+
+	if !c.driftTracer.addSample(int64(arrival), pktBaseTime, rtt.Microseconds()) {
+		return
+	}
+
+	c.tsbpdDrift = c.driftTracer.correction()
+
+	c.log("connection:tsbpd", func() string {
+		return fmt.Sprintf("drift=%dus base shift=%dus correction=%dus", c.driftTracer.drift, c.driftTracer.baseShift, c.tsbpdDrift)
+	})
 }
 
 // handleKeepAlive resets the idle timeout and sends a keepalive to the peer.
@@ -897,7 +947,13 @@ func (c *srtConn) handleACKACK(p packet.Packet) {
 	// p.typeSpecific is the ACKNumber
 	if ack, ok := c.ackNumbers[p.Header().TypeSpecific]; ok {
 		// 4.10.  Round-Trip Time Estimation
-		c.recalculateRTT(time.Since(ack.timestamp))
+		rtt := time.Since(ack.timestamp)
+		c.recalculateRTT(rtt)
+
+		// The ACKACK is also used to trace the clock drift
+		if c.driftTracer != nil {
+			c.addDriftSample(p.Header().Timestamp, rtt)
+		}
 
 		// Remember what the peer has confirmed, so that sendACK can drop a
 		// periodic ACK that would repeat it.
