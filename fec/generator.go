@@ -9,7 +9,7 @@ import (
 // Generator is responsible for generating FEC control packets.
 type Generator struct {
 	config Config
-	
+
 	mu     sync.Mutex
 	buffer []packet.Packet
 }
@@ -36,10 +36,10 @@ func (g *Generator) AddPacket(p packet.Packet) []packet.Packet {
 	if len(g.buffer) >= g.config.Cols {
 		// Generate one FEC control packet for the row
 		ctrl := g.generateRowFEC()
-		
+
 		// Reset buffer for the next row
 		g.buffer = g.buffer[:0]
-		
+
 		// Create the gosrt packet
 		fecPkt := WriteControlPacket(p.Header().DestinationSocketId, ctrl)
 		return []packet.Packet{fecPkt}
@@ -76,15 +76,15 @@ func (g *Generator) generateRowFEC() *ControlPacket {
 		// Flags: we'd XOR KK flags here
 		flags := byte(p.Header().KeyBaseEncryptionFlag.Val() & 0x03)
 		ctrl.FlagsRecov ^= flags
-		
+
 		length := uint16(p.Len())
 		ctrl.LengthRecov ^= length
-		
+
 		data := p.Data()
 		for i := 0; i < len(data); i++ {
 			ctrl.PayloadRecov[i] ^= data[i]
 		}
 	}
-	
+
 	return ctrl
 }

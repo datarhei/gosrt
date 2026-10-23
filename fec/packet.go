@@ -58,24 +58,24 @@ func WriteControlPacket(destSocketId uint32, ctrl *ControlPacket) packet.Packet 
 	p.Header().MessageNumber = 0
 	p.Header().Timestamp = ctrl.TimestampRecov
 	p.Header().DestinationSocketId = destSocketId
-	
-	// Flags for FEC control packet according to spec
-	p.Header().PacketPositionFlag = packet.SinglePacket // 11b
-	p.Header().OrderFlag = true                                  // Live mode typical
-	p.Header().KeyBaseEncryptionFlag = packet.UnencryptedPacket // 00b
-	p.Header().RetransmittedPacketFlag = true                    // Must be 1 to prevent reordering logic
 
-	payload := make([]byte, ExtraHeaderSize + len(ctrl.PayloadRecov))
-	
+	// Flags for FEC control packet according to spec
+	p.Header().PacketPositionFlag = packet.SinglePacket         // 11b
+	p.Header().OrderFlag = true                                 // Live mode typical
+	p.Header().KeyBaseEncryptionFlag = packet.UnencryptedPacket // 00b
+	p.Header().RetransmittedPacketFlag = true                   // Must be 1 to prevent reordering logic
+
+	payload := make([]byte, ExtraHeaderSize+len(ctrl.PayloadRecov))
+
 	// Write Extra FEC header
 	payload[0] = byte(ctrl.GroupIndex)
 	payload[1] = ctrl.FlagsRecov
 	binary.BigEndian.PutUint16(payload[2:4], ctrl.LengthRecov)
-	
+
 	// Write payload recovery
 	copy(payload[4:], ctrl.PayloadRecov)
-	
+
 	p.SetData(payload)
-	
+
 	return p
 }

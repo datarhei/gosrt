@@ -215,7 +215,7 @@ type srtConn struct {
 	// Congestion control
 	recv congestion.Receiver
 	snd  congestion.Sender
-	
+
 	// FEC
 	fecGen *fec.Generator
 	fecRec *fec.Reconstructor
@@ -731,7 +731,7 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	// Process FEC filter
 	if c.fecRec != nil {
 		recoveredPkts := c.fecRec.AddPacket(p)
-		
+
 		if header.MessageNumber == 0 {
 			c.log("connection:filter", func() string { return "processed FEC filter control packet" })
 			for _, recPkt := range recoveredPkts {
@@ -740,7 +740,7 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 			}
 			return
 		}
-		
+
 		for _, recPkt := range recoveredPkts {
 			c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", recPkt.Header().PacketSequenceNumber.Val()) })
 			c.handlePacket(recPkt)

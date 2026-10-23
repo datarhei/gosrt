@@ -33,7 +33,7 @@ func (p *LossyProxy) Start(listenAddr string, forwardAddr string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	p.conn, err = net.ListenUDP("udp", listenUdpAddr)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func (p *LossyProxy) Start(listenAddr string, forwardAddr string) error {
 			if err != nil {
 				return
 			}
-			
+
 			packetCopy := make([]byte, n)
 			copy(packetCopy, buf[:n])
 
@@ -87,7 +87,7 @@ func (p *LossyProxy) Stop() {
 	}
 }
 
-func TestFEC_Benefit_WithoutFECDropsPackets(t *testing.T) {
+func TestFECBenefitWithoutFECDropsPackets(t *testing.T) {
 	// Start lossy proxy
 	proxy := &LossyProxy{
 		delay:    100 * time.Millisecond,
@@ -100,7 +100,7 @@ func TestFEC_Benefit_WithoutFECDropsPackets(t *testing.T) {
 	// Server config
 	serverConfig := DefaultConfig()
 	// Set low latency so that ARQ cannot recover the packets in time (RTT = 200ms)
-	serverConfig.Latency = 120 * time.Millisecond 
+	serverConfig.Latency = 120 * time.Millisecond
 
 	ln, err := Listen("srt", "127.0.0.1:6006", serverConfig)
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestFEC_Benefit_WithoutFECDropsPackets(t *testing.T) {
 				break
 			}
 		}
-		
+
 		var stats Statistics
 		conn.Stats(&stats)
 		serverStats = &stats
@@ -168,7 +168,7 @@ func TestFEC_Benefit_WithoutFECDropsPackets(t *testing.T) {
 	require.Greater(t, serverStats.Accumulated.PktRecvDrop, uint64(0), "Expected receiver to drop packets due to ARQ being too slow. This proves FEC is needed.")
 }
 
-func TestFEC_Benefit_WithFECReconstructsPackets(t *testing.T) {
+func TestFECBenefitWithFECReconstructsPackets(t *testing.T) {
 	// Start lossy proxy
 	proxy := &LossyProxy{
 		delay:    100 * time.Millisecond,
@@ -180,7 +180,7 @@ func TestFEC_Benefit_WithFECReconstructsPackets(t *testing.T) {
 
 	// Server config
 	serverConfig := DefaultConfig()
-	serverConfig.Latency = 120 * time.Millisecond 
+	serverConfig.Latency = 120 * time.Millisecond
 	serverConfig.PacketFilter = "fec,cols:10,rows:1,layout:even"
 
 	ln, err := Listen("srt", "127.0.0.1:6008", serverConfig)
@@ -210,10 +210,11 @@ func TestFEC_Benefit_WithFECReconstructsPackets(t *testing.T) {
 				break
 			}
 			if n > 0 {
-				receivedCount++; fmt.Printf("Recv Pkt len=%d\n", n)
+				receivedCount++
+				fmt.Printf("Recv Pkt len=%d\n", n)
 			}
 		}
-		
+
 		var stats Statistics
 		conn.Stats(&stats)
 		serverStats = &stats
@@ -255,8 +256,7 @@ func TestFEC_Benefit_WithFECReconstructsPackets(t *testing.T) {
 	fmt.Printf("Packets Lost at Receiver (Network Gaps): %d\n", serverStats.Accumulated.PktRecvLoss)
 	fmt.Printf("----------------------------------\n\n")
 
-	// Note: We don't check serverStats.Accumulated.PktRecvDrop == 0 anymore, 
+	// Note: We don't check serverStats.Accumulated.PktRecvDrop == 0 anymore,
 	// because ARQ will still retransmit late packets and they will be counted as dropped.
 	// The true verification is the require.Equal(t, 100, receivedCount) in the reader goroutine!
 }
-
