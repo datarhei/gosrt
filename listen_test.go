@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -715,6 +716,10 @@ func TestListenDiscardRepeatedHandshakes(t *testing.T) {
 }
 
 func TestListenMultipleIPs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Skipping test: this test only runs on Linux")
+	}
+
 	ln, err := Listen("srt", "0.0.0.0:6003", DefaultConfig())
 	require.NoError(t, err)
 	defer ln.Close()
