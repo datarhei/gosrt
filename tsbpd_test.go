@@ -77,3 +77,57 @@ func TestTSBPDPeerClockLater(t *testing.T) {
 func TestTSBPDPeerClockEarlier(t *testing.T) {
 	testPeerClockOffset(t, -200*time.Millisecond)
 }
+
+func TestControlBaseTimeWrap(t *testing.T) {
+	c := &srtConn{}
+	c.tsbpdPeerOffset = 1000
+	c.havePeerOffset = true
+
+	wrap := int64(packet.MAX_TIMESTAMP) + 1
+	at := func(ts uint32, carry int64) int64 { return carry + int64(ts) + c.tsbpdPeerOffset }
+
+	// Far from a wrap
+	c.tsbpdTimeBaseOffset = 0
+	c.tsbpdWrapPeriod = false
+	require.Equal(t, at(100_000_000, 0), c.controlBaseTime(100_000_000, at(100_000_000, 0)+50))
+
+	// The data packets are in the wrap period. A control packet from before the wrap.
+	c.tsbpdWrapPeriod = true
+	ts := uint32(packet.MAX_TIMESTAMP - 10_000)
+	require.Equal(t, at(ts, 0), c.controlBaseTime(ts, at(ts, 0)+50))
+
+	// A control packet from after the wrap, but within the first 30s
+	ts = 5_000_000
+	require.Equal(t, at(ts, wrap), c.controlBaseTime(ts, at(ts, wrap)+50))
+
+	// A control packet whose timestamp is already past 30s, while the data packets are still in the wrap period
+	ts = 30_005_000
+	require.Equal(t, at(ts, wrap), c.controlBaseTime(ts, at(ts, wrap)+50))
+
+	// The wrap period of the data packets ended, the offset includes the wrap
+	c.tsbpdTimeBaseOffset = uint64(wrap)
+	c.tsbpdWrapPeriod = false
+	require.Equal(t, at(ts, wrap), c.controlBaseTime(ts, at(ts, wrap)+50))
+
+	// A late control packet from before the wrap, after the wrap period ended
+	ts = uint32(packet.MAX_TIMESTAMP - 10_000)
+	require.Equal(t, at(ts, 0), c.controlBaseTime(ts, at(ts, 0)+50))
+}
+
+func TestDriftSampleAtWrap(t *testing.T) {
+	c := &srtConn{}
+	c.havePeerOffset = true
+	c.tsbpdWrapPeriod = true
+
+	wrap := int64(packet.MAX_TIMESTAMP) + 1
+	d := newDriftTracer()
+
+	// ACKACKs around the end of the wrap period of the data packets, without any drift
+	for i := range d.maxSpan {
+		ts := uint32(29_990_000 + i*20)
+		arrival := wrap + int64(ts)
+		d.addSample(arrival, c.controlBaseTime(ts, arrival), 20_000)
+	}
+
+	require.InDelta(t, 0, d.correction(), 10)
+}

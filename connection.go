@@ -824,6 +824,33 @@ func (c *srtConn) getTsbpdTimeBaseOffset(timestamp uint32) uint64 {
 	return tsbpdTimeBaseOffset
 }
 
+// controlBaseTime returns the time of the timestamp of a control packet on the local time base. The wrap period
+// of the timestamps is tracked with the data packets, but the timestamps of control packets may be ahead of the
+// data packets, e.g. by the time the data packets spend in the queue of the sender. Near a wrap of the timestamp,
+// the wrap period may not match the control packet. Therefore, the wrap that brings the time closest to the
+// arrival of the control packet is taken.
+func (c *srtConn) controlBaseTime(timestamp uint32, arrival int64) int64 {
+	wrap := int64(packet.MAX_TIMESTAMP) + 1
+	base := int64(c.tsbpdTimeBase+c.tsbpdTimeBaseOffset+uint64(timestamp)) + c.tsbpdPeerOffset
+
+	best := base
+	for _, t := range []int64{base - wrap, base + wrap} {
+		if abs64(arrival-t) < abs64(arrival-best) {
+			best = t
+		}
+	}
+
+	return best
+}
+
+func abs64(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+
+	return x
+}
+
 // addDriftSample adds a sample to the drift tracer from an ACKACK with the given timestamp and
 // the RTT measured with it. If the drift has been updated, the TSBPD time of the following packets
 // will be corrected accordingly.
@@ -833,10 +860,10 @@ func (c *srtConn) addDriftSample(timestamp uint32, rtt time.Duration) {
 		return
 	}
 
-	arrival := c.tsbpdTimeBase + c.getTimestamp()
-	pktBaseTime := int64(c.tsbpdTimeBase+c.getTsbpdTimeBaseOffset(timestamp)+uint64(timestamp)) + c.tsbpdPeerOffset
+	arrival := int64(c.tsbpdTimeBase + c.getTimestamp())
+	pktBaseTime := c.controlBaseTime(timestamp, arrival)
 
-	if !c.driftTracer.addSample(int64(arrival), pktBaseTime, rtt.Microseconds()) {
+	if !c.driftTracer.addSample(arrival, pktBaseTime, rtt.Microseconds()) {
 		return
 	}
 
