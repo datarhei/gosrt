@@ -17,6 +17,7 @@ type ReceiveConfig struct {
 	InitialSequenceNumber circular.Number
 	PeriodicACKInterval   uint64 // microseconds
 	PeriodicNAKInterval   uint64 // microseconds
+	MaxDropDistance       uint32 // packets ahead of ACK; zero uses the default FC window
 	OnSendACK             func(seq circular.Number, light bool)
 	OnSendNAK             func(list []circular.Number)
 	OnDeliver             func(p packet.Packet)
@@ -28,6 +29,8 @@ type receiver struct {
 	lastACKSequenceNumber       circular.Number
 	lastDeliveredSequenceNumber circular.Number
 	packetList                  *list.List
+	dropRanges                  []dropRange
+	maxDropDistance             uint32
 	lock                        sync.RWMutex
 
 	nPackets uint
@@ -72,6 +75,7 @@ func NewReceiver(config ReceiveConfig) congestion.Receiver {
 		lastACKSequenceNumber:       config.InitialSequenceNumber.Dec(),
 		lastDeliveredSequenceNumber: config.InitialSequenceNumber.Dec(),
 		packetList:                  list.New(),
+		maxDropDistance:             config.MaxDropDistance,
 
 		periodicACKInterval: config.PeriodicACKInterval,
 		periodicNAKInterval: config.PeriodicNAKInterval,
@@ -81,6 +85,10 @@ func NewReceiver(config ReceiveConfig) congestion.Receiver {
 		sendACK: config.OnSendACK,
 		sendNAK: config.OnSendNAK,
 		deliver: config.OnDeliver,
+	}
+
+	if r.maxDropDistance == 0 || r.maxDropDistance >= packet.MAX_SEQUENCENUMBER/2 {
+		r.maxDropDistance = 25600
 	}
 
 	if r.sendACK == nil {
@@ -129,6 +137,7 @@ func (r *receiver) Flush() {
 	defer r.lock.Unlock()
 
 	r.packetList = r.packetList.Init()
+	r.dropRanges = nil
 }
 
 func (r *receiver) Push(pkt packet.Packet) {
@@ -193,7 +202,7 @@ func (r *receiver) Push(pkt packet.Packet) {
 		return
 	}
 
-	if pkt.Header().PacketSequenceNumber.Lt(r.lastACKSequenceNumber) {
+	if pkt.Header().PacketSequenceNumber.Lte(r.lastACKSequenceNumber) {
 		// Already acknowledged, ignoring
 		r.statistics.PktDrop++
 		r.statistics.ByteDrop += pktLen
@@ -203,9 +212,10 @@ func (r *receiver) Push(pkt packet.Packet) {
 
 	if pkt.Header().PacketSequenceNumber.Equals(r.maxSeenSequenceNumber.Inc()) {
 		// In order, the packet we expected
-		r.maxSeenSequenceNumber = pkt.Header().PacketSequenceNumber
+		r.maxSeenSequenceNumber = r.skipDropped(pkt.Header().PacketSequenceNumber)
 	} else if pkt.Header().PacketSequenceNumber.Lte(r.maxSeenSequenceNumber) {
 		// Out of order, is it a missing piece? put it in the correct position
+		var before *list.Element
 		for e := r.packetList.Front(); e != nil; e = e.Next() {
 			p := e.Value.(packet.Packet)
 
@@ -214,38 +224,40 @@ func (r *receiver) Push(pkt packet.Packet) {
 				r.statistics.PktDrop++
 				r.statistics.ByteDrop += pktLen
 
-				break
+				return
 			} else if p.Header().PacketSequenceNumber.Gt(pkt.Header().PacketSequenceNumber) {
-				// Late arrival, this fills a gap
-				r.statistics.PktBuf++
-				r.statistics.PktUnique++
-				r.statistics.PktLate++
-
-				r.statistics.ByteBuf += pktLen
-				r.statistics.ByteUnique += pktLen
-				r.statistics.ByteLate += pktLen
-
-				r.packetList.InsertBefore(pkt, e)
-
+				before = e
 				break
 			}
+		}
+		// A DROPREQ can extend maxSeen past the last buffered packet. Accept
+		// a packet in that tail if it arrives before the drop is acknowledged.
+		r.statistics.PktBuf++
+		r.statistics.PktUnique++
+		r.statistics.PktLate++
+		r.statistics.ByteBuf += pktLen
+		r.statistics.ByteUnique += pktLen
+		r.statistics.ByteLate += pktLen
+		if before != nil {
+			r.packetList.InsertBefore(pkt, before)
+		} else {
+			r.packetList.PushBack(pkt)
 		}
 
 		return
 	} else {
 		// Too far ahead, there are some missing sequence numbers, immediate NAK report
 		// here we can prevent a possibly unnecessary NAK with implementing SRTO_LOSSMAXTTL
-		r.sendNAK([]circular.Number{
-			r.maxSeenSequenceNumber.Inc(),
-			pkt.Header().PacketSequenceNumber.Dec(),
-		})
+		if missing := r.appendMissing(nil, r.maxSeenSequenceNumber.Inc(), pkt.Header().PacketSequenceNumber.Dec()); len(missing) != 0 {
+			r.sendNAK(missing)
+		}
 
 		// The distance is one more than the actual lost packets
 		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber)) - 1
 		r.statistics.PktLoss += len
 		r.statistics.ByteLoss += len * uint64(r.avgPayloadSize)
 
-		r.maxSeenSequenceNumber = pkt.Header().PacketSequenceNumber
+		r.maxSeenSequenceNumber = r.skipDropped(pkt.Header().PacketSequenceNumber)
 	}
 
 	r.statistics.PktBuf++
@@ -286,6 +298,7 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 
 	for e := r.packetList.Front(); e != nil; e = e.Next() {
 		p := e.Value.(packet.Packet)
+		ackSequenceNumber = r.skipDropped(ackSequenceNumber)
 
 		// Skip packets that we already ACK'd.
 		if p.Header().PacketSequenceNumber.Lte(ackSequenceNumber) {
@@ -308,6 +321,7 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 
 		break
 	}
+	ackSequenceNumber = r.skipDropped(ackSequenceNumber)
 
 	ok = true
 	sequenceNumber = ackSequenceNumber.Inc()
@@ -315,6 +329,7 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 	// Keep track of the last ACK's sequence number. With this we can faster ignore
 	// packets that come in late that have a lower sequence number.
 	r.lastACKSequenceNumber = ackSequenceNumber
+	r.pruneDrops()
 
 	r.lastPeriodicACK = now
 	r.nPackets = 0
@@ -323,8 +338,8 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 }
 
 func (r *receiver) periodicNAK(now uint64) []circular.Number {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	if now-r.lastPeriodicNAK < r.periodicNAKInterval {
 		return nil
@@ -348,10 +363,7 @@ func (r *receiver) periodicNAK(now uint64) []circular.Number {
 
 		// If this packet is not in sequence, we stop here and report that gap.
 		if !p.Header().PacketSequenceNumber.Equals(ackSequenceNumber.Inc()) {
-			nackSequenceNumber := ackSequenceNumber.Inc()
-
-			list = append(list, nackSequenceNumber)
-			list = append(list, p.Header().PacketSequenceNumber.Dec())
+			list = r.appendMissing(list, ackSequenceNumber.Inc(), p.Header().PacketSequenceNumber.Dec())
 		}
 
 		ackSequenceNumber = p.Header().PacketSequenceNumber

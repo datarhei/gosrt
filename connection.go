@@ -336,6 +336,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
 		PeriodicACKInterval:   10_000,
 		PeriodicNAKInterval:   20_000,
+		MaxDropDistance:       c.config.FC,
 		OnSendACK:             c.sendACK,
 		OnSendNAK:             c.sendNAK,
 		OnDeliver:             c.deliver,
@@ -693,6 +694,8 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 			c.handleShutdown(p)
 		} else if header.ControlType == packet.CTRLTYPE_NAK {
 			c.handleNAK(p)
+		} else if header.ControlType == packet.CRTLTYPE_DROPREQ {
+			c.handleDropReq(p)
 		} else if header.ControlType == packet.CTRLTYPE_ACK {
 			c.handleACK(p)
 		} else if header.ControlType == packet.CTRLTYPE_ACKACK {
@@ -907,6 +910,23 @@ func (c *srtConn) handleACK(p packet.Packet) {
 		c.statisticsLock.Unlock()
 
 		c.sendACKACK(p.Header().TypeSpecific)
+	}
+}
+
+// handleDropReq stops requesting packets that the sender can no longer resend.
+func (c *srtConn) handleDropReq(p packet.Packet) {
+	c.log("control:recv:DROPREQ:dump", func() string { return p.Dump() })
+	cif := &packet.CIFDropReq{}
+	if err := p.UnmarshalCIF(cif); err != nil {
+		c.statisticsLock.Lock()
+		c.statistics.pktRecvInvalid++
+		c.statisticsLock.Unlock()
+		c.log("control:recv:DROPREQ:error", func() string { return fmt.Sprintf("invalid DROPREQ: %s", err) })
+		return
+	}
+	c.log("control:recv:DROPREQ:cif", func() string { return cif.String() })
+	if dropper, ok := c.recv.(congestion.ReceiverDropper); ok {
+		dropper.Drop(cif.FirstPacketSequenceNumber, cif.LastPacketSequenceNumber)
 	}
 }
 
