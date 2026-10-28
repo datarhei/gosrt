@@ -267,15 +267,16 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 
 		ln.lock.Lock()
 
-		// We received a duplicate request: reject silently
-		_, exists := ln.connsByPeer[cif.SRTSocketId]
+		// We received a duplicate request from the same peer (same remote address
+		// and same peer socket ID): reject silently
+		_, exists := ln.connsByPeer[newPeerKey(p.Header().Addr, cif.SRTSocketId)]
 		if exists {
 			ln.lock.Unlock()
 			return nil
 		}
 
 		// Already fill connsByPeer for this connection
-		ln.connsByPeer[cif.SRTSocketId] = nil
+		ln.connsByPeer[newPeerKey(p.Header().Addr, cif.SRTSocketId)] = nil
 
 		// Already reserve a socketId for this connection
 		socketId, err := req.generateSocketId()
@@ -352,7 +353,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.lock.Lock()
 	defer req.ln.lock.Unlock()
 
-	if cr, hasReq := req.ln.connsByPeer[req.peerSocketId]; !hasReq || cr != nil {
+	if cr, hasReq := req.ln.connsByPeer[newPeerKey(req.addr, req.peerSocketId)]; !hasReq || cr != nil {
 		return
 	}
 
@@ -371,7 +372,7 @@ func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.send(p)
 
 	delete(req.ln.conns, req.socketId)
-	delete(req.ln.connsByPeer, req.peerSocketId)
+	delete(req.ln.connsByPeer, newPeerKey(req.addr, req.peerSocketId))
 }
 
 // generateSocketId generates an SRT SocketID that can be used for this connection
@@ -400,7 +401,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.lock.Lock()
 	defer req.ln.lock.Unlock()
 
-	if cr, hasReq := req.ln.connsByPeer[req.peerSocketId]; !hasReq || cr != nil {
+	if cr, hasReq := req.ln.connsByPeer[newPeerKey(req.addr, req.peerSocketId)]; !hasReq || cr != nil {
 		return nil, fmt.Errorf("connection already accepted")
 	}
 
@@ -485,7 +486,7 @@ func (req *connRequest) Accept() (Conn, error) {
 	req.ln.send(p)
 
 	req.ln.conns[req.socketId] = conn
-	req.ln.connsByPeer[req.peerSocketId] = conn
+	req.ln.connsByPeer[newPeerKey(req.addr, req.peerSocketId)] = conn
 
 	return conn, nil
 }

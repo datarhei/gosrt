@@ -125,7 +125,7 @@ type listener struct {
 
 	backlog     chan packet.Packet
 	conns       map[uint32]*srtConn
-	connsByPeer map[uint32]*srtConn
+	connsByPeer map[peerKey]*srtConn
 	lock        sync.RWMutex
 
 	start time.Time
@@ -222,7 +222,7 @@ func Listen(network, address string, config Config) (Listener, error) {
 	ln.pc = newPacketConn(pc)
 
 	ln.conns = make(map[uint32]*srtConn)
-	ln.connsByPeer = make(map[uint32]*srtConn)
+	ln.connsByPeer = make(map[peerKey]*srtConn)
 
 	ln.backlog = make(chan packet.Packet, 128)
 
@@ -365,7 +365,7 @@ func (ln *listener) error() error {
 func (ln *listener) handleShutdown(c *srtConn) {
 	ln.lock.Lock()
 	delete(ln.conns, c.socketId)
-	delete(ln.connsByPeer, c.peerSocketId)
+	delete(ln.connsByPeer, newPeerKey(c.remoteAddr, c.peerSocketId))
 	ln.lock.Unlock()
 }
 
@@ -497,4 +497,24 @@ func (ln *listener) log(topic string, message func() string) {
 	}
 
 	ln.config.Logger.Print(topic, 0, 2, message)
+}
+
+// peerKey identifies a caller by its remote address and its own (peer) socket ID.
+//
+// The peer socket ID alone is not unique: it is chosen by the caller, and two
+// independent callers (e.g. two devices running the same encoder app) can pick
+// the same value. Keying connsByPeer on the socket ID alone made the listener
+// treat the second caller's conclusion handshake as a duplicate of the first and
+// drop it silently for as long as the first connection was alive.
+type peerKey struct {
+	addr     string
+	socketId uint32
+}
+
+func newPeerKey(addr net.Addr, socketId uint32) peerKey {
+	k := peerKey{socketId: socketId}
+	if addr != nil {
+		k.addr = addr.String()
+	}
+	return k
 }
