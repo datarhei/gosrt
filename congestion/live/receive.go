@@ -278,7 +278,6 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 		p := e.Value.(packet.Packet)
 
 		minPktTsbpdTime = p.Header().PktTsbpdTime
-		maxPktTsbpdTime = p.Header().PktTsbpdTime
 	}
 
 	// Find the sequence number up until we have all in a row.
