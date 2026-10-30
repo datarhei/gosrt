@@ -17,6 +17,7 @@ type ReceiveConfig struct {
 	InitialSequenceNumber circular.Number
 	PeriodicACKInterval   uint64 // microseconds
 	PeriodicNAKInterval   uint64 // microseconds
+	ReorderTolerance      uint32 // packets, max. reorder tolerance (SRTO_LOSSMAXTTL)
 	OnSendACK             func(seq circular.Number, light bool)
 	OnSendNAK             func(list []circular.Number)
 	OnDeliver             func(p packet.Packet)
@@ -34,6 +35,12 @@ type receiver struct {
 
 	periodicACKInterval uint64 // config
 	periodicNAKInterval uint64 // config
+	maxReorderTolerance uint32 // config, packets
+
+	reorderTolerance uint32 // packets, current reorder tolerance
+	freshLoss        []freshLoss
+	consecOrdered    int
+	consecEarly      int
 
 	lastPeriodicACK uint64
 	lastPeriodicNAK uint64
@@ -75,6 +82,8 @@ func NewReceiver(config ReceiveConfig) congestion.Receiver {
 
 		periodicACKInterval: config.PeriodicACKInterval,
 		periodicNAKInterval: config.PeriodicNAKInterval,
+		maxReorderTolerance: config.ReorderTolerance,
+		reorderTolerance:    config.ReorderTolerance,
 
 		avgPayloadSize: 1456, //  5.1.2. SRT's Default LiveCC Algorithm
 
@@ -109,6 +118,7 @@ func (r *receiver) Stats() congestion.ReceiveStats {
 	r.statistics.MbpsEstimatedRecvBandwidth = r.rate.bytesPerSecond * 8 / 1024 / 1024
 	r.statistics.MbpsEstimatedLinkCapacity = r.avgLinkCapacity * packet.MAX_PAYLOAD_SIZE * 8 / 1024 / 1024
 	r.statistics.PktLossRate = r.rate.pktLossRate
+	r.statistics.PktReorderTolerance = uint64(r.reorderTolerance)
 
 	return r.statistics
 }
@@ -129,6 +139,7 @@ func (r *receiver) Flush() {
 	defer r.lock.Unlock()
 
 	r.packetList = r.packetList.Init()
+	r.freshLoss = r.freshLoss[:0]
 }
 
 func (r *receiver) Push(pkt packet.Packet) {
@@ -214,6 +225,8 @@ func (r *receiver) Push(pkt packet.Packet) {
 				r.statistics.PktDrop++
 				r.statistics.ByteDrop += pktLen
 
+				r.unlose(pkt)
+
 				break
 			} else if p.Header().PacketSequenceNumber.Gt(pkt.Header().PacketSequenceNumber) {
 				// Late arrival, this fills a gap
@@ -227,18 +240,20 @@ func (r *receiver) Push(pkt packet.Packet) {
 
 				r.packetList.InsertBefore(pkt, e)
 
+				r.unlose(pkt)
+
+				// A retransmitted packet counts as sent in order, an original packet has been reordered.
+				r.inserted(pkt.Header().RetransmittedPacketFlag)
+
 				break
 			}
 		}
 
 		return
 	} else {
-		// Too far ahead, there are some missing sequence numbers, immediate NAK report
-		// here we can prevent a possibly unnecessary NAK with implementing SRTO_LOSSMAXTTL
-		r.sendNAK([]circular.Number{
-			r.maxSeenSequenceNumber.Inc(),
-			pkt.Header().PacketSequenceNumber.Dec(),
-		})
+		// Too far ahead, there are some missing sequence numbers. The NAK is sent immediately or,
+		// with a reorder tolerance (SRTO_LOSSMAXTTL), after that many more packets arrived.
+		r.registerLoss(r.maxSeenSequenceNumber.Inc(), pkt.Header().PacketSequenceNumber.Dec())
 
 		// The distance is one more than the actual lost packets
 		len := uint64(pkt.Header().PacketSequenceNumber.Distance(r.maxSeenSequenceNumber)) - 1
@@ -255,6 +270,8 @@ func (r *receiver) Push(pkt packet.Packet) {
 	r.statistics.ByteUnique += pktLen
 
 	r.packetList.PushBack(pkt)
+
+	r.inserted(true)
 }
 
 func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Number, lite bool) {
@@ -314,6 +331,10 @@ func (r *receiver) periodicACK(now uint64) (ok bool, sequenceNumber circular.Num
 	// Keep track of the last ACK's sequence number. With this we can faster ignore
 	// packets that come in late that have a lower sequence number.
 	r.lastACKSequenceNumber = ackSequenceNumber
+
+	// Gaps up to the ACK'd sequence number are either filled or skipped (TLPKTDROP).
+	// Either way, they must not be reported anymore.
+	r.revokeFreshLoss(ackSequenceNumber)
 
 	r.lastPeriodicACK = now
 	r.nPackets = 0

@@ -86,7 +86,9 @@ type Config struct {
 	// SRTO_LATENCY
 	Latency time.Duration
 
-	// Packet reorder tolerance.
+	// Max. packet reorder tolerance in packets. A gap in the received sequence numbers is reported
+	// with a NAK only after that many more packets arrived. As in libsrt, the actual tolerance adapts
+	// to the reordering on the link, up to this value. 0 means that a gap is reported immediately.
 	// SRTO_LOSSMAXTTL
 	LossMaxTTL uint32
 

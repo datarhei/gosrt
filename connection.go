@@ -343,6 +343,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		InitialSequenceNumber: c.initialPacketSequenceNumber,
 		PeriodicACKInterval:   10_000,
 		PeriodicNAKInterval:   20_000,
+		ReorderTolerance:      c.config.LossMaxTTL,
 		OnSendACK:             c.sendACK,
 		OnSendNAK:             c.sendNAK,
 		OnDeliver:             c.deliver,

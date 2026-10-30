@@ -80,7 +80,7 @@ type StatisticsInterval struct {
 
 	UsSndDuration uint64 // Accumulated time in microseconds, during which the SRT sender has some data to transmit, including packets that have been sent, but not yet acknowledged
 
-	PktReorderDistance uint64
+	PktReorderDistance uint64 // The max. distance in sequence numbers of an original (not retransmitted) packet that arrived out of order
 	PktRecvBelated     uint64 // Number of packets that arrived too late
 	PktRecvLate        uint64 // Number of packets that arrived late (out of order) but in time
 	PktSndDrop         uint64 // Number of dropped by the SRT sender DATA packets that have no chance to be delivered in time
@@ -200,7 +200,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		MbpsSendRate:       float64(s.Accumulated.ByteSent-previous.ByteSent) * 8 / 1024 / 1024 / (float64(interval) / 1000),
 		MbpsRecvRate:       float64(s.Accumulated.ByteRecv-previous.ByteRecv) * 8 / 1024 / 1024 / (float64(interval) / 1000),
 		UsSndDuration:      s.Accumulated.UsSndDuration - previous.UsSndDuration,
-		PktReorderDistance: 0,
+		PktReorderDistance: recv.PktReorderDistance,
 		PktRecvBelated:     s.Accumulated.PktRecvBelated - previous.PktRecvBelated,
 		PktRecvLate:        s.Accumulated.PktRecvLate - previous.PktRecvLate,
 		PktSndDrop:         s.Accumulated.PktSendDrop - previous.PktSendDrop,
@@ -241,7 +241,7 @@ func (c *srtConn) Stats(s *Statistics) {
 		ByteRecvBuf:           recv.ByteBuf,
 		MsRecvBuf:             recv.MsBuf,
 		MsRecvTsbPdDelay:      c.tsbpdDelay / 1000,
-		PktReorderTolerance:   uint64(c.config.LossMaxTTL),
+		PktReorderTolerance:   recv.PktReorderTolerance,
 		PktRecvAvgBelatedTime: 0,
 		PktSendLossRate:       send.PktLossRate,
 		PktRecvLossRate:       recv.PktLossRate,
