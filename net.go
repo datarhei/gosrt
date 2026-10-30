@@ -29,6 +29,16 @@ func ListenControl(config Config) func(network, address string, c syscall.RawCon
 					return
 				}
 			}
+
+			// Bind to a specific interface (SO_BINDTODEVICE), so this socket's
+			// traffic egresses via that interface regardless of the routing
+			// table. Requires CAP_NET_RAW (root).
+			if config.BindToDevice != "" {
+				opErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, config.BindToDevice)
+				if opErr != nil {
+					return
+				}
+			}
 		})
 		if err != nil {
 			return err
@@ -52,6 +62,16 @@ func DialControl(config Config) func(network string, address string, c syscall.R
 			// Set TTL
 			if config.IPTTL > 0 {
 				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, config.IPTTL)
+				if opErr != nil {
+					return
+				}
+			}
+
+			// Bind to a specific interface (SO_BINDTODEVICE), so this socket's
+			// traffic egresses via that interface regardless of the routing
+			// table. Requires CAP_NET_RAW (root).
+			if config.BindToDevice != "" {
+				opErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, config.BindToDevice)
 				if opErr != nil {
 					return
 				}
