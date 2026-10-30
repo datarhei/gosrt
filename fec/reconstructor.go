@@ -15,8 +15,6 @@ type Reconstructor struct {
 
 	packets  map[uint32]packet.Packet
 	controls map[uint32]*ControlPacket
-
-	lastClean uint32
 }
 
 // NewReconstructor creates a new FEC Reconstructor.

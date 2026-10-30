@@ -175,3 +175,47 @@ func TestDropRequestUDPDeliveryAndNAKSuppression(t *testing.T) {
 	server.Stats(&after)
 	require.Equal(t, afterDrop.Accumulated.PktSentNAK, after.Accumulated.PktSentNAK)
 }
+
+func TestDropRequestCancelsDeferredNAK(t *testing.T) {
+	for _, base := range []uint32{100, packet.MAX_SEQUENCENUMBER - 5} {
+		t.Run(strconv.FormatUint(uint64(base), 10), func(t *testing.T) {
+			initial := circular.New(base, packet.MAX_SEQUENCENUMBER)
+			var ack circular.Number
+			var naks []circular.Number
+			recv := live.NewReceiver(live.ReceiveConfig{
+				InitialSequenceNumber: initial,
+				ReorderTolerance:      4,
+				PeriodicACKInterval:   10,
+				PeriodicNAKInterval:   20,
+				OnSendACK:             func(seq circular.Number, _ bool) { ack = seq },
+				OnSendNAK:             func(seqs []circular.Number) { naks = append(naks, seqs...) },
+			})
+			push := func(offset uint32) {
+				p := packet.NewPacket(nil)
+				p.Header().PacketSequenceNumber = initial.Add(offset)
+				p.Header().PktTsbpdTime = 1_000_000_000_000
+				recv.Push(p)
+			}
+			push(0)
+			push(10)
+			require.Empty(t, naks)
+			c := &srtConn{recv: recv, config: DefaultConfig(), peerIdleTimeout: time.NewTimer(time.Hour), logger: NewLogger(nil)}
+			defer c.peerIdleTimeout.Stop()
+			var wire bytes.Buffer
+			for _, word := range []uint32{0x80070000, 0, 123, 1, initial.Inc().Val(), initial.Add(9).Val()} {
+				require.NoError(t, binary.Write(&wire, binary.BigEndian, word))
+			}
+			p, err := packet.NewPacketFromData(nil, wire.Bytes())
+			require.NoError(t, err)
+			c.handlePacket(p)
+			// Expire the reorder TTL before any ACK tick can revoke the gap.
+			for offset := uint32(11); offset <= 18; offset++ {
+				push(offset)
+			}
+			require.Empty(t, naks, "DROPREQ must cancel a deferred NAK before the next ACK tick")
+			recv.Tick(20)
+			require.Equal(t, initial.Add(19), ack)
+			require.Empty(t, naks)
+		})
+	}
+}

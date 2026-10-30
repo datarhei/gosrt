@@ -67,6 +67,7 @@ func (r *receiver) Drop(first, last circular.Number) {
 		r.dropRanges = r.dropRanges[:len(r.dropRanges)-(j-i)+1]
 	}
 	r.dropRanges[i] = dropRange{first: first, last: last}
+	r.dropFreshLoss(first, last)
 	// A control packet can overtake data. Retain future ranges within the
 	// window, but only extend maxSeen across drops adjacent to known data.
 	r.maxSeenSequenceNumber = r.skipDropped(r.maxSeenSequenceNumber)

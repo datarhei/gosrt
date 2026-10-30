@@ -10,10 +10,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/datarhei/gosrt/crypto/keywrap"
 	"github.com/datarhei/gosrt/packet"
 	"github.com/datarhei/gosrt/rand"
-
-	"github.com/benburkert/openpgp/aes/keywrap"
 )
 
 // Crypto implements the SRT data encryption and decryption.

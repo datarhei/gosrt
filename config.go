@@ -64,6 +64,12 @@ type Config struct {
 	// SRTO_IPTTL
 	IPTTL int
 
+	// BindToDevice binds the underlying UDP socket to a specific network
+	// interface (Linux SO_BINDTODEVICE), so this connection's traffic egresses
+	// via that interface regardless of the routing table. Empty means no
+	// binding. Requires CAP_NET_RAW (typically root). No effect on non-Linux.
+	BindToDevice string
+
 	// Allow only IPv6.
 	// SRTO_IPV6ONLY
 	IPv6Only int
@@ -80,7 +86,9 @@ type Config struct {
 	// SRTO_LATENCY
 	Latency time.Duration
 
-	// Packet reorder tolerance.
+	// Max. packet reorder tolerance in packets. A gap in the received sequence numbers is reported
+	// with a NAK only after that many more packets arrived. As in libsrt, the actual tolerance adapts
+	// to the reordering on the link, up to this value. 0 means that a gap is reported immediately.
 	// SRTO_LOSSMAXTTL
 	LossMaxTTL uint32
 

@@ -187,7 +187,7 @@ func TestDropMetadataBoundMergeAndFlush(t *testing.T) {
 }
 
 func TestDropConcurrentReceiverOperations(t *testing.T) {
-	r := dropReceiver(0)
+	r := reorderDropReceiver(0, 8)
 	var wg sync.WaitGroup
 	for worker := range 4 {
 		wg.Go(func() {
@@ -214,90 +214,104 @@ func FuzzDropReceiverModel(f *testing.F) {
 	f.Add(uint32(100), []byte{0, 0, 0, 0, 7, 0, 1, 2, 5, 0, 1, 0})
 	f.Add(packet.MAX_SEQUENCENUMBER-10, []byte{1, 5, 7, 0, 0, 0, 0, 8, 0, 1, 1, 4})
 	f.Fuzz(func(t *testing.T, initial uint32, operations []byte) {
-		if len(operations) > 600 {
-			operations = operations[:600]
-		}
-		initial &= packet.MAX_SEQUENCENUMBER
-		r := dropReceiver(initial)
-		seq := func(i int) circular.Number { return dropSeq(initial).Add(uint32(i)) }
-		var received, dropped [64]bool
-		ack := -1
-		r.sendNAK = func(numbers []circular.Number) {
-			for j := 0; j+1 < len(numbers); j += 2 {
-				for n := numbers[j]; ; n = n.Inc() {
-					index := int((n.Val() - initial) & packet.MAX_SEQUENCENUMBER)
-					require.Greater(t, index, ack)
-					require.Less(t, index, len(received))
-					require.False(t, received[index], "NAK for received packet")
-					require.False(t, dropped[index], "NAK for dropped packet")
-					if n.Equals(numbers[j+1]) {
-						break
-					}
+		checkDropReceiverModel(t, initial, operations, 0)
+	})
+}
+
+func FuzzDropReorderReceiverModel(f *testing.F) {
+	f.Add(uint32(100), uint8(3), []byte{128, 0, 0, 128, 10, 0, 129, 1, 9, 128, 11, 0, 128, 12, 0, 128, 13, 0})
+	f.Add(uint32(0x7ffffffb), uint8(4), []byte{129, 3, 5, 128, 0, 0, 128, 8, 0, 0, 9, 0, 0, 10, 0})
+	f.Fuzz(func(t *testing.T, initial uint32, tolerance uint8, operations []byte) {
+		checkDropReceiverModel(t, initial, operations, uint32(tolerance%8)+1)
+	})
+}
+
+func checkDropReceiverModel(t *testing.T, initial uint32, operations []byte, tolerance uint32) {
+	if len(operations) > 600 {
+		operations = operations[:600]
+	}
+	initial &= packet.MAX_SEQUENCENUMBER
+	r := reorderDropReceiver(initial, tolerance)
+	seq := func(i int) circular.Number { return dropSeq(initial).Add(uint32(i)) }
+	var received, dropped [64]bool
+	ack := -1
+	r.sendNAK = func(numbers []circular.Number) {
+		for j := 0; j+1 < len(numbers); j += 2 {
+			for n := numbers[j]; ; n = n.Inc() {
+				index := int((n.Val() - initial) & packet.MAX_SEQUENCENUMBER)
+				require.Greater(t, index, ack)
+				require.Less(t, index, len(received))
+				require.False(t, received[index], "NAK for received packet")
+				require.False(t, dropped[index], "NAK for dropped packet")
+				if n.Equals(numbers[j+1]) {
+					break
 				}
 			}
 		}
-		var delivered []uint32
-		r.deliver = func(p packet.Packet) { delivered = append(delivered, p.Header().PacketSequenceNumber.Val()) }
-		for i := 0; i+2 < len(operations); i += 3 {
-			a, b := int(operations[i+1]%64), int(operations[i+2]%64)
-			if operations[i]%2 == 0 {
-				r.Push(dropPacket(seq(a).Val()))
-				if a > ack {
-					received[a] = true
-				}
-			} else {
-				if a > b {
-					a, b = b, a
-				}
-				r.Drop(seq(a), seq(b))
-				for k := a; k <= b; k++ {
-					dropped[k] = true
-				}
+	}
+	var delivered []uint32
+	r.deliver = func(p packet.Packet) { delivered = append(delivered, p.Header().PacketSequenceNumber.Val()) }
+	for i := 0; i+2 < len(operations); i += 3 {
+		a, b := int(operations[i+1]%64), int(operations[i+2]%64)
+		if operations[i]%2 == 0 {
+			r.Push(dropPacket(seq(a).Val()))
+			if a > ack {
+				received[a] = true
 			}
+		} else {
+			if a > b {
+				a, b = b, a
+			}
+			r.Drop(seq(a), seq(b))
+			for k := a; k <= b; k++ {
+				dropped[k] = true
+			}
+		}
+		now := uint64(i+1) * 20
+		if tolerance == 0 || operations[i]&0x80 == 0 {
 			for ack+1 < 64 && (received[ack+1] || dropped[ack+1]) {
 				ack++
 			}
-			now := uint64(i+1) * 20
 			r.Tick(now)
-			wantACK := dropSeq(initial).Dec()
-			if ack >= 0 {
-				wantACK = seq(ack)
-			}
-			require.Equal(t, wantACK, r.lastACKSequenceNumber)
-			// Expand the reported NAK intervals and compare to a per-packet oracle.
-			got := make(map[uint32]bool)
-			for naks, j := r.periodicNAK(now+20), 0; j+1 < len(naks); j += 2 {
-				for n := naks[j]; ; n = n.Inc() {
-					got[n.Val()] = true
-					if n.Equals(naks[j+1]) {
-						break
-					}
-					require.LessOrEqual(t, len(got), 64)
-				}
-			}
-			lastReceived := -1
-			for k, yes := range received {
-				if yes {
-					lastReceived = k
-				}
-			}
-			want := make(map[uint32]bool)
-			for k := ack + 1; k < lastReceived; k++ {
-				if !received[k] && !dropped[k] {
-					want[seq(k).Val()] = true
-				}
-			}
-			require.Equal(t, want, got)
 		}
-		r.Tick(1_000_000_000_000)
-		var want []uint32
-		for i, yes := range received {
+		wantACK := dropSeq(initial).Dec()
+		if ack >= 0 {
+			wantACK = seq(ack)
+		}
+		require.Equal(t, wantACK, r.lastACKSequenceNumber)
+		// Expand the reported NAK intervals and compare to a per-packet oracle.
+		got := make(map[uint32]bool)
+		for naks, j := r.periodicNAK(now+20), 0; j+1 < len(naks); j += 2 {
+			for n := naks[j]; ; n = n.Inc() {
+				got[n.Val()] = true
+				if n.Equals(naks[j+1]) {
+					break
+				}
+				require.LessOrEqual(t, len(got), 64)
+			}
+		}
+		lastReceived := -1
+		for k, yes := range received {
 			if yes {
-				want = append(want, seq(i).Val())
+				lastReceived = k
 			}
 		}
-		require.Equal(t, want, delivered)
-		require.Zero(t, r.Stats().PktBuf)
-		require.Zero(t, r.Stats().ByteBuf)
-	})
+		want := make(map[uint32]bool)
+		for k := ack + 1; k < lastReceived; k++ {
+			if !received[k] && !dropped[k] {
+				want[seq(k).Val()] = true
+			}
+		}
+		require.Equal(t, want, got)
+	}
+	r.Tick(1_000_000_000_000)
+	var want []uint32
+	for i, yes := range received {
+		if yes {
+			want = append(want, seq(i).Val())
+		}
+	}
+	require.Equal(t, want, delivered)
+	require.Zero(t, r.Stats().PktBuf)
+	require.Zero(t, r.Stats().ByteBuf)
 }

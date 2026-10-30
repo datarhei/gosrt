@@ -234,15 +234,22 @@ func openReader(addr string, logger srt.Logger) (io.ReadCloser, error) {
 				return nil, err
 			}
 
-			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
-				if config.StreamId != req.StreamId() {
-					return srt.REJECT
-				}
+			req, err := ln.Accept2()
+			if err != nil {
+				return nil, err
+			}
 
-				req.SetPassphrase(config.Passphrase)
+			if config.StreamId != req.StreamId() {
+				req.Reject(srt.REJ_PEER)
+				return nil, fmt.Errorf("invalid streamid: %s != %s", config.StreamId, req.StreamId())
+			}
 
-				return srt.PUBLISH
-			})
+			if err := req.SetPassphrase(config.Passphrase); err != nil {
+				req.Reject(srt.REJ_BADSECRET)
+				return nil, fmt.Errorf("wrong passphrase: %w", err)
+			}
+
+			conn, err := req.Accept()
 			if err != nil {
 				return nil, err
 			}
@@ -322,15 +329,22 @@ func openWriter(addr string, logger srt.Logger) (io.WriteCloser, error) {
 				return nil, err
 			}
 
-			conn, _, err := ln.Accept(func(req srt.ConnRequest) srt.ConnType {
-				if config.StreamId != req.StreamId() {
-					return srt.REJECT
-				}
+			req, err := ln.Accept2()
+			if err != nil {
+				return nil, err
+			}
 
-				req.SetPassphrase(config.Passphrase)
+			if config.StreamId != req.StreamId() {
+				req.Reject(srt.REJ_PEER)
+				return nil, fmt.Errorf("invalid streamid: %s != %s", config.StreamId, req.StreamId())
+			}
 
-				return srt.SUBSCRIBE
-			})
+			if err := req.SetPassphrase(config.Passphrase); err != nil {
+				req.Reject(srt.REJ_BADSECRET)
+				return nil, fmt.Errorf("wrong passphrase: %w", err)
+			}
+
+			conn, err := req.Accept()
 			if err != nil {
 				return nil, err
 			}

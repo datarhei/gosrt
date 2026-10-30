@@ -607,114 +607,6 @@ func TestListenParallelRequests(t *testing.T) {
 	ln.Close()
 }
 
-func TestListenDiscardRepeatedHandshakes(t *testing.T) {
-	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
-	require.NoError(t, err)
-
-	singleReqReceived := make(chan struct{})
-
-	listenDone := make(chan struct{})
-	defer func() { <-listenDone }()
-
-	defer ln.Close()
-
-	go func() {
-		defer close(listenDone)
-
-		for {
-			req, err := ln.Accept2()
-			if err != nil {
-				break
-			}
-
-			close(singleReqReceived)
-			defer req.Reject(REJ_CLOSE)
-		}
-	}()
-
-	for range 4 {
-		conn, err := net.Dial("udp", "127.0.0.1:6003")
-		require.NoError(t, err)
-		defer conn.Close()
-
-		// send induction request
-		p := packet.NewPacket(conn.RemoteAddr())
-		p.Header().IsControlPacket = true
-		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
-		p.Header().SubType = 0
-		p.Header().TypeSpecific = 0
-		p.Header().Timestamp = 0
-		p.Header().DestinationSocketId = 0
-		sendcif := &packet.CIFHandshake{
-			IsRequest:                   true,
-			Version:                     4,
-			EncryptionField:             0,
-			ExtensionField:              2,
-			InitialPacketSequenceNumber: circular.New(10000, packet.MAX_SEQUENCENUMBER),
-			MaxTransmissionUnitSize:     MAX_MSS_SIZE,
-			MaxFlowWindowSize:           25600,
-			HandshakeType:               packet.HSTYPE_INDUCTION,
-			SRTSocketId:                 55555,
-			SynCookie:                   0,
-		}
-		sendcif.PeerIP.FromNetAddr(conn.LocalAddr())
-		p.MarshalCIF(sendcif)
-		var buf bytes.Buffer
-		err = p.Marshal(&buf)
-		require.NoError(t, err)
-		_, err = conn.Write(buf.Bytes())
-		require.NoError(t, err)
-
-		// read induction response
-		inbuf := make([]byte, 1024)
-		n, err := conn.Read(inbuf)
-		require.NoError(t, err)
-		p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
-		require.NoError(t, err)
-		recvcif := &packet.CIFHandshake{}
-		err = p.UnmarshalCIF(recvcif)
-		require.NoError(t, err)
-
-		// send conclusion
-		p.Header().IsControlPacket = true
-		p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
-		p.Header().SubType = 0
-		p.Header().TypeSpecific = 0
-		p.Header().Timestamp = 0
-		p.Header().DestinationSocketId = 0 // recvcif.SRTSocketId
-		sendcif.Version = 5
-		sendcif.ExtensionField = recvcif.ExtensionField
-		sendcif.HandshakeType = packet.HSTYPE_CONCLUSION
-		sendcif.SynCookie = recvcif.SynCookie
-		sendcif.HasHS = true
-		sendcif.SRTHS = &packet.CIFHandshakeExtension{
-			SRTVersion: SRT_VERSION,
-			SRTFlags: packet.CIFHandshakeExtensionFlags{
-				TSBPDSND:      true,
-				TSBPDRCV:      true,
-				CRYPT:         true, // must always set to true
-				TLPKTDROP:     true,
-				PERIODICNAK:   true,
-				REXMITFLG:     true,
-				STREAM:        false,
-				PACKET_FILTER: false,
-			},
-			RecvTSBPDDelay: uint16(120),
-			SendTSBPDDelay: uint16(120),
-		}
-		sendcif.HasSID = true
-		sendcif.StreamId = "foobar"
-		p.MarshalCIF(sendcif)
-		buf.Reset()
-		err = p.Marshal(&buf)
-		require.NoError(t, err)
-		_, err = conn.Write(buf.Bytes())
-		require.NoError(t, err)
-	}
-
-	<-singleReqReceived
-}
-
 func TestListenMultipleIPs(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Skipping test: this test only runs on Linux")
@@ -912,4 +804,159 @@ func TestListenDualStackWildcardAcceptsIPv4(t *testing.T) {
 	clientConn.Close()
 
 	<-serverDone
+}
+
+// handshakeConclusion performs an induction + conclusion handshake over conn
+// with the given caller socket ID and returns the conclusion packet bytes, so
+// the caller can retransmit it.
+func handshakeConclusion(t *testing.T, conn net.Conn, socketId uint32) []byte {
+	t.Helper()
+
+	// send induction request
+	p := packet.NewPacket(conn.RemoteAddr())
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0
+	sendcif := &packet.CIFHandshake{
+		IsRequest:                   true,
+		Version:                     4,
+		EncryptionField:             0,
+		ExtensionField:              2,
+		InitialPacketSequenceNumber: circular.New(10000, packet.MAX_SEQUENCENUMBER),
+		MaxTransmissionUnitSize:     MAX_MSS_SIZE,
+		MaxFlowWindowSize:           25600,
+		HandshakeType:               packet.HSTYPE_INDUCTION,
+		SRTSocketId:                 socketId,
+		SynCookie:                   0,
+	}
+	sendcif.PeerIP.FromNetAddr(conn.LocalAddr())
+	p.MarshalCIF(sendcif)
+	var buf bytes.Buffer
+	err := p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	// read induction response
+	inbuf := make([]byte, 1024)
+	n, err := conn.Read(inbuf)
+	require.NoError(t, err)
+	p, err = packet.NewPacketFromData(conn.RemoteAddr(), inbuf[:n])
+	require.NoError(t, err)
+	recvcif := &packet.CIFHandshake{}
+	err = p.UnmarshalCIF(recvcif)
+	require.NoError(t, err)
+
+	// send conclusion
+	p.Header().IsControlPacket = true
+	p.Header().ControlType = packet.CTRLTYPE_HANDSHAKE
+	p.Header().SubType = 0
+	p.Header().TypeSpecific = 0
+	p.Header().Timestamp = 0
+	p.Header().DestinationSocketId = 0
+	sendcif.Version = 5
+	sendcif.ExtensionField = recvcif.ExtensionField
+	sendcif.HandshakeType = packet.HSTYPE_CONCLUSION
+	sendcif.SynCookie = recvcif.SynCookie
+	sendcif.HasHS = true
+	sendcif.SRTHS = &packet.CIFHandshakeExtension{
+		SRTVersion: SRT_VERSION,
+		SRTFlags: packet.CIFHandshakeExtensionFlags{
+			TSBPDSND:      true,
+			TSBPDRCV:      true,
+			CRYPT:         true, // must always set to true
+			TLPKTDROP:     true,
+			PERIODICNAK:   true,
+			REXMITFLG:     true,
+			STREAM:        false,
+			PACKET_FILTER: false,
+		},
+		RecvTSBPDDelay: uint16(120),
+		SendTSBPDDelay: uint16(120),
+	}
+	sendcif.HasSID = true
+	sendcif.StreamId = "foobar"
+	p.MarshalCIF(sendcif)
+	buf.Reset()
+	err = p.Marshal(&buf)
+	require.NoError(t, err)
+	_, err = conn.Write(buf.Bytes())
+	require.NoError(t, err)
+
+	return append([]byte(nil), buf.Bytes()...)
+}
+
+// countConnRequests collects connection requests on ln until it is closed,
+// keeping them pending meanwhile (as a slow application would), then rejects
+// them and reports how many arrived.
+func countConnRequests(ln Listener) (<-chan int, func()) {
+	done := make(chan int, 1)
+
+	go func() {
+		var reqs []ConnRequest
+		for {
+			req, err := ln.Accept2()
+			if err != nil {
+				break
+			}
+			reqs = append(reqs, req)
+		}
+		for _, req := range reqs {
+			req.Reject(REJ_CLOSE)
+		}
+		done <- len(reqs)
+	}()
+
+	return done, func() { ln.Close() }
+}
+
+// A caller that does not get a timely answer retransmits its conclusion
+// handshake from the same socket. Only one connection request must result.
+func TestListenDiscardRepeatedHandshakes(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	requests, stop := countConnRequests(ln)
+
+	conn, err := net.Dial("udp", "127.0.0.1:6003")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	conclusion := handshakeConclusion(t, conn, 55555)
+
+	for range 3 {
+		_, err = conn.Write(conclusion)
+		require.NoError(t, err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	stop()
+
+	require.Equal(t, 1, <-requests)
+}
+
+// Two independent callers (different remote address) may legitimately pick the
+// same caller socket ID, e.g. two devices running the same encoder app. The
+// listener must not mistake the second one for a retransmission of the first.
+func TestListenDistinctPeersSameSocketId(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	requests, stop := countConnRequests(ln)
+
+	for range 2 {
+		conn, err := net.Dial("udp", "127.0.0.1:6003")
+		require.NoError(t, err)
+		defer conn.Close()
+
+		handshakeConclusion(t, conn, 55555)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	stop()
+
+	require.Equal(t, 2, <-requests)
 }

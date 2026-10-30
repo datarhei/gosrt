@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -210,6 +211,11 @@ type srtConn struct {
 	readQueue  chan packet.Packet
 	readBuffer bytes.Buffer
 
+	deadlineLock   sync.Mutex
+	readDeadline   time.Time
+	writeDeadline  time.Time
+	readDeadlineCh chan struct{}
+
 	onSend     func(p packet.Packet)
 	onShutdown func(*srtConn)
 
@@ -316,6 +322,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 	}
 
 	c.readQueue = make(chan packet.Packet, 1024)
+	c.readDeadlineCh = make(chan struct{})
 
 	if c.config.DriftTracer {
 		c.driftTracer = newDriftTracer()
@@ -337,6 +344,7 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		PeriodicACKInterval:   10_000,
 		PeriodicNAKInterval:   20_000,
 		MaxDropDistance:       c.config.FC,
+		ReorderTolerance:      c.config.LossMaxTTL,
 		OnSendACK:             c.sendACK,
 		OnSendNAK:             c.sendNAK,
 		OnDeliver:             c.deliver,
@@ -456,10 +464,53 @@ func (c *srtConn) ticker(ctx context.Context) {
 
 func (c *srtConn) ReadPacket() (packet.Packet, error) {
 	var p packet.Packet
-	select {
-	case <-c.ctx.Done():
-		return nil, io.EOF
-	case p = <-c.readQueue:
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
+	for {
+		deadline, deadlineChanged := c.readDeadlineState()
+
+		var timeoutCh <-chan time.Time
+		if !deadline.IsZero() {
+			d := time.Until(deadline)
+			if d <= 0 {
+				return nil, os.ErrDeadlineExceeded
+			}
+			if timer == nil {
+				timer = time.NewTimer(d)
+			} else {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(d)
+			}
+			timeoutCh = timer.C
+		} else if timer != nil {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
+
+		select {
+		case <-c.ctx.Done():
+			return nil, io.EOF
+		case <-timeoutCh:
+			return nil, os.ErrDeadlineExceeded
+		case <-deadlineChanged:
+			continue
+		case p = <-c.readQueue:
+		}
+		break
 	}
 
 	if p.Header().PacketSequenceNumber.Gt(c.debug.expectedReadPacketSequenceNumber) {
@@ -515,6 +566,10 @@ func (c *srtConn) WritePacket(p packet.Packet) error {
 }
 
 func (c *srtConn) Write(b []byte) (int, error) {
+	if c.writeDeadlineExpired() {
+		return 0, os.ErrDeadlineExceeded
+	}
+
 	c.writeBuffer.Write(b)
 
 	for {
@@ -827,6 +882,33 @@ func (c *srtConn) getTsbpdTimeBaseOffset(timestamp uint32) uint64 {
 	return tsbpdTimeBaseOffset
 }
 
+// controlBaseTime returns the time of the timestamp of a control packet on the local time base. The wrap period
+// of the timestamps is tracked with the data packets, but the timestamps of control packets may be ahead of the
+// data packets, e.g. by the time the data packets spend in the queue of the sender. Near a wrap of the timestamp,
+// the wrap period may not match the control packet. Therefore, the wrap that brings the time closest to the
+// arrival of the control packet is taken.
+func (c *srtConn) controlBaseTime(timestamp uint32, arrival int64) int64 {
+	wrap := int64(packet.MAX_TIMESTAMP) + 1
+	base := int64(c.tsbpdTimeBase+c.tsbpdTimeBaseOffset+uint64(timestamp)) + c.tsbpdPeerOffset
+
+	best := base
+	for _, t := range []int64{base - wrap, base + wrap} {
+		if abs64(arrival-t) < abs64(arrival-best) {
+			best = t
+		}
+	}
+
+	return best
+}
+
+func abs64(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+
+	return x
+}
+
 // addDriftSample adds a sample to the drift tracer from an ACKACK with the given timestamp and
 // the RTT measured with it. If the drift has been updated, the TSBPD time of the following packets
 // will be corrected accordingly.
@@ -836,10 +918,10 @@ func (c *srtConn) addDriftSample(timestamp uint32, rtt time.Duration) {
 		return
 	}
 
-	arrival := c.tsbpdTimeBase + c.getTimestamp()
-	pktBaseTime := int64(c.tsbpdTimeBase+c.getTsbpdTimeBaseOffset(timestamp)+uint64(timestamp)) + c.tsbpdPeerOffset
+	arrival := int64(c.tsbpdTimeBase + c.getTimestamp())
+	pktBaseTime := c.controlBaseTime(timestamp, arrival)
 
-	if !c.driftTracer.addSample(int64(arrival), pktBaseTime, rtt.Microseconds()) {
+	if !c.driftTracer.addSample(arrival, pktBaseTime, rtt.Microseconds()) {
 		return
 	}
 
@@ -1638,6 +1720,48 @@ func (c *srtConn) log(topic string, message func() string) {
 	c.logger.Print(topic, c.socketId, 2, message)
 }
 
-func (c *srtConn) SetDeadline(t time.Time) error      { return nil }
-func (c *srtConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *srtConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *srtConn) SetDeadline(t time.Time) (err error) {
+	if err := c.SetReadDeadline(t); err != nil {
+		return err
+	}
+
+	if err := c.SetWriteDeadline(t); err != nil {
+		return err
+	}
+
+	return
+}
+
+func (c *srtConn) SetReadDeadline(t time.Time) error {
+	c.deadlineLock.Lock()
+	defer c.deadlineLock.Unlock()
+
+	c.readDeadline = t
+	close(c.readDeadlineCh)
+	c.readDeadlineCh = make(chan struct{})
+
+	return nil
+}
+
+func (c *srtConn) SetWriteDeadline(t time.Time) error {
+	c.deadlineLock.Lock()
+	defer c.deadlineLock.Unlock()
+
+	c.writeDeadline = t
+
+	return nil
+}
+
+func (c *srtConn) readDeadlineState() (time.Time, <-chan struct{}) {
+	c.deadlineLock.Lock()
+	defer c.deadlineLock.Unlock()
+
+	return c.readDeadline, c.readDeadlineCh
+}
+
+func (c *srtConn) writeDeadlineExpired() bool {
+	c.deadlineLock.Lock()
+	defer c.deadlineLock.Unlock()
+
+	return !c.writeDeadline.IsZero() && !time.Now().Before(c.writeDeadline)
+}
