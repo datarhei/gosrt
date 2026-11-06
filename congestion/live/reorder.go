@@ -25,16 +25,21 @@ type freshLoss struct {
 // registerLoss registers a range of missing packets. If there's no reorder tolerance, a NAK is sent immediately.
 // The caller must hold the lock.
 func (r *receiver) registerLoss(from, to circular.Number) {
+	missing := r.appendMissing(nil, from, to)
 	if r.reorderTolerance == 0 {
-		r.sendNAK([]circular.Number{from, to})
+		if len(missing) != 0 {
+			r.sendNAK(missing)
+		}
 		return
 	}
 
-	r.freshLoss = append(r.freshLoss, freshLoss{
-		from: from,
-		to:   to,
-		ttl:  int(r.reorderTolerance),
-	})
+	for i := 0; i < len(missing); i += 2 {
+		r.freshLoss = append(r.freshLoss, freshLoss{
+			from: missing[i],
+			to:   missing[i+1],
+			ttl:  int(r.reorderTolerance),
+		})
+	}
 }
 
 // inserted is called after a packet has been added to the buffer. The ranges of missing packets whose TTL
@@ -174,5 +179,30 @@ func (r *receiver) revokeFreshLoss(seq circular.Number) {
 		kept = append(kept, l)
 	}
 
+	r.freshLoss = kept
+}
+
+// dropFreshLoss subtracts an inclusive sender drop without changing the TTL or
+// expiration order of surviving ranges. The caller must hold the lock.
+func (r *receiver) dropFreshLoss(first, last circular.Number) {
+	if len(r.freshLoss) == 0 {
+		return
+	}
+
+	// A contiguous drop can split at most one existing loss range. Use a
+	// separate slice so that splitting cannot overwrite an unread entry.
+	kept := make([]freshLoss, 0, len(r.freshLoss)+1)
+	for _, loss := range r.freshLoss {
+		if loss.to.Lt(first) || loss.from.Gt(last) {
+			kept = append(kept, loss)
+			continue
+		}
+		if loss.from.Lt(first) {
+			kept = append(kept, freshLoss{from: loss.from, to: first.Dec(), ttl: loss.ttl})
+		}
+		if loss.to.Gt(last) {
+			kept = append(kept, freshLoss{from: last.Inc(), to: loss.to, ttl: loss.ttl})
+		}
+	}
 	r.freshLoss = kept
 }

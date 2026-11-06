@@ -30,7 +30,7 @@ const (
 	CTRLTYPE_WARN      CtrlType = 0x0004 // unimplemented, receiver->sender
 	CTRLTYPE_SHUTDOWN  CtrlType = 0x0005
 	CTRLTYPE_ACKACK    CtrlType = 0x0006
-	CRTLTYPE_DROPREQ   CtrlType = 0x0007 // unimplemented, sender->receiver
+	CRTLTYPE_DROPREQ   CtrlType = 0x0007 // sender->receiver
 	CRTLTYPE_PEERERROR CtrlType = 0x0008 // unimplemented, receiver->sender (only for file transfers)
 	CTRLTYPE_USER      CtrlType = 0x7FFF
 )

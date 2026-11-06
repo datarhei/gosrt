@@ -55,6 +55,14 @@ type Receiver interface {
 	SetNAKInterval(nakInterval uint64)
 }
 
+// ReceiverDropper is optionally implemented by receivers that handle sender
+// drop requests. Existing Receiver implementations do not need to implement it.
+type ReceiverDropper interface {
+	// Drop marks an inclusive sequence range as no longer available from the sender.
+	// Already received packets retain their scheduled delivery time.
+	Drop(first, last circular.Number)
+}
+
 // SendStats are collected statistics from a sender
 type SendStats struct {
 	Pkt  uint64 // Sent packets in total
