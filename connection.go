@@ -847,23 +847,41 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 
 	c.log("data:recv:dump", func() string { return p.Dump() })
 
+	// As libsrt, packets that can't be decrypted and unencrypted packets on an encrypted
+	// connection are dropped.
+	undecrypted := false
+
 	c.cryptoLock.Lock()
 	if c.crypto != nil {
 		if header.KeyBaseEncryptionFlag != 0 {
 			if err := c.crypto.EncryptOrDecryptPayload(p.Data(), header.KeyBaseEncryptionFlag, header.PacketSequenceNumber.Val()); err != nil {
-				c.statisticsLock.Lock()
-				c.statistics.pktRecvUndecrypt++
-				c.statistics.byteRecvUndecrypt += p.Len()
-				c.statisticsLock.Unlock()
+				undecrypted = true
 			}
 		} else {
-			c.statisticsLock.Lock()
-			c.statistics.pktRecvUndecrypt++
-			c.statistics.byteRecvUndecrypt += p.Len()
-			c.statisticsLock.Unlock()
+			undecrypted = true
 		}
 	}
 	c.cryptoLock.Unlock()
+
+	if undecrypted {
+		c.statisticsLock.Lock()
+		c.statistics.pktRecvUndecrypt++
+		c.statistics.byteRecvUndecrypt += p.Len()
+		c.statisticsLock.Unlock()
+
+		c.log("data:recv:undecrypted", func() string {
+			return fmt.Sprintf("dropped packet %d, it can't be decrypted", header.PacketSequenceNumber.Val())
+		})
+
+		// The packet holds its place in the sequence, it is neither reported as missing nor delivered
+		if dropper, ok := c.recv.(congestion.ReceiverPacketDropper); ok {
+			dropper.PushDropped(p)
+		} else {
+			p.Decommission()
+		}
+
+		return
+	}
 
 	// Put the packet into receive congestion control
 	c.recv.Push(p)
