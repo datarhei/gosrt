@@ -10,3 +10,5 @@
   scheduled for delivery and bound pending drop metadata.
 - Remove accepted DROPREQ ranges from pending reorder losses and exclude them
   when registering later gaps, preserving the TTL of other missing packets.
+- Drop packets that can't be decrypted and unencrypted packets on an encrypted
+  connection instead of delivering them, and count them as dropped, as libsrt does.

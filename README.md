@@ -455,6 +455,7 @@ control:send:keepalive:dump
 control:send:shutdown:cif
 control:send:shutdown:dump
 data:recv:dump
+data:recv:undecrypted
 data:send:dump
 dial
 handshake:recv:cif
