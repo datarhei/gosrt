@@ -83,14 +83,17 @@ In the `contrib/client` directory you'll find a complete example of a SRT client
 
 Forward Error Correction (FEC) adds redundancy to the data stream, allowing the receiver to rebuild lost packets without needing them to be retransmitted. This is especially useful in high-latency or extremely lossy networks (such as satellite or microwave links) where traditional ARQ (retransmission) would take too long or be inefficient.
 
-GoSRT implements FEC based on the [SMPTE 2022-1-2007 standard](https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md) via the SRT Packet Filtering framework. Both parties (sender and receiver) must configure FEC for it to be successfully negotiated.
+GoSRT implements the row (one-dimensional) part of the built-in SRT FEC packet filter, based on the [SMPTE 2022-1-2007 standard](https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md). It is compatible with libsrt (v1.4 and later).
 
 You can enable FEC by providing a `PacketFilter` configuration string. The syntax is:
-`fec,cols:<N>,rows:<N>,layout:<even|staircase>`
+`fec,cols:<N>[,rows:1][,layout:<even|staircase>][,arq:<always|onreq|never>]`
 
-- **`cols`**: The number of columns in the FEC matrix (e.g., number of data packets before an FEC packet).
-- **`rows`**: The number of rows in the FEC matrix.
-- **`layout`**: The arrangement of packets (`even` or `staircase`).
+- **`cols`** (required): The number of data packets in a row. An FEC packet is sent after each row. Must be between 2 and 1024.
+- **`rows`**: Only `1` (row FEC) is supported. Column (2D) FEC is rejected, and column FEC packets from a peer are ignored.
+- **`layout`**: Accepted for compatibility. It has no effect with row FEC.
+- **`arq`**: Accepted for compatibility. The GoSRT receiver always behaves as `always`: it reports losses right away, even if FEC is able to recover them.
+
+The filter is negotiated during the HSv5 handshake: parameters that are set on only one side are taken over from the other side. If both sides set a parameter to different values, the connection is rejected (`REJ_FILTER`). If only one side has configured a filter, the connection is established without FEC. The `PacketFilter` of a listener applies to all of its connections.
 
 ### Example
 
@@ -99,9 +102,9 @@ import "github.com/datarhei/gosrt"
 
 config := srt.DefaultConfig()
 
-// Enable FEC with 5 columns, 1 row, and an even layout.
+// Enable row FEC with 5 columns.
 // This means for every 5 data packets, 1 redundant FEC packet is sent.
-config.PacketFilter = "fec,cols:5,rows:1,layout:even"
+config.PacketFilter = "fec,cols:5"
 
 conn, err := srt.Dial("srt", "golang.org:6000", config)
 if err != nil {
@@ -180,42 +183,42 @@ Both options accept an address. Valid addresses are: `-` for `stdin`, resp. `std
 A SRT URL is of the form `srt://[host]:[port]/?[options]` where options are in the form of a `HTTP` query string. These are the
 known options (similar to [srt-live-transmit](https://github.com/Haivision/srt/blob/master/docs/apps/srt-live-transmit.md)):
 
-| Option               | Values                 | Description                                                             |
-| -------------------- | ---------------------- | ----------------------------------------------------------------------- |
-| `mode`               | `listener` or `caller` | Enforce listener or caller mode.                                        |
-| `congestion`         | `live`                 | Congestion control. Currently only `live` is supported.                 |
-| `conntimeo`          | `ms`                   | Connection timeout.                                                     |
-| `drifttracer`        | `bool`                 | Enable drift tracer. Corrects the delivery time for the clock drift between the peers. |
-| `enforcedencryption` | `bool`                 | Accept connection only if both parties have encryption enabled.         |
-| `fc`                 | `bytes`                | Flow control window size.                                               |
-| `inputbw`            | `bytes`                | Input bandwidth. Ignored.                                               |
-| `iptos`              | 0...255                | IP socket type of service. Broken.                                      |
-| `ipttl`              | 1...255                | Defines IP socket "time to live" option. Broken.                        |
-| `ipv6only`           | `bool`                 | Use IPv6 only. Not implemented.                                         |
-| `kmpreannounce`      | `packets`              | Duration of Stream Encryption key switchover.                           |
-| `kmrefreshrate`      | `packets`              | Stream encryption key refresh rate.                                     |
-| `latency`            | `ms`                   | Maximum accepted transmission latency.                                  |
+| Option               | Values                 | Description                                                                                                                                                                                          |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`               | `listener` or `caller` | Enforce listener or caller mode.                                                                                                                                                                     |
+| `congestion`         | `live`                 | Congestion control. Currently only `live` is supported.                                                                                                                                              |
+| `conntimeo`          | `ms`                   | Connection timeout.                                                                                                                                                                                  |
+| `drifttracer`        | `bool`                 | Enable drift tracer. Corrects the delivery time for the clock drift between the peers.                                                                                                               |
+| `enforcedencryption` | `bool`                 | Accept connection only if both parties have encryption enabled.                                                                                                                                      |
+| `fc`                 | `bytes`                | Flow control window size.                                                                                                                                                                            |
+| `inputbw`            | `bytes`                | Input bandwidth. Ignored.                                                                                                                                                                            |
+| `iptos`              | 0...255                | IP socket type of service. Broken.                                                                                                                                                                   |
+| `ipttl`              | 1...255                | Defines IP socket "time to live" option. Broken.                                                                                                                                                     |
+| `ipv6only`           | `bool`                 | Use IPv6 only. Not implemented.                                                                                                                                                                      |
+| `kmpreannounce`      | `packets`              | Duration of Stream Encryption key switchover.                                                                                                                                                        |
+| `kmrefreshrate`      | `packets`              | Stream encryption key refresh rate.                                                                                                                                                                  |
+| `latency`            | `ms`                   | Maximum accepted transmission latency.                                                                                                                                                               |
 | `lossmaxttl`         | `packets`              | Max. packet reorder tolerance. A gap is reported with a NAK only after that many more packets arrived. The tolerance adapts to the reordering on the link, as in libsrt. Default: 0 (immediate NAK). |
-| `maxbw`              | `bytes`                | Bandwidth limit. Ignored.                                               |
-| `mininputbw`         | `bytes`                | Minimum allowed estimate of `inputbw`.                                  |
-| `messageapi`         | `bool`                 | Enable SRT message mode. Must be `false`.                               |
-| `mss`                | 76...                  | MTU size.                                                               |
-| `nakreport`          | `bool`                 | Enable periodic NAK reports.                                            |
-| `oheadbw`            | 10...100               | Limits bandwidth overhead. Percents. Ignored.                           |
-| `packetfilter`       | `string`               | Set up the packet filter. Not implemented.                              |
-| `passphrase`         | `string`               | Password for the encrypted transmission.                                |
-| `payloadsize`        | `bytes`                | Maximum payload size.                                                   |
-| `pbkeylen`           | `16`, `24`, or `32`    | Crypto key length in bytes.                                             |
-| `peeridletimeo`      | `ms`                   | Peer idle timeout.                                                      |
-| `peerlatency`        | `ms`                   | Minimum receiver latency to be requested by sender.                     |
-| `rcvbuf`             | `bytes`                | Receiver buffer size.                                                   |
-| `rcvlatency`         | `ms`                   | Receiver-side latency.                                                  |
-| `sndbuf`             | `bytes`                | Sender buffer size.                                                     |
-| `snddropdelay`       | `ms`                   | Sender's delay before dropping packets.                                 |
-| `streamid`           | `string`               | Stream ID (settable in caller mode only, visible on the listener peer). |
-| `tlpktdrop`          | `bool`                 | Drop too late packets.                                                  |
-| `transtype`          | `live`                 | Transmission type. Must be `live`.                                      |
-| `tsbpdmode`          | `bool`                 | Enable timestamp-based packet delivery mode.                            |
+| `maxbw`              | `bytes`                | Bandwidth limit. Ignored.                                                                                                                                                                            |
+| `mininputbw`         | `bytes`                | Minimum allowed estimate of `inputbw`.                                                                                                                                                               |
+| `messageapi`         | `bool`                 | Enable SRT message mode. Must be `false`.                                                                                                                                                            |
+| `mss`                | 76...                  | MTU size.                                                                                                                                                                                            |
+| `nakreport`          | `bool`                 | Enable periodic NAK reports.                                                                                                                                                                         |
+| `oheadbw`            | 10...100               | Limits bandwidth overhead. Percents. Ignored.                                                                                                                                                        |
+| `packetfilter`       | `string`               | Set up the packet filter. Not implemented.                                                                                                                                                           |
+| `passphrase`         | `string`               | Password for the encrypted transmission.                                                                                                                                                             |
+| `payloadsize`        | `bytes`                | Maximum payload size.                                                                                                                                                                                |
+| `pbkeylen`           | `16`, `24`, or `32`    | Crypto key length in bytes.                                                                                                                                                                          |
+| `peeridletimeo`      | `ms`                   | Peer idle timeout.                                                                                                                                                                                   |
+| `peerlatency`        | `ms`                   | Minimum receiver latency to be requested by sender.                                                                                                                                                  |
+| `rcvbuf`             | `bytes`                | Receiver buffer size.                                                                                                                                                                                |
+| `rcvlatency`         | `ms`                   | Receiver-side latency.                                                                                                                                                                               |
+| `sndbuf`             | `bytes`                | Sender buffer size.                                                                                                                                                                                  |
+| `snddropdelay`       | `ms`                   | Sender's delay before dropping packets.                                                                                                                                                              |
+| `streamid`           | `string`               | Stream ID (settable in caller mode only, visible on the listener peer).                                                                                                                              |
+| `tlpktdrop`          | `bool`                 | Drop too late packets.                                                                                                                                                                               |
+| `transtype`          | `live`                 | Transmission type. Must be `live`.                                                                                                                                                                   |
+| `tsbpdmode`          | `bool`                 | Enable timestamp-based packet delivery mode.                                                                                                                                                         |
 
 ### Usage
 

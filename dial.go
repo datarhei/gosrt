@@ -13,6 +13,7 @@ import (
 
 	"github.com/datarhei/gosrt/circular"
 	"github.com/datarhei/gosrt/crypto"
+	"github.com/datarhei/gosrt/fec"
 	"github.com/datarhei/gosrt/packet"
 	"github.com/datarhei/gosrt/rand"
 )
@@ -509,6 +510,35 @@ func (dl *dialer) handleHandshake(p packet.Packet) {
 				}
 
 				return
+			}
+
+			// Use the packet filter as negotiated by the listener
+			if len(dl.config.PacketFilter) != 0 {
+				peerFilter := ""
+				if cif.HasFilter {
+					peerFilter = cif.PacketFilter
+				}
+
+				if len(peerFilter) == 0 {
+					dl.log("handshake:recv:filter", func() string {
+						return fmt.Sprintf("peer didn't agree on packet filter %q. Continuing without packet filter", dl.config.PacketFilter)
+					})
+					dl.config.PacketFilter = ""
+				} else {
+					filter, err := fec.Negotiate(dl.config.PacketFilter, peerFilter)
+					if err != nil {
+						dl.sendShutdown(cif.SRTSocketId)
+
+						dl.connChan <- connResponse{
+							conn: nil,
+							err:  fmt.Errorf("incompatible packet filter (local %q, peer %q): %w", dl.config.PacketFilter, peerFilter, err),
+						}
+
+						return
+					}
+
+					dl.config.PacketFilter = filter
+				}
 			}
 
 			// Select the largest TSBPD delay advertised by the listener, but at least 120ms

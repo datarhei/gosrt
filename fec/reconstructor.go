@@ -1,23 +1,29 @@
 package fec
 
 import (
+	"net"
 	"sync"
 
 	"github.com/datarhei/gosrt/circular"
 	"github.com/datarhei/gosrt/packet"
 )
 
-// Reconstructor is responsible for rebuilding lost packets using FEC control packets.
-//
-// Everything a peer sends is untrusted: malformed or inconsistent FEC packets must never
-// cause a panic, they are ignored and nothing is reconstructed from them.
+// Reconstructor is responsible for rebuilding lost packets using row FEC control packets.
 type Reconstructor struct {
 	config Config
 
 	mu sync.Mutex
 
-	packets  map[uint32]packet.Packet
-	controls map[uint32]*ControlPacket
+	packets  map[uint32]packet.Packet  // received and reconstructed data packets, by sequence number
+	controls map[uint32]*ControlPacket // FEC packets, by the sequence number of the first packet of their row
+
+	history uint32 // number of sequence numbers to keep behind the highest one
+
+	highest     circular.Number
+	haveHighest bool
+
+	alignBase uint32 // first sequence number of the row of the most recent FEC packet
+	haveAlign bool
 }
 
 // NewReconstructor creates a new FEC Reconstructor.
@@ -26,18 +32,24 @@ func NewReconstructor(cfg Config) *Reconstructor {
 		config:   cfg,
 		packets:  make(map[uint32]packet.Packet),
 		controls: make(map[uint32]*ControlPacket),
+		history:  uint32(4*cfg.Cols + 64),
 	}
 }
 
 // AddPacket processes an incoming data packet or FEC control packet.
 // It returns a slice of recovered packets (if any).
 func (r *Reconstructor) AddPacket(p packet.Packet) []packet.Packet {
-	if p == nil || p.Header().IsControlPacket || r.config.Cols < 1 {
+	if p == nil || p.Header().IsControlPacket {
 		return nil
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	cols := uint32(r.config.Cols)
+	if cols < MinCols {
+		return nil
+	}
 
 	var recovered []packet.Packet
 
@@ -47,56 +59,108 @@ func (r *Reconstructor) AddPacket(p packet.Packet) []packet.Packet {
 			return nil
 		}
 
-		r.controls[ctrl.SNBase] = ctrl
+		// Column FEC (2D) is not supported. Using a column packet as a row packet would rebuild wrong data, so it is ignored.
+		if ctrl.GroupIndex != RowGroupIndex {
+			return nil
+		}
 
-		if pkt := r.tryReconstruct(ctrl.SNBase); pkt != nil {
+		base := (ctrl.SNBase - (cols - 1)) & packet.MAX_SEQUENCENUMBER
+
+		r.alignBase = base
+		r.haveAlign = true
+		r.updateHighest(ctrl.SNBase)
+
+		r.controls[base] = ctrl
+
+		if pkt := r.tryReconstruct(base); pkt != nil {
 			recovered = append(recovered, pkt)
 		}
 	} else {
-		// Data packet
 		seq := p.Header().PacketSequenceNumber.Val()
-		r.packets[seq] = p.Clone()
+		if _, ok := r.packets[seq]; ok {
+			return nil // Duplicate
+		}
 
-		// If we already have the control packet for this sequence, we might be able to reconstruct now
-		// We'd have to find the SNBase. A simple way: check the past few sequence numbers.
-		for base := seq - uint32(r.config.Cols); base <= seq; base++ {
+		r.packets[seq] = p.Clone()
+		r.updateHighest(seq)
+
+		if r.haveAlign {
+			base := r.rowBase(seq)
 			if _, ok := r.controls[base]; ok {
 				if pkt := r.tryReconstruct(base); pkt != nil {
 					recovered = append(recovered, pkt)
 				}
-				break
-			}
-		}
-
-		// Periodically clean up old packets (keep a window of 100 packets)
-		if len(r.packets) > 100 {
-			for k := range r.packets {
-				if circular.New(k, packet.MAX_SEQUENCENUMBER).Distance(circular.New(seq, packet.MAX_SEQUENCENUMBER)) > 100 {
-					delete(r.packets, k)
-				}
-			}
-			for k := range r.controls {
-				if circular.New(k, packet.MAX_SEQUENCENUMBER).Distance(circular.New(seq, packet.MAX_SEQUENCENUMBER)) > 100 {
-					delete(r.controls, k)
-				}
 			}
 		}
 	}
+
+	r.cleanup()
 
 	return recovered
 }
 
-func (r *Reconstructor) tryReconstruct(snBase uint32) packet.Packet {
-	ctrl, ok := r.controls[snBase]
+func (r *Reconstructor) updateHighest(seq uint32) {
+	s := circular.New(seq, packet.MAX_SEQUENCENUMBER)
+	if !r.haveHighest || s.Gt(r.highest) {
+		r.highest = s
+		r.haveHighest = true
+	}
+}
+
+func (r *Reconstructor) rowBase(seq uint32) uint32 {
+	cols := int64(r.config.Cols)
+
+	offset := int64((seq - r.alignBase) & packet.MAX_SEQUENCENUMBER)
+	if offset > int64(packet.MAX_SEQUENCENUMBER/2) {
+		offset -= int64(packet.MAX_SEQUENCENUMBER) + 1
+	}
+
+	rows := offset / cols
+	if offset%cols < 0 {
+		rows--
+	}
+
+	return uint32(int64(r.alignBase)+rows*cols) & packet.MAX_SEQUENCENUMBER
+}
+
+// cleanup removes packets and FEC packets that are too far behind the highest sequence number.
+func (r *Reconstructor) cleanup() {
+	if !r.haveHighest || uint32(len(r.packets)+len(r.controls)) <= 2*r.history {
+		return
+	}
+
+	isOld := func(seq uint32) bool {
+		s := circular.New(seq, packet.MAX_SEQUENCENUMBER)
+		return s.Lt(r.highest) && s.Distance(r.highest) > r.history
+	}
+
+	for seq, p := range r.packets {
+		if isOld(seq) {
+			p.Decommission()
+			delete(r.packets, seq)
+		}
+	}
+
+	for base := range r.controls {
+		if isOld(base) {
+			delete(r.controls, base)
+		}
+	}
+}
+
+func (r *Reconstructor) tryReconstruct(base uint32) packet.Packet {
+	ctrl, ok := r.controls[base]
 	if !ok {
 		return nil
 	}
 
+	cols := uint32(r.config.Cols)
+
 	missingCount := 0
 	var missingSeq uint32
 
-	for i := uint32(0); i < uint32(r.config.Cols); i++ {
-		seq := (snBase + i) & packet.MAX_SEQUENCENUMBER
+	for i := uint32(0); i < cols; i++ {
+		seq := (base + i) & packet.MAX_SEQUENCENUMBER
 		if _, ok := r.packets[seq]; !ok {
 			missingCount++
 			missingSeq = seq
@@ -104,72 +168,78 @@ func (r *Reconstructor) tryReconstruct(snBase uint32) packet.Packet {
 	}
 
 	if missingCount == 0 {
-		// All packets received, clean up control
-		delete(r.controls, snBase)
+		// All packets received, nothing to do.
+		delete(r.controls, base)
 		return nil
 	}
 
-	if missingCount == 1 {
-		// Exactly one missing! Reconstruct it.
-		p := packet.NewPacket(nil)
-		p.Header().IsControlPacket = false
-		p.Header().PacketSequenceNumber = circular.New(missingSeq, packet.MAX_SEQUENCENUMBER)
+	if missingCount > 1 {
+		// Can't reconstruct yet.
+		return nil
+	}
 
-		tsRecov := ctrl.TimestampRecov
-		flagsRecov := ctrl.FlagsRecov
-		lengthRecov := ctrl.LengthRecov
+	// Exactly one missing, reconstruct it.
+	tsRecov := ctrl.TimestampRecov
+	flagsRecov := ctrl.FlagsRecov
+	lengthRecov := ctrl.LengthRecov
 
-		// Determine max length we might need
-		maxLen := len(ctrl.PayloadRecov)
-		payloadRecov := make([]byte, maxLen)
-		copy(payloadRecov, ctrl.PayloadRecov)
+	payloadRecov := make([]byte, len(ctrl.PayloadRecov))
+	copy(payloadRecov, ctrl.PayloadRecov)
 
-		for i := uint32(0); i < uint32(r.config.Cols); i++ {
-			seq := (snBase + i) & packet.MAX_SEQUENCENUMBER
-			if seq == missingSeq {
-				continue
-			}
+	var addr, localAddr net.Addr
+	var destinationSocketId uint32
 
-			pkt := r.packets[seq]
-
-			data := pkt.Data()
-			if len(data) > len(payloadRecov) {
-				// The recovery payload must cover every packet of the row. If it doesn't, the
-				// FEC packet is malformed or doesn't belong to these packets. Using it would
-				// index out of range.
-				delete(r.controls, snBase)
-				return nil
-			}
-
-			tsRecov ^= pkt.Header().Timestamp
-			flagsRecov ^= byte(pkt.Header().KeyBaseEncryptionFlag.Val() & 0x03)
-			lengthRecov ^= uint16(pkt.Len())
-
-			for j := 0; j < len(data); j++ {
-				payloadRecov[j] ^= data[j]
-			}
+	for i := uint32(0); i < cols; i++ {
+		seq := (base + i) & packet.MAX_SEQUENCENUMBER
+		if seq == missingSeq {
+			continue
 		}
 
-		if lengthRecov == 0 || int(lengthRecov) > len(payloadRecov) {
-			// Inconsistent FEC packet, the recovered packet would be garbage.
-			delete(r.controls, snBase)
+		pkt := r.packets[seq]
+		header := pkt.Header()
+
+		data := pkt.Data()
+		if len(data) > len(payloadRecov) {
+			// The FEC payload must cover every packet of the row. If it doesn't, the FEC packet doesn't belong to these packets and would produce garbage.
+			delete(r.controls, base)
 			return nil
 		}
 
-		p.Header().Timestamp = tsRecov
-		p.Header().KeyBaseEncryptionFlag = packet.PacketEncryption(flagsRecov & 0x03)
-		p.Header().RetransmittedPacketFlag = true
+		tsRecov ^= header.Timestamp
+		flagsRecov ^= byte(header.KeyBaseEncryptionFlag.Val() & 0x03)
+		lengthRecov ^= uint16(len(data))
 
-		p.SetData(payloadRecov[:lengthRecov])
+		for j, b := range data {
+			payloadRecov[j] ^= b
+		}
 
-		// Add the reconstructed packet to our buffer so it can be used for future blocks if needed (e.g. 2D layout)
-		r.packets[missingSeq] = p.Clone()
-
-		// Clean up control
-		delete(r.controls, snBase)
-
-		return p
+		addr = header.Addr
+		localAddr = header.LocalAddr
+		destinationSocketId = header.DestinationSocketId
 	}
 
-	return nil
+	delete(r.controls, base)
+
+	if lengthRecov == 0 || int(lengthRecov) > len(payloadRecov) {
+		return nil // Inconsistent FEC packet
+	}
+
+	p := packet.NewPacket(addr)
+	header := p.Header()
+	header.LocalAddr = localAddr
+	header.DestinationSocketId = destinationSocketId
+	header.IsControlPacket = false
+	header.PacketSequenceNumber = circular.New(missingSeq, packet.MAX_SEQUENCENUMBER)
+	header.PacketPositionFlag = packet.SinglePacket
+	header.OrderFlag = false
+	header.KeyBaseEncryptionFlag = packet.PacketEncryption(flagsRecov & 0x03)
+	header.RetransmittedPacketFlag = true
+	header.MessageNumber = 1 // The original message number can't be recovered. It must not be 0, because that marks an FEC control packet.
+	header.Timestamp = tsRecov
+
+	p.SetData(payloadRecov[:lengthRecov])
+
+	r.packets[missingSeq] = p.Clone() // Keep the reconstructed packet, so it isn't considered missing anymore.
+
+	return p
 }
