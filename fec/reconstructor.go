@@ -8,6 +8,9 @@ import (
 )
 
 // Reconstructor is responsible for rebuilding lost packets using FEC control packets.
+//
+// Everything a peer sends is untrusted: malformed or inconsistent FEC packets must never
+// cause a panic, they are ignored and nothing is reconstructed from them.
 type Reconstructor struct {
 	config Config
 
@@ -29,6 +32,10 @@ func NewReconstructor(cfg Config) *Reconstructor {
 // AddPacket processes an incoming data packet or FEC control packet.
 // It returns a slice of recovered packets (if any).
 func (r *Reconstructor) AddPacket(p packet.Packet) []packet.Packet {
+	if p == nil || p.Header().IsControlPacket || r.config.Cols < 1 {
+		return nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -124,25 +131,36 @@ func (r *Reconstructor) tryReconstruct(snBase uint32) packet.Packet {
 			}
 
 			pkt := r.packets[seq]
+
+			data := pkt.Data()
+			if len(data) > len(payloadRecov) {
+				// The recovery payload must cover every packet of the row. If it doesn't, the
+				// FEC packet is malformed or doesn't belong to these packets. Using it would
+				// index out of range.
+				delete(r.controls, snBase)
+				return nil
+			}
+
 			tsRecov ^= pkt.Header().Timestamp
 			flagsRecov ^= byte(pkt.Header().KeyBaseEncryptionFlag.Val() & 0x03)
 			lengthRecov ^= uint16(pkt.Len())
 
-			data := pkt.Data()
 			for j := 0; j < len(data); j++ {
 				payloadRecov[j] ^= data[j]
 			}
+		}
+
+		if lengthRecov == 0 || int(lengthRecov) > len(payloadRecov) {
+			// Inconsistent FEC packet, the recovered packet would be garbage.
+			delete(r.controls, snBase)
+			return nil
 		}
 
 		p.Header().Timestamp = tsRecov
 		p.Header().KeyBaseEncryptionFlag = packet.PacketEncryption(flagsRecov & 0x03)
 		p.Header().RetransmittedPacketFlag = true
 
-		if int(lengthRecov) <= len(payloadRecov) {
-			p.SetData(payloadRecov[:lengthRecov])
-		} else {
-			p.SetData(payloadRecov)
-		}
+		p.SetData(payloadRecov[:lengthRecov])
 
 		// Add the reconstructed packet to our buffer so it can be used for future blocks if needed (e.g. 2D layout)
 		r.packets[missingSeq] = p.Clone()
