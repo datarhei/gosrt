@@ -2,6 +2,7 @@ package srt
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"time"
 
@@ -47,12 +48,23 @@ type ConnRequest interface {
 	// Deprecated: replaced by Reject().
 	SetRejectionReason(r RejectionReason)
 
+	// SetReceiverLatency overrides the listener's ReceiverLatency for this
+	// connection. Call it before Accept(). The value is clamped to 0-65535ms.
+	SetReceiverLatency(latency time.Duration)
+
+	// SetPeerLatency overrides the listener's PeerLatency for this
+	// connection. Call it before Accept(). The value is clamped to 0-65535ms.
+	SetPeerLatency(latency time.Duration)
+
 	// Accept accepts the request and returns a connection.
 	Accept() (Conn, error)
 
 	// Reject rejects the request.
 	Reject(r RejectionReason)
 }
+
+// maxTsbpdDelay is the largest latency the handshake can carry (16-bit ms).
+const maxTsbpdDelay = math.MaxUint16 * time.Millisecond
 
 // connRequest implements the ConnRequest interface
 type connRequest struct {
@@ -349,6 +361,14 @@ func (req *connRequest) SetRejectionReason(reason RejectionReason) {
 	req.rejectionReason = reason
 }
 
+func (req *connRequest) SetReceiverLatency(latency time.Duration) {
+	req.config.ReceiverLatency = min(max(latency, 0), maxTsbpdDelay)
+}
+
+func (req *connRequest) SetPeerLatency(latency time.Duration) {
+	req.config.PeerLatency = min(max(latency, 0), maxTsbpdDelay)
+}
+
 func (req *connRequest) Reject(reason RejectionReason) {
 	req.ln.lock.Lock()
 	defer req.ln.lock.Unlock()
@@ -405,7 +425,7 @@ func (req *connRequest) Accept() (Conn, error) {
 		return nil, fmt.Errorf("connection already accepted")
 	}
 
-	// Select the largest TSBPD delay advertised by the caller, but at least 120ms
+	// Select the largest TSBPD delay advertised by the caller, but at least the configured latency
 	recvTsbpdDelay := uint16(req.config.ReceiverLatency.Milliseconds())
 	sendTsbpdDelay := uint16(req.config.PeerLatency.Milliseconds())
 

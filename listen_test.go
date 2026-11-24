@@ -133,6 +133,87 @@ func TestListenCrypt(t *testing.T) {
 	ln.Close()
 }
 
+// The listener can raise the latency of a single connection request above its
+// own config. Each direction negotiates to the larger side, so a caller asking
+// for 120ms gets the 500ms the listener set on its request, while a request the
+// listener leaves alone keeps 120ms.
+func TestListenRequestLatency(t *testing.T) {
+	ln, err := Listen("srt", "127.0.0.1:6003", DefaultConfig())
+	require.NoError(t, err)
+
+	listenDone := make(chan struct{})
+	go func() {
+		defer close(listenDone)
+
+		for {
+			req, err := ln.Accept2()
+			if err != nil {
+				return
+			}
+
+			switch req.StreamId() {
+			case "receiver":
+				req.SetReceiverLatency(500 * time.Millisecond)
+			case "peer":
+				req.SetPeerLatency(500 * time.Millisecond)
+			}
+
+			if _, err := req.Accept(); err != nil {
+				t.Errorf("accept %q: %v", req.StreamId(), err)
+			}
+		}
+	}()
+	defer func() {
+		ln.Close()
+		<-listenDone
+	}()
+
+	for _, tc := range []struct {
+		streamId string
+		send     uint64 // the caller's MsSendTsbPdDelay: the listener's receiver latency
+		recv     uint64 // the caller's MsRecvTsbPdDelay: the listener's peer latency
+	}{
+		{streamId: "receiver", send: 500, recv: 120},
+		{streamId: "peer", send: 120, recv: 500},
+		{streamId: "default", send: 120, recv: 120},
+	} {
+		config := DefaultConfig()
+		config.StreamId = tc.streamId
+		config.Latency = 120 * time.Millisecond
+
+		conn, err := Dial("srt", "127.0.0.1:6003", config)
+		require.NoError(t, err, tc.streamId)
+
+		stats := Statistics{}
+		conn.Stats(&stats)
+		conn.Close()
+
+		require.Equal(t, tc.send, stats.Instantaneous.MsSendTsbPdDelay, tc.streamId)
+		require.Equal(t, tc.recv, stats.Instantaneous.MsRecvTsbPdDelay, tc.streamId)
+	}
+}
+
+// The handshake carries latencies as 16 bits of milliseconds, so the setters
+// clamp instead of letting the value wrap around.
+func TestListenRequestLatencyClamp(t *testing.T) {
+	for _, tc := range []struct {
+		latency, want time.Duration
+	}{
+		{latency: -time.Second, want: 0},
+		{latency: 0, want: 0},
+		{latency: 500 * time.Millisecond, want: 500 * time.Millisecond},
+		{latency: 65535 * time.Millisecond, want: 65535 * time.Millisecond},
+		{latency: 70 * time.Second, want: 65535 * time.Millisecond},
+	} {
+		req := &connRequest{}
+		req.SetReceiverLatency(tc.latency)
+		req.SetPeerLatency(tc.latency)
+
+		require.Equal(t, tc.want, req.config.ReceiverLatency, tc.latency.String())
+		require.Equal(t, tc.want, req.config.PeerLatency, tc.latency.String())
+	}
+}
+
 func TestListenHSV4(t *testing.T) {
 	start := time.Now()
 
