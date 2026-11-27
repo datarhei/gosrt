@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- `ConnRequest.SetReceiverLatency` and `ConnRequest.SetPeerLatency` let a
+  listener set the latency of a single connection request before `Accept()`,
+  in place of its own config. Values are clamped to 0-65,535 ms, the range of
+  the handshake field.
+
 ### Fixed
 
 - Honor received DROPREQ ranges in live mode so the receiver stops requesting
