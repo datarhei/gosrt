@@ -311,14 +311,29 @@ func newSRTConn(config srtConnConfig) *srtConn {
 
 	c.networkQueue = make(chan packet.Packet, 1024)
 
+	payloadSize := c.config.PayloadSize
+
+	if len(c.config.PacketFilter) > 0 {
+		fecCfg, err := fec.ParseConfig(c.config.PacketFilter)
+		if err == nil {
+			c.fecGen = fec.NewGenerator(fecCfg, c.initialPacketSequenceNumber.Val())
+			c.fecRec = fec.NewReconstructor(fecCfg)
+
+			// An FEC packet carries an extra header in addition to the XORed payload.
+			payloadSize -= fec.ExtraHeaderSize
+		} else {
+			c.log("connection:error", func() string { return fmt.Sprintf("invalid FEC config: %s", err) })
+		}
+	}
+
 	c.writeQueue = make(chan packet.Packet, 1024)
 	if c.version == 4 {
 		// libsrt-1.2.3 receiver doesn't like it when the payload is larger than 7*188 bytes.
 		// Here we just take a multiple of a mpegts chunk size.
-		c.writeData = make([]byte, int(c.config.PayloadSize/188*188))
+		c.writeData = make([]byte, int(payloadSize/188*188))
 	} else {
 		// For v5 we use the max. payload size: https://github.com/Haivision/srt/issues/876
-		c.writeData = make([]byte, int(c.config.PayloadSize))
+		c.writeData = make([]byte, int(payloadSize))
 	}
 
 	c.readQueue = make(chan packet.Packet, 1024)
@@ -364,16 +379,6 @@ func newSRTConn(config srtConnConfig) *srtConn {
 		OverheadBW:            c.config.OverheadBW,
 		OnDeliver:             c.pop,
 	})
-
-	if len(c.config.PacketFilter) > 0 {
-		fecCfg, err := fec.ParseConfig(c.config.PacketFilter)
-		if err == nil {
-			c.fecGen = fec.NewGenerator(fecCfg)
-			c.fecRec = fec.NewReconstructor(fecCfg)
-		} else {
-			c.log("connection:error", func() string { return fmt.Sprintf("invalid FEC config: %s", err) })
-		}
-	}
 
 	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
 
@@ -676,11 +681,16 @@ func (c *srtConn) pop(p packet.Packet) {
 	// Send the packet on the wire
 	c.onSend(p)
 
-	if c.fecGen != nil && !p.Header().IsControlPacket {
+	// Only original packets are protected by FEC, retransmissions are not.
+	if c.fecGen != nil && !p.Header().IsControlPacket && !p.Header().RetransmittedPacketFlag {
 		fecPkts := c.fecGen.AddPacket(p)
 		for _, fecPkt := range fecPkts {
+			fecPkt.Header().Addr = c.remoteAddr
+			fecPkt.Header().LocalAddr = c.localAddr
 			c.log("fec:send:dump", func() string { return fecPkt.Dump() })
 			c.onSend(fecPkt)
+			// FEC packets are never retransmitted
+			fecPkt.Decommission()
 		}
 	}
 }
@@ -778,6 +788,49 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 		return
 	}
 
+	// Process FEC filter
+	// https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md
+	// "An FEC control packet is distinguished from a regular data packet by having
+	// its message number equal to 0. This value isn't normally used in SRT (message
+	// numbers start from 1, increment to a maximum, and then roll back to 1)."
+	if header.MessageNumber == 0 {
+		if c.fecRec == nil {
+			c.log("connection:filter", func() string { return "dropped FEC filter control packet" })
+			return
+		}
+
+		c.log("connection:filter", func() string { return "processed FEC filter control packet" })
+
+		c.handleRecoveredPackets(c.fecRec.AddPacket(p))
+
+		return
+	}
+
+	// The reconstructor keeps its own copy of the packet, so it must see it before
+	// it gets decrypted in place.
+	var recoveredPkts []packet.Packet
+	if c.fecRec != nil {
+		recoveredPkts = c.fecRec.AddPacket(p)
+	}
+
+	c.handleDataPacket(p)
+
+	c.handleRecoveredPackets(recoveredPkts)
+}
+
+// handleRecoveredPackets processes the packets that have been rebuilt by the FEC filter.
+func (c *srtConn) handleRecoveredPackets(pkts []packet.Packet) {
+	for _, p := range pkts {
+		c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", p.Header().PacketSequenceNumber.Val()) })
+		c.handleDataPacket(p)
+	}
+}
+
+// handleDataPacket processes a data packet that has been received from the network
+// or that has been rebuilt by the FEC filter.
+func (c *srtConn) handleDataPacket(p packet.Packet) {
+	header := p.Header()
+
 	if header.PacketSequenceNumber.Gt(c.debug.expectedRcvPacketSequenceNumber) {
 		c.log("connection:error", func() string {
 			return fmt.Sprintf("recv lost packets. got: %d, expected: %d (%d)\n", header.PacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Val(), c.debug.expectedRcvPacketSequenceNumber.Distance(header.PacketSequenceNumber))
@@ -785,35 +838,6 @@ func (c *srtConn) handlePacket(p packet.Packet) {
 	}
 
 	c.debug.expectedRcvPacketSequenceNumber = header.PacketSequenceNumber.Inc()
-
-	//fmt.Printf("%s\n", p.String())
-
-	// Ignore FEC filter control packets
-	// https://github.com/Haivision/srt/blob/master/docs/features/packet-filtering-and-fec.md
-	// "An FEC control packet is distinguished from a regular data packet by having
-	// its message number equal to 0. This value isn't normally used in SRT (message
-	// numbers start from 1, increment to a maximum, and then roll back to 1)."
-	// Process FEC filter
-	if c.fecRec != nil {
-		recoveredPkts := c.fecRec.AddPacket(p)
-
-		if header.MessageNumber == 0 {
-			c.log("connection:filter", func() string { return "processed FEC filter control packet" })
-			for _, recPkt := range recoveredPkts {
-				c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", recPkt.Header().PacketSequenceNumber.Val()) })
-				c.handlePacket(recPkt)
-			}
-			return
-		}
-
-		for _, recPkt := range recoveredPkts {
-			c.log("connection:filter", func() string { return fmt.Sprintf("recovered packet %d", recPkt.Header().PacketSequenceNumber.Val()) })
-			c.handlePacket(recPkt)
-		}
-	} else if header.MessageNumber == 0 {
-		c.log("connection:filter", func() string { return "dropped FEC filter control packet" })
-		return
-	}
 
 	// 4.5.1.1.  TSBPD Time Base Calculation
 	if !c.tsbpdWrapPeriod {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/datarhei/gosrt/crypto"
+	"github.com/datarhei/gosrt/fec"
 	"github.com/datarhei/gosrt/packet"
 	"github.com/datarhei/gosrt/rand"
 )
@@ -227,6 +228,34 @@ func newConnRequest(ln *listener, p packet.Packet) *connRequest {
 
 				return nil
 			}
+
+			// Negotiate the packet filter.
+			peerFilter := ""
+			if cif.HasFilter {
+				peerFilter = cif.PacketFilter
+			}
+
+			filter, err := fec.Negotiate(config.PacketFilter, peerFilter)
+			if err != nil {
+				cif.HandshakeType = packet.HandshakeType(REJ_FILTER)
+				ln.log("handshake:recv:error", func() string {
+					return fmt.Sprintf("incompatible packet filter (local %q, peer %q): %s", config.PacketFilter, peerFilter, err)
+				})
+				p.MarshalCIF(cif)
+				ln.log("handshake:send:dump", func() string { return p.Dump() })
+				ln.log("handshake:send:cif", func() string { return cif.String() })
+				ln.send(p)
+
+				return nil
+			}
+
+			if len(peerFilter) != 0 && len(filter) == 0 {
+				ln.log("handshake:recv:filter", func() string {
+					return fmt.Sprintf("peer requested packet filter %q, but none is configured. Continuing without packet filter", peerFilter)
+				})
+			}
+
+			config.PacketFilter = filter
 		} else {
 			cif.HandshakeType = packet.HandshakeType(REJ_ROGUE)
 			ln.log("handshake:recv:error", func() string { return fmt.Sprintf("only HSv4 and HSv5 are supported (got HSv%d)", cif.Version) })
@@ -463,11 +492,11 @@ func (req *connRequest) Accept() (Conn, error) {
 		req.handshake.SRTHS.SRTFlags.PERIODICNAK = true
 		req.handshake.SRTHS.SRTFlags.REXMITFLG = true
 		req.handshake.SRTHS.SRTFlags.STREAM = false
+		// The handshake is the one received from the peer. Don't echo the peer's filter
+		// back, respond with the negotiated one.
 		req.handshake.SRTHS.SRTFlags.PACKET_FILTER = len(req.config.PacketFilter) > 0
-		if len(req.config.PacketFilter) > 0 {
-			req.handshake.HasFilter = true
-			req.handshake.PacketFilter = req.config.PacketFilter
-		}
+		req.handshake.HasFilter = len(req.config.PacketFilter) > 0
+		req.handshake.PacketFilter = req.config.PacketFilter
 		req.handshake.SRTHS.RecvTSBPDDelay = recvTsbpdDelay
 		req.handshake.SRTHS.SendTSBPDDelay = sendTsbpdDelay
 	}

@@ -2,6 +2,7 @@ package srt
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
@@ -13,13 +14,26 @@ import (
 
 // LossyProxy simulates a network with packet loss and delay.
 type LossyProxy struct {
-	mu         sync.RWMutex
-	clientAddr *net.UDPAddr
-	serverAddr *net.UDPAddr
-	conn       *net.UDPConn
-	delay      time.Duration
-	dropRate   int // 1 in N packets dropped
-	pktCount   int
+	mu                   sync.RWMutex
+	clientAddr           *net.UDPAddr
+	serverAddr           *net.UDPAddr
+	conn                 *net.UDPConn
+	delay                time.Duration
+	dropRate             int // 1 in N packets dropped
+	pktCount             int
+	dropOriginalDataOnly bool
+}
+
+// isOriginalDataPacket returns whether the raw SRT packet is a data packet that is neither an FEC packet nor a retransmission.
+func isOriginalDataPacket(data []byte) bool {
+	if len(data) < 16 || data[0]&0x80 != 0 {
+		return false
+	}
+
+	msgno := binary.BigEndian.Uint32(data[4:8]) & 0x03ffffff
+	retransmitted := data[4]&0x04 != 0
+
+	return msgno != 0 && !retransmitted
 }
 
 func (p *LossyProxy) Start(listenAddr string, forwardAddr string) error {
@@ -50,8 +64,10 @@ func (p *LossyProxy) Start(listenAddr string, forwardAddr string) error {
 			packetCopy := make([]byte, n)
 			copy(packetCopy, buf[:n])
 
-			p.pktCount++
-			if p.dropRate > 0 && p.pktCount%p.dropRate == 0 {
+			if !p.dropOriginalDataOnly || isOriginalDataPacket(packetCopy) {
+				p.pktCount++
+			}
+			if p.dropRate > 0 && p.pktCount%p.dropRate == 0 && (!p.dropOriginalDataOnly || isOriginalDataPacket(packetCopy)) {
 				// Drop packet
 				continue
 			}

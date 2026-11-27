@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- fixed panic on malformed FEC packets.
+- fixed FEC logic by ignoring column FEC packets and negotiate filter between client and peer.
 - Honor received DROPREQ ranges in live mode so the receiver stops requesting
   packets the sender has dropped and can acknowledge past those gaps without
   waiting for a later packet's playout time. Keep already received packets

@@ -11,6 +11,9 @@ import (
 // ExtraHeaderSize is the size of the extra FEC header in bytes.
 const ExtraHeaderSize = 4
 
+// RowGroupIndex is the group index of a row FEC packet.
+const RowGroupIndex int8 = -1
+
 // ControlPacket holds the parsed fields of an FEC control packet.
 type ControlPacket struct {
 	SNBase         uint32

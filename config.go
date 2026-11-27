@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
+
+	"github.com/datarhei/gosrt/fec"
 )
 
 const (
@@ -709,8 +710,8 @@ func (c *Config) Validate() error {
 	}
 
 	if len(c.PacketFilter) != 0 {
-		if !strings.HasPrefix(strings.ToLower(c.PacketFilter), "fec") {
-			return fmt.Errorf("config: PacketFilter %s is not supported", c.PacketFilter)
+		if _, err := fec.ParseConfig(c.PacketFilter); err != nil {
+			return fmt.Errorf("config: PacketFilter %q is not supported: %w", c.PacketFilter, err)
 		}
 	}
 
