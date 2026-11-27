@@ -103,6 +103,14 @@ func (r *fakeLiveReceive) PacketRate() (pps, bps, capacity float64) {
 
 func (r *fakeLiveReceive) Flush() {}
 
+func (r *fakeLiveReceive) PushDropped(pkt packet.Packet) {
+	if pkt == nil {
+		return
+	}
+
+	pkt.Decommission()
+}
+
 func (r *fakeLiveReceive) Push(pkt packet.Packet) {
 	r.lock.Lock()
 	defer r.lock.Unlock()

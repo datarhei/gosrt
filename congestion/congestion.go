@@ -63,6 +63,14 @@ type ReceiverDropper interface {
 	Drop(first, last circular.Number)
 }
 
+// ReceiverPacketDropper is optionally implemented by receivers that can hold the place of a
+// received packet that has to be dropped. Existing Receiver implementations do not need to implement it.
+type ReceiverPacketDropper interface {
+	// PushDropped pushes a received packet to the receiver queue that has to be dropped, e.g. because
+	// it could not be decrypted. It will not be reported as missing and it will not be delivered.
+	PushDropped(pkt packet.Packet)
+}
+
 // SendStats are collected statistics from a sender
 type SendStats struct {
 	Pkt  uint64 // Sent packets in total
